@@ -12,7 +12,9 @@ WORKDIR /app
 
 # Third-party dependencies first, so source edits don't invalidate this layer.
 COPY pyproject.toml uv.lock .python-version ./
+# uv needs every workspace member's pyproject.toml to resolve the lockfile, even unused ones.
 COPY apps/api/pyproject.toml apps/api/
+COPY evals/pyproject.toml evals/
 COPY packages/core/pyproject.toml packages/core/
 COPY packages/pipeline/pyproject.toml packages/pipeline/
 RUN --mount=type=cache,target=/root/.cache/uv \

@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "lecture-api",
     "lecture-core",
+    "lecture-evals",
     "lecture-pipeline",
 ]
 
@@ -24,11 +25,12 @@ dev = [
 
 [tool.uv.workspace]
 # Listed explicitly: apps/web (Next.js) will live next to apps/api and has no pyproject.
-members = ["apps/api", "packages/*"]
+members = ["apps/api", "evals", "packages/*"]
 
 [tool.uv.sources]
 lecture-api = { workspace = true }
 lecture-core = { workspace = true }
+lecture-evals = { workspace = true }
 lecture-pipeline = { workspace = true }
 
 [tool.ruff]
@@ -53,14 +55,14 @@ select = [
 "tests/**" = ["S101"]  # assert is how pytest works
 
 [tool.ruff.lint.isort]
-known-first-party = ["lecture_api", "lecture_core", "lecture_pipeline"]
+known-first-party = ["lecture_api", "lecture_core", "lecture_evals", "lecture_pipeline"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-mypy_path = ["apps/api/src", "packages/core/src", "packages/pipeline/src"]
-files = ["apps/api/src", "packages/core/src", "packages/pipeline/src", "tests"]
+mypy_path = ["apps/api/src", "evals/src", "packages/core/src", "packages/pipeline/src"]
+files = ["apps/api/src", "evals/src", "packages/core/src", "packages/pipeline/src", "tests"]
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]

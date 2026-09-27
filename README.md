@@ -8,8 +8,11 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
 
-- A uv workspace with three packages: `apps/api` (FastAPI), `packages/core` (settings, models,
-  storage), and `packages/pipeline` (the content-addressed stage cache).
+- A uv workspace with four packages: `apps/api` (FastAPI), `packages/core` (settings, models,
+  storage, the study-notes format), `packages/pipeline` (the content-addressed stage cache), and
+  `evals` (baselines and scoring).
+- A single-call Gemini baseline that summarises a lecture video and records tokens, cost and
+  timings ([below](#gemini-baseline)).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
   uploads the file to storage, and the API confirms it.
 - Postgres with Alembic migrations, and SeaweedFS as local S3, both in Docker Compose.
@@ -60,6 +63,45 @@ To browse stored files, open the SeaweedFS filer UI at http://localhost:8888.
 To run the API in Docker instead of on the host, use `make app`. It builds the image, runs
 migrations in a one-off container, and starts the API on port 8000.
 
+## Gemini baseline
+
+`gemini-baseline` sends a whole lecture video to Gemini in one call and asks for the study notes
+the pipeline will produce: a TL;DR, chapters, key concepts, formulas and a quiz, each with a
+timestamp. It sets the bar the pipeline has to beat, and answers "why not just use Gemini?" with
+numbers.
+
+1. Get an API key at https://aistudio.google.com/apikey and add `GEMINI_API_KEY=...` to `.env`.
+2. Put lecture videos in `data/lectures/` (git ignores `data/`). On the free tier Google may use
+   what you send to improve its products, so stick to public, openly licensed lectures.
+3. Optionally install ffmpeg (`sudo apt install -y ffmpeg`) so the script can read the video's
+   length itself. Otherwise it uses the length Gemini reports.
+4. Run it:
+
+```bash
+uv run gemini-baseline data/lectures/lecture-15.mp4 --title "Dynamic programming"
+```
+
+Each run writes a folder under `data/baselines/<video>/`:
+
+- `notes.md`: the notes, for reading.
+- `result.json`: the notes in the shared format (`lecture_core.notes.StudyNotes`, times in
+  seconds), plus the model, prompt and video hashes, tokens by modality, cost, timings, and
+  checks: timestamps outside the video, chapter gaps and overlaps, and how much of the video the
+  chapters cover.
+- `response.json`: the model's raw output.
+
+| Option | Default | Notes |
+|---|---|---|
+| `--model` | `gemini-3.8-flash` | Prices for common models are built in ([pricing.py](evals/src/lecture_evals/pricing.py)). For others, pass `--input-price` and `--output-price` (USD per million tokens). |
+| `--processing` | `static` | `static` puts every frame in context. `agentic` lets the model choose where to look, which uses fewer tokens. Worth running both. |
+| `--fps` | `1` | Frames per second, `static` only. Slides change slowly, so try `0.5`. |
+| `--media-resolution` | `low` | About 100 tokens per second of video. `high` is about 300 and reads small text better. |
+| `--prompt` | `prompts/baseline-gemini/v1.md` | To try a change, copy it to `v2.md`. Each run records which prompt it used. |
+
+At low resolution a one-hour lecture is roughly 360k input tokens, so a run on
+`gemini-3.8-flash` costs about $0.30. That model's prices double on 1 January 2027. Uploads are
+reused for 48 hours, so repeat runs on the same video skip the upload.
+
 ## Commands
 
 | Command | What it does |
@@ -80,6 +122,9 @@ migrations in a one-off container, and starts the API on port 8000.
 apps/api/                  FastAPI service (routes, schemas, dependencies)
 packages/core/             settings, SQLAlchemy models, Alembic migrations, S3 client
 packages/pipeline/         stage cache; stages and Temporal workflows from Phase 2
+evals/                     baselines (Gemini) now; eval suites and datasets from Phase 4
+prompts/                   versioned prompts
+data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
 tests/integration/         real Postgres and SeaweedFS via testcontainers
 infra/compose.yaml         local stack (`app` profile adds the API)

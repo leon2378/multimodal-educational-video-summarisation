@@ -1,0 +1,19 @@
+[project]
+name = "lecture-evals"
+version = "0.1.0"
+description = "Baselines and evaluation suites that score pipeline outputs."
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=2.25",
+    "lecture-core",
+]
+
+[project.scripts]
+gemini-baseline = "lecture_evals.baselines.gemini:main"
+
+[tool.uv.sources]
+lecture-core = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13"]
+build-backend = "uv_build"
