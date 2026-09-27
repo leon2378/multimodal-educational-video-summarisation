@@ -105,8 +105,8 @@ Treat retrieved transcript and slide text as **untrusted input**. Keep it inside
 | Detection | YOLO26 n/s (Ultralytics), fine-tuned | AGPL-3.0, which is fine for an open-source repo but a company would need a licence. RF-DETR (Apache-2.0 for the standard sizes) is the alternative |
 | Labelling | Label Studio (or CVAT) | Pre-label with a base model, then correct by hand |
 | OCR | RapidOCR (PP-OCRv5 models on ONNX Runtime) | No PaddlePaddle install, fast on CPU, has English/Latin models |
-| Slide understanding | Vision LLM through an API: Gemini Flash-Lite on the free tier for development with public lectures, a paid tier for everything else | Self-hosted: Qwen3-VL-8B or Qwen3.5-9B on vLLM (Modal). Offline dev: Qwen3.5-4B quantised in Ollama |
-| Summaries + Q&A | A small, fast hosted model (e.g. Gemini Flash), called through **Pydantic AI** | Provider-agnostic, schema-validated output, fallback models, OpenTelemetry traces |
+| Slide understanding | Vision LLM through an API: Gemini Flash-Lite on the free tier for development with public lectures, Claude Haiku 4.5 on paid runs | Self-hosted: Qwen3-VL-8B or Qwen3.5-9B on vLLM (Modal). Offline dev: Qwen3.5-4B quantised in Ollama |
+| Summaries + Q&A | Claude Haiku 4.5 or Gemini Flash, called through **Pydantic AI** | Provider-agnostic, schema-validated output, fallback models, OpenTelemetry traces |
 | Embeddings | Qwen3-Embedding-0.6B (Apache-2.0, 32K context), served by Hugging Face TEI | EmbeddingGemma-300M if CPU-bound (2K context) |
 | Sparse | BM25 (FastEmbed `Qdrant/bm25`) | Catches exact technical terms |
 | Reranker | bge-reranker-v2-m3 (TEI) | Qwen3-Reranker-0.6B (vLLM) |
@@ -162,7 +162,7 @@ Treat retrieved transcript and slide text as **untrusted input**. Keep it inside
 - The cloud profile uses the same activity interface with backend = Modal (L4 or A10). Modal's Starter plan includes $30/month of compute, and an L4 costs about $0.80/hour, which is plenty for development bursts.
 - **Privacy:** Google may use content sent to Gemini's free tier to improve its products. Use the free tier only for public, openly licensed lectures, and a paid tier for anything private.
 
-**Rough cost** (an estimate to replace with measured numbers). With a small hosted model at about $1/$5 per million input/output tokens, one lecture-hour costs roughly **$0.20–0.30** in API calls. That assumes about 30 slides routed to the vision LLM (~1.9k input and ~350 output tokens each) and map-reduce summaries plus a verification pass (~60k input and ~11k output tokens). ASR on a Modal L4 adds a few cents.
+**Rough cost** (an estimate to replace with measured numbers). With Claude Haiku 4.5 at $1/$5 per million input/output tokens, one lecture-hour costs roughly **$0.20–0.30** in API calls. That assumes about 30 slides routed to the vision LLM (~1.9k input and ~350 output tokens each) and map-reduce summaries plus a verification pass (~60k input and ~11k output tokens). ASR on a Modal L4 adds a few cents.
 
 ---
 
@@ -320,6 +320,7 @@ Stretch goals: an MCP server that exposes lecture search to AI assistants, multi
 - [Trivy compromised by TeamPCP (Wiz)](https://www.wiz.io/blog/trivy-compromised-teampcp-supply-chain-attack)
 - [Modal pricing](https://modal.com/pricing)
 - [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
+- [Claude Haiku 4.5](https://www.anthropic.com/claude/haiku)
 - [Pydantic AI model providers](https://ai.pydantic.dev/models/overview/)
 - [grafana/docker-otel-lgtm](https://github.com/grafana/docker-otel-lgtm)
 - [MIT OpenCourseWare terms of use](https://mitocw.zendesk.com/hc/en-us/articles/4414774353051-What-are-the-requirements-of-use-for-MIT-OpenCourseWare)
