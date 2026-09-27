@@ -1,0 +1,75 @@
+[project]
+name = "lecture-summariser"
+version = "0.1.0"
+description = "Turns lecture videos into timestamp-grounded study notes and cited Q&A."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "lecture-api",
+    "lecture-core",
+    "lecture-pipeline",
+]
+
+[dependency-groups]
+dev = [
+    "boto3-stubs[s3]>=1.43",
+    "httpx2>=2.13",  # Starlette's TestClient prefers it over httpx as of Starlette 1.7
+    "mypy>=2.3",
+    "pip-audit>=2.10",
+    "pre-commit>=4.6",
+    "pytest>=9.1",
+    "ruff>=0.16",
+    "testcontainers[postgres]>=4.15",
+]
+
+[tool.uv.workspace]
+# Listed explicitly: apps/web (Next.js) will live next to apps/api and has no pyproject.
+members = ["apps/api", "packages/*"]
+
+[tool.uv.sources]
+lecture-api = { workspace = true }
+lecture-core = { workspace = true }
+lecture-pipeline = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",  # pycodestyle, pyflakes
+    "I",            # isort
+    "B",            # bugbear
+    "UP",           # pyupgrade
+    "SIM",          # simplify
+    "RUF",          # ruff-specific
+    "ASYNC",        # blocking calls in async code
+    "PT",           # pytest style
+    "S",            # bandit
+    "FAST",         # FastAPI
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert is how pytest works
+
+[tool.ruff.lint.isort]
+known-first-party = ["lecture_api", "lecture_core", "lecture_pipeline"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = ["apps/api/src", "packages/core/src", "packages/pipeline/src"]
+files = ["apps/api/src", "packages/core/src", "packages/pipeline/src", "tests"]
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["docker.*", "testcontainers.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = [
+    "integration: needs Docker; starts Postgres and SeaweedFS with testcontainers",
+]

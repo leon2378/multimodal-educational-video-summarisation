@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Local config
+.env
+.env.*
+!.env.example
+
+# Lecture media never goes in git. Datasets are tracked with DVC from Phase 4.
+data/
+*.mp4
+*.mkv
+*.webm
+*.mov
+
+# Web app (Phase 2)
+node_modules/
+.next/
+
+# Editors and OS
+.idea/
+.DS_Store
+Thumbs.db

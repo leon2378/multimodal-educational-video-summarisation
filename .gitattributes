@@ -1,0 +1,6 @@
+# LF everywhere. The code runs in WSL2 and Linux containers, where CRLF breaks Makefiles and scripts.
+* text=auto eol=lf
+
+*.jpg binary
+*.png binary
+*.mp4 binary

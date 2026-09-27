@@ -1,0 +1,74 @@
+# Local stack. `make up` starts the backing services; `make app` also runs the API in a container.
+# Ports bind to 127.0.0.1 only. Credentials here are dev-only defaults (see .env.example).
+name: lecture-summariser
+
+x-api: &api
+  build:
+    context: ..
+    dockerfile: infra/docker/api.Dockerfile
+  image: lecture-summariser/api:dev
+  profiles: [app]
+  environment:
+    DATABASE_URL: postgresql+asyncpg://lecture:lecture@postgres:5432/lecture
+    S3_ENDPOINT_URL: http://seaweedfs:8333
+    # Presigned URLs must name a host your browser or curl can reach, not the Compose service.
+    S3_PUBLIC_ENDPOINT_URL: http://localhost:8333
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: lecture
+      POSTGRES_PASSWORD: lecture
+      POSTGRES_DB: lecture
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lecture -d lecture"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.47
+    # `mini` runs master, volume, filer and S3 gateway in one process and creates the bucket.
+    command: mini -bucket=lectures -s3.config=/etc/seaweedfs/s3.json
+    ports:
+      - "127.0.0.1:8333:8333"  # S3 API
+      - "127.0.0.1:8888:8888"  # filer UI, for browsing stored files
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8333/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *api
+    command: ["alembic", "-c", "packages/core/alembic.ini", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *api
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      seaweedfs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
+  seaweedfs-data:

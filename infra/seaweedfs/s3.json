@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "lecture-dev",
+      "credentials": [
+        {
+          "accessKey": "lecture-dev",
+          "secretKey": "lecture-dev-secret"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

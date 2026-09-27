@@ -1,0 +1,17 @@
+[project]
+name = "lecture-api"
+version = "0.1.0"
+description = "FastAPI service: uploads, lecture metadata, and (later) results and Q&A."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.141",
+    "lecture-core",
+    "uvicorn[standard]>=0.54",
+]
+
+[tool.uv.sources]
+lecture-core = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13"]
+build-backend = "uv_build"
