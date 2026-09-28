@@ -21,9 +21,11 @@ data/
 *.webm
 *.mov
 
-# Web app (Phase 2)
+# Web app
 node_modules/
 .next/
+*.tsbuildinfo
+apps/web/next-env.d.ts
 
 # Editors and OS
 .idea/

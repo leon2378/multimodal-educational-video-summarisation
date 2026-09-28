@@ -50,6 +50,14 @@ class LectureCreated(BaseModel):
     upload: UploadTarget
 
 
+class MediaOut(BaseModel):
+    """Where the browser plays the lecture from: a presigned URL straight to storage."""
+
+    url: str
+    content_type: str
+    expires_in_s: int
+
+
 class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -80,6 +88,11 @@ class TranscriptLineOut(BaseModel):
     text: str
 
 
+class TimeSpan(BaseModel):
+    start_s: float
+    end_s: float
+
+
 class SlideOut(BaseModel):
     slide_id: int
     image_url: str
@@ -89,7 +102,8 @@ class SlideOut(BaseModel):
     figure_description: str
     latex: list[str]
     code: str
-    spans: list[dict[str, float]]
+    # Every stretch of the video during which this is the current slide.
+    spans: list[TimeSpan]
 
 
 class TimelineSegmentOut(BaseModel):

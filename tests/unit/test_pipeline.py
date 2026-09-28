@@ -7,9 +7,10 @@ from lecture_core.timeline import SlideDeck, SlideImage, SlideReading, SlideSpan
 from lecture_llm.agents import LectureLLM, PlannedChapter, Prompt, Prompts, render
 from lecture_pipeline.assemble import chapter_ranges, locate, merge_duplicate_concepts
 from lecture_pipeline.cli import run
-from lecture_pipeline.fuse import build_timeline
+from lecture_pipeline.fuse import build_timeline, split_sentences
 from lecture_pipeline.settings import PipelineSettings
 from tests.unit.fakes import TRANSCRIPT, FakeLLM, FakeTranscriber
+from tests.unit.fakes import _segment as fakes_segment
 
 PROMPTS = Prompts.load(Path(__file__).resolve().parents[2] / "prompts" / "pipeline")
 
@@ -163,3 +164,23 @@ def test_pipeline_runs_end_to_end_then_entirely_from_cache(
     assert all(stage.cached for stage in again.run.stages)
     assert (len(fake_llm.calls), transcriber.calls) == (calls, 1)
     assert again.notes == notes
+
+
+def test_split_sentences_uses_word_timings() -> None:
+    segment = fakes_segment(10.0, 'So memoisation. It "caches" results? Yes! and then more words')
+
+    sentences = split_sentences(segment)
+
+    assert [s.text for s in sentences] == [
+        "So memoisation.",
+        'It "caches" results?',
+        "Yes!",
+        "and then more words",
+    ]
+    assert [s.start_s for s in sentences] == [10.0, 10.8, 12.0, 12.4]
+    assert sentences[0].end_s == segment.words[1].end_s
+
+
+def test_split_sentences_cuts_run_ons() -> None:
+    segment = fakes_segment(0.0, " ".join(["word"] * 10))
+    assert [len(s.words) for s in split_sentences(segment, max_words=4)] == [4, 4, 2]

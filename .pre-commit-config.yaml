@@ -9,6 +9,8 @@ repos:
       - id: check-merge-conflict
       - id: check-toml
       - id: check-yaml
+        # pnpm 12 writes its lockfile as several YAML documents.
+        args: ["--allow-multiple-documents"]
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
@@ -28,5 +30,5 @@ repos:
         name: uv.lock is up to date
         entry: uv lock --check
         language: system
-        files: ^(uv\.lock|pyproject\.toml|(apps|packages)/[^/]+/pyproject\.toml)$
+        files: ^(uv\.lock|pyproject\.toml|evals/pyproject\.toml|(apps|packages)/[^/]+/pyproject\.toml)$
         pass_filenames: false

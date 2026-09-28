@@ -64,9 +64,36 @@ jobs:
       - run: uv export --locked --all-packages --all-extras --no-emit-workspace --format requirements-txt --output-file "$RUNNER_TEMP/requirements.txt"
       - run: uv run --locked pip-audit --disable-pip --requirement "$RUNNER_TEMP/requirements.txt"
 
+  web:
+    name: Web app
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+        with:
+          package_json_file: apps/web/package.json
+          cache: true
+          cache_dependency_path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      # The typed client must match the committed OpenAPI schema (itself checked against the
+      # API by tests/unit/test_openapi_snapshot.py).
+      - run: pnpm run gen:api && git diff --exit-code -- src/lib/api/schema.d.ts
+      - run: pnpm run typecheck
+      - run: pnpm run test
+      - run: pnpm run build
+      - run: pnpm audit --audit-level high
+
   image:
     name: Build images
-    needs: [lint, test]
+    needs: [lint, test, web]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,6 +108,13 @@ jobs:
           push: false
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          push: false
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
       # The CPU variant of the worker image. The GPU variant adds 1.4 GB of CUDA wheels from
       # the same Dockerfile, so it isn't built here.
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0

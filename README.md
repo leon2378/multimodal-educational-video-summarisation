@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phase 2 of 6 in progress: lectures go from upload to study notes through the API (2a, 2b); the web page (2c) is next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phase 2 of 6 done: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -12,6 +12,9 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   and study-notes formats), `packages/perception` (video, audio, slide detection, speech
   recognition), `packages/llm` (Pydantic AI agents), `packages/pipeline` (stages, stage cache,
   local runner) and `evals` (baselines and scoring).
+- A web app ([below](#web-app)): upload with a progress bar, live processing progress, and a
+  lecture page with the video, a transcript that follows playback, slides, chapters, notes and a
+  quiz, every timestamp clickable.
 - Processing through the API: a Temporal workflow per lecture, CPU and GPU workers, progress
   over server-sent events, and results in Postgres ([below](#processing-a-lecture)).
 - The processing pipeline: speech recognition, slide detection, a vision LLM reading each slide, a
@@ -22,8 +25,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
   uploads the file to storage, and the API confirms it.
 - Postgres with Alembic migrations, and SeaweedFS as local S3, both in Docker Compose.
-- Unit tests, plus integration tests that start real Postgres and SeaweedFS with testcontainers.
-- CI: lint, type-check, tests, dependency audit, image build. Actions are pinned to commit SHAs.
+- Unit tests, plus integration tests that start real Postgres, SeaweedFS and Temporal with
+  testcontainers and drive the whole flow through the API.
+- CI: lint, type-check, tests, the web app's checks and build, dependency audits (Python and
+  npm), image builds. Actions are pinned to commit SHAs.
 
 ## Getting started
 
@@ -35,12 +40,13 @@ You need:
 - **Docker Desktop** with WSL integration turned on for Ubuntu (Settings → Resources → WSL integration)
 - **uv**: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - **make**: `sudo apt install -y make`
+- **Node 24** (only to work on the web app outside Docker), with pnpm through `corepack enable`
 
 Then:
 
 ```bash
 make install   # Python deps (uv picks Python 3.12) and git hooks
-make up        # Postgres and SeaweedFS
+make up        # Postgres, SeaweedFS and Temporal
 make migrate   # create the tables
 make api       # API with auto-reload on http://localhost:8000 (docs at /docs)
 ```
@@ -68,6 +74,24 @@ To browse stored files, open the SeaweedFS filer UI at http://localhost:8888.
 
 To run the API in Docker instead of on the host, use `make app`. It builds the image, runs
 migrations in a one-off container, and starts the API on port 8000.
+
+## Web app
+
+`make app` builds and runs the API, the CPU worker and the web app in Docker; add
+`make gpu-worker` for speech recognition. Then open http://localhost:3000:
+
+- **Library**: upload a lecture (straight to storage, with a progress bar). Processing starts on
+  its own, and the page switches to the lecture.
+- **Lecture page**: live processing progress, then the video with a slide strip that follows
+  the slide on screen, chapters, and tabs for a transcript that highlights and scrolls with
+  playback, the notes (formulas rendered with KaTeX) and a quiz. Every timestamp plays the video
+  from there.
+
+For hot reload while working on it, run `make web` (Node 24) alongside `make up`, `make api` and
+the workers. The web app calls the API from the browser: its address is baked in at build time
+(`NEXT_PUBLIC_API_URL`, default http://localhost:8000), and the API allows the web origin
+(`CORS_ORIGINS`). After changing the API, `make openapi` regenerates the typed client; CI fails
+if it's out of date.
 
 ## Processing a lecture
 
@@ -174,6 +198,8 @@ LLM judge.
 | `make gpu-worker` | Build and run the GPU worker (speech recognition) in Docker |
 | `make worker` | Run a CPU worker on the host instead |
 | `make api` | Run the API on the host with auto-reload |
+| `make web` | Run the web app on the host with hot reload (Node 24) |
+| `make openapi` | Regenerate the web app's typed API client after an API change |
 | `make migrate` | Apply migrations |
 | `make revision m="add chapters"` | Generate a migration after changing `packages/core/src/lecture_core/models.py` |
 | `make test` / `make test-unit` | All tests / unit tests only |
@@ -185,6 +211,7 @@ LLM judge.
 
 ```
 apps/api/                  FastAPI service (routes, schemas, dependencies)
+apps/web/                  Next.js web app (library, lecture page); typed client from openapi.json
 packages/core/             settings, SQLAlchemy models, Alembic migrations, S3 client
 packages/perception/       PyAV media reading, slide detection, speech recognition
 packages/llm/              Pydantic AI agents: read slides, chapters, notes
@@ -211,13 +238,19 @@ One integration test runs `alembic check`: it fails if a model changed without a
 ## Decisions
 
 Architecture decisions are recorded in [docs/adr](docs/adr/README.md). Phase 1 differs from the
-blueprint in four places:
+blueprint in these places:
 
 - **Temporal and Qdrant aren't in Compose yet.** They're added when first used: Temporal in Phase 2
   ([ADR 0002](docs/adr/0002-temporal-for-orchestration.md)), Qdrant in Phase 3.
-- **Uploads are a single presigned PUT** (up to 5 GiB), not multipart. Multipart arrives with the
-  web app and Uppy in Phase 2.
-- **CI builds the image but doesn't scan or push it.** That comes with deployment in Phase 6.
+- **Uploads are a single presigned PUT** (up to 5 GiB), not resumable multipart through Uppy.
+  Worth adding when uploads get large or flaky.
+- **The player streams the uploaded MP4 directly** (a presigned URL with range requests) rather
+  than HLS renditions. Transcoding to HLS comes back if other formats or adaptive bitrate are
+  needed.
+- **The web app uses Tailwind without shadcn/ui**, which can come in when there are more
+  components to share.
+- **CI builds the images (API, CPU worker, web) but doesn't scan or push them.** That comes with
+  deployment in Phase 6.
 - **No update bot (Dependabot or Renovate) opening PRs.** Dependencies are updated by hand with
   `uv lock --upgrade`, and CI audits the lockfile on every push. GitHub's Dependabot security
   alerts (Settings → Code security) still flag vulnerable packages without committing anything.
@@ -233,11 +266,12 @@ blueprint in four places:
         (static mode on Lecture 10; agentic mode still to do).
   - [x] Check faster-whisper int8 on the GPU inside Docker, and note peak VRAM.
   - [ ] Draft 30 golden Q&A questions, so Phase 3 retrieval choices can be measured.
-- [ ] **Phase 2, vertical slice**
+- [x] **Phase 2, vertical slice**
   - [x] 2a: pipeline stages (ASR, slide detection, vision LLM, timeline, chapters, notes), stage
         cache, GPU worker image, local runner
   - [x] 2b: Temporal workers, process/progress/results API, new tables
-  - [ ] 2c: web lecture page (player, chapters, synced transcript, slides)
+  - [x] 2c: web app (upload, live progress, lecture page with player, synced transcript, slides,
+        chapters, notes, quiz)
 - [ ] **Phase 3, RAG Q&A**: hybrid search, reranking, streamed cited answers
 - [ ] **Phase 4, evals and observability**: eval suites, Langfuse, OpenTelemetry, CI eval gate
 - [ ] **Phase 5, CV and optimisation**: YOLO26 fine-tune, OCR-vs-VLM routing, ONNX/TensorRT/int8

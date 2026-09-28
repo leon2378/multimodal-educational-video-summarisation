@@ -1,0 +1,5 @@
+# pnpm settings for the web app (it has no sub-packages).
+
+# Supply-chain guard: only resolve releases at least 7 days old (in minutes). Malicious versions
+# such as LiteLLM 1.82.7 in March 2026 were caught and pulled within days of publishing.
+minimumReleaseAge: 10080

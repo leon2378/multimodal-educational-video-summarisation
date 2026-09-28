@@ -3,11 +3,12 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 2b (orchestration and storage)
+## Current state: Phase 2 complete (vertical slice)
 
-A lecture goes from upload to study notes through the API: the API starts a Temporal workflow,
-workers run the pipeline stages, and the results land in Postgres. The same stages also run
-on a local file without any of that (`lecture-process`).
+A lecture goes from upload in the browser to study notes: the web app uploads straight to
+storage and asks the API to process; the API starts a Temporal workflow; workers run the
+pipeline stages; the results land in Postgres; the web app shows them in step with the video.
+The same stages also run on a local file without any of that (`lecture-process`).
 
 ```
  client ── upload (presigned PUT) ──────────────────────────────► SeaweedFS
@@ -39,6 +40,22 @@ on a local file without any of that (`lecture-process`).
 
 Lecture status: `awaiting_upload → uploaded → processing → ready`, or `failed` when a run
 fails. A ready or failed lecture can be processed again.
+
+### Web app (Phase 2c)
+
+`apps/web`, Next.js 16 with TanStack Query and Tailwind. The browser calls the API directly
+(CORS allows the web origin) through a client generated from the API's OpenAPI schema, and loads
+the video and slide images straight from storage through presigned URLs.
+
+- **Library** (`/`): upload with progress (a presigned PUT from the browser), then it starts
+  processing and opens the lecture.
+- **Lecture** (`/lectures/{id}`): an `EventSource` on `/events` shows each stage while it
+  processes and refreshes the page's data when the run ends. The video's `timeupdate` drives
+  everything else: the transcript line (a binary search over sentence start times), the current
+  slide (the span containing the time, so camera shots keep the last slide) and the current
+  chapter. Every timestamp seeks the video.
+- Transcript lines are sentences: runs split batched ASR segments at sentence ends using word
+  timings when saving results, without touching the cached ASR output.
 
 ### Processing (Phase 2b)
 
@@ -105,7 +122,7 @@ so a second run only redoes stages whose inputs, version, model, params or promp
 - No verification pass yet (flagging claims the cited segments don't support). It comes with the
   eval suites in Phase 4.
 
-## Next: Phase 2c
+## Next: Phase 3 (RAG Q&A)
 
-`apps/web`: a Next.js lecture page with the player, chapters, a transcript that follows
-playback, and the slides, reading the API above. Uploads move to multipart through Uppy.
+Chunk the timeline segments, index them in Qdrant (dense and BM25), rerank, and stream cited
+answers over SSE to a chat on the lecture page, per lecture and per course.

@@ -3,7 +3,7 @@ COMPOSE := docker compose -f infra/compose.yaml
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app gpu-worker worker down reset migrate revision api process test test-unit lint fmt typecheck audit check
+.PHONY: help install up app gpu-worker worker web openapi down reset migrate revision api process test test-unit lint fmt typecheck audit check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -15,7 +15,7 @@ install: ## Install Python dependencies and git hooks
 up: ## Start Postgres, SeaweedFS and Temporal (UI on http://localhost:8233)
 	$(COMPOSE) up -d --wait postgres seaweedfs temporal
 
-app: ## Build and run the API and the CPU worker in Docker too (http://localhost:8000/docs)
+app: ## Build and run the API, the web app and the CPU worker in Docker (http://localhost:3000)
 	$(COMPOSE) --profile app up -d --build --wait
 
 gpu-worker: ## Build and run the GPU worker (speech recognition) in Docker
@@ -23,6 +23,13 @@ gpu-worker: ## Build and run the GPU worker (speech recognition) in Docker
 
 worker: ## Run a CPU worker on the host instead of in Docker
 	uv run lecture-worker --queues cpu,llm
+
+web: ## Run the web app with hot reload (http://localhost:3000); needs Node 24
+	cd apps/web && corepack enable && pnpm install && pnpm run dev
+
+openapi: ## Regenerate the web app's typed API client after changing the API
+	uv run python -m lecture_api.openapi > apps/web/openapi.json
+	cd apps/web && pnpm run gen:api
 
 down: ## Stop everything, keeping data
 	$(COMPOSE) --profile app --profile gpu down

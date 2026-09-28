@@ -10,6 +10,7 @@ from lecture_core.timeline import (
     TimelineSegment,
     Transcript,
     TranscriptSegment,
+    Word,
 )
 
 
@@ -60,3 +61,36 @@ def _span_at(time_s: float, spans: list[SlideSpan]) -> SlideSpan | None:
         if span.start_s <= time_s < span.end_s:
             return span
     return None
+
+
+_SENTENCE_END = (".", "?", "!")
+_CLOSERS = "\"')]"
+
+
+def split_sentences(segment: TranscriptSegment, max_words: int = 40) -> list[TranscriptSegment]:
+    """Split one speech segment into sentences, using its word timings.
+
+    Batched speech recognition returns segments of up to about 30 seconds, too coarse for a
+    transcript that follows playback line by line. A run-on sentence is also cut at `max_words`.
+    """
+    if not segment.words:
+        return [segment]
+    sentences: list[TranscriptSegment] = []
+    current: list[Word] = []
+    for word in segment.words:
+        current.append(word)
+        if word.text.rstrip(_CLOSERS).endswith(_SENTENCE_END) or len(current) >= max_words:
+            sentences.append(_join(current))
+            current = []
+    if current:
+        sentences.append(_join(current))
+    return sentences
+
+
+def _join(words: list[Word]) -> TranscriptSegment:
+    return TranscriptSegment(
+        start_s=words[0].start_s,
+        end_s=words[-1].end_s,
+        text=" ".join(word.text for word in words),
+        words=words,
+    )

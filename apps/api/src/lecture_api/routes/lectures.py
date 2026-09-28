@@ -14,7 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 
 from lecture_api.deps import SessionDep, SettingsDep, StorageDep, lecture_or_404
-from lecture_api.schemas import LectureCreate, LectureCreated, LectureOut, UploadTarget
+from lecture_api.schemas import LectureCreate, LectureCreated, LectureOut, MediaOut, UploadTarget
 from lecture_core.models import Lecture, LectureStatus
 from lecture_core.storage import source_key
 
@@ -90,3 +90,19 @@ async def complete_upload(
     await session.commit()
     await session.refresh(lecture)
     return LectureOut.model_validate(lecture)
+
+
+@router.get("/{lecture_id}/media")
+async def media(
+    lecture_id: uuid.UUID, session: SessionDep, storage: StorageDep, settings: SettingsDep
+) -> MediaOut:
+    """A presigned URL for playing the uploaded video. Browsers play MP4 (H.264/AAC) directly;
+    other formats will need the HLS renditions planned for later."""
+    lecture = await lecture_or_404(session, lecture_id)
+    if lecture.status == LectureStatus.AWAITING_UPLOAD:
+        raise HTTPException(status.HTTP_409_CONFLICT, "The video hasn't been uploaded yet.")
+    return MediaOut(
+        url=storage.presign_get(lecture.source_key, settings.upload_url_ttl_s),
+        content_type=lecture.content_type,
+        expires_in_s=settings.upload_url_ttl_s,
+    )

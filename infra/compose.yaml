@@ -113,6 +113,22 @@ services:
       timeout: 3s
       retries: 20
 
+  # The web app on http://localhost:3000. It calls the API from the browser, at the address
+  # baked in at build time.
+  web:
+    profiles: [app]
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    image: lecture-summariser/web:dev
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
   # Serves the cpu and llm queues: media, slides, timeline, LLM calls, saving results.
   cpu-worker:
     <<: *worker

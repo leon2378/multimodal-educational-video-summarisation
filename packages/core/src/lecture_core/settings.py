@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "default"
 
+    # Browser origins allowed to call the API (the web app). JSON list in the environment.
+    cors_origins: list[str] = ["http://localhost:3000"]
+
     upload_url_ttl_s: int = 3600
     # A single presigned PUT tops out at 5 GiB on S3. Multipart uploads arrive with the web app.
     max_upload_bytes: int = 5 * 1024**3

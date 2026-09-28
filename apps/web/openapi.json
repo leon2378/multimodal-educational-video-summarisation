@@ -1,0 +1,1406 @@
+{
+  "components": {
+    "schemas": {
+      "Chapter": {
+        "properties": {
+          "end_s": {
+            "title": "End S",
+            "type": "number"
+          },
+          "start_s": {
+            "title": "Start S",
+            "type": "number"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "start_s",
+          "end_s",
+          "summary"
+        ],
+        "title": "Chapter",
+        "type": "object"
+      },
+      "Concept": {
+        "properties": {
+          "at_s": {
+            "title": "At S",
+            "type": "number"
+          },
+          "definition": {
+            "title": "Definition",
+            "type": "string"
+          },
+          "term": {
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "term",
+          "definition",
+          "at_s"
+        ],
+        "title": "Concept",
+        "type": "object"
+      },
+      "Formula": {
+        "properties": {
+          "at_s": {
+            "title": "At S",
+            "type": "number"
+          },
+          "latex": {
+            "title": "Latex",
+            "type": "string"
+          },
+          "meaning": {
+            "title": "Meaning",
+            "type": "string"
+          }
+        },
+        "required": [
+          "latex",
+          "meaning",
+          "at_s"
+        ],
+        "title": "Formula",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LectureCreate": {
+        "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "content_type": {
+            "examples": [
+              "video/mp4"
+            ],
+            "pattern": "^video/[\\w.+-]+$",
+            "title": "Content Type",
+            "type": "string"
+          },
+          "filename": {
+            "examples": [
+              "6.006-lecture-01.mp4"
+            ],
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "licence": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "CC BY-NC-SA 4.0"
+            ],
+            "title": "Licence"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "filename",
+          "content_type"
+        ],
+        "title": "LectureCreate",
+        "type": "object"
+      },
+      "LectureCreated": {
+        "properties": {
+          "lecture": {
+            "$ref": "#/components/schemas/LectureOut"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/UploadTarget"
+          }
+        },
+        "required": [
+          "lecture",
+          "upload"
+        ],
+        "title": "LectureCreated",
+        "type": "object"
+      },
+      "LectureOut": {
+        "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "licence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Licence"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "source_filename": {
+            "title": "Source Filename",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LectureStatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "source_filename",
+          "content_type",
+          "size_bytes",
+          "duration_s",
+          "licence",
+          "attribution",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "LectureOut",
+        "type": "object"
+      },
+      "LectureStatus": {
+        "enum": [
+          "awaiting_upload",
+          "uploaded",
+          "processing",
+          "ready",
+          "failed"
+        ],
+        "title": "LectureStatus",
+        "type": "string"
+      },
+      "MediaOut": {
+        "description": "Where the browser plays the lecture from: a presigned URL straight to storage.",
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "expires_in_s": {
+            "title": "Expires In S",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "content_type",
+          "expires_in_s"
+        ],
+        "title": "MediaOut",
+        "type": "object"
+      },
+      "NotesOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "notes": {
+            "$ref": "#/components/schemas/StudyNotes"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "notes",
+          "model",
+          "run_id",
+          "created_at"
+        ],
+        "title": "NotesOut",
+        "type": "object"
+      },
+      "Progress": {
+        "properties": {
+          "done": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StageInfo"
+            },
+            "title": "Done",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "running": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Running",
+            "type": "array"
+          },
+          "status": {
+            "default": "running",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "Progress",
+        "type": "object"
+      },
+      "ProgressEvent": {
+        "description": "One server-sent event: the lecture's status and its latest run's progress.",
+        "properties": {
+          "lecture_status": {
+            "$ref": "#/components/schemas/LectureStatus"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Progress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "lecture_status",
+          "run_id",
+          "progress"
+        ],
+        "title": "ProgressEvent",
+        "type": "object"
+      },
+      "QuizQuestion": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "at_s": {
+            "title": "At S",
+            "type": "number"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer",
+          "at_s"
+        ],
+        "title": "QuizQuestion",
+        "type": "object"
+      },
+      "RunOut": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lecture_id": {
+            "format": "uuid",
+            "title": "Lecture Id",
+            "type": "string"
+          },
+          "llm_usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Usage"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/StageInfo"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "id",
+          "lecture_id",
+          "status",
+          "started_at",
+          "finished_at",
+          "error",
+          "stages",
+          "llm_usage"
+        ],
+        "title": "RunOut",
+        "type": "object"
+      },
+      "RunStatus": {
+        "enum": [
+          "running",
+          "succeeded",
+          "failed"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
+      "SlideOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "figure_description": {
+            "title": "Figure Description",
+            "type": "string"
+          },
+          "first_seen_s": {
+            "title": "First Seen S",
+            "type": "number"
+          },
+          "image_url": {
+            "title": "Image Url",
+            "type": "string"
+          },
+          "latex": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Latex",
+            "type": "array"
+          },
+          "slide_id": {
+            "title": "Slide Id",
+            "type": "integer"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/TimeSpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide_id",
+          "image_url",
+          "first_seen_s",
+          "title",
+          "text",
+          "figure_description",
+          "latex",
+          "code",
+          "spans"
+        ],
+        "title": "SlideOut",
+        "type": "object"
+      },
+      "StageInfo": {
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "seconds": {
+            "title": "Seconds",
+            "type": "number"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "seconds",
+          "cached"
+        ],
+        "title": "StageInfo",
+        "type": "object"
+      },
+      "StudyNotes": {
+        "properties": {
+          "chapters": {
+            "items": {
+              "$ref": "#/components/schemas/Chapter"
+            },
+            "title": "Chapters",
+            "type": "array"
+          },
+          "concepts": {
+            "items": {
+              "$ref": "#/components/schemas/Concept"
+            },
+            "title": "Concepts",
+            "type": "array"
+          },
+          "formulas": {
+            "items": {
+              "$ref": "#/components/schemas/Formula"
+            },
+            "title": "Formulas",
+            "type": "array"
+          },
+          "quiz": {
+            "items": {
+              "$ref": "#/components/schemas/QuizQuestion"
+            },
+            "title": "Quiz",
+            "type": "array"
+          },
+          "tldr": {
+            "title": "Tldr",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tldr",
+          "chapters",
+          "concepts",
+          "formulas",
+          "quiz"
+        ],
+        "title": "StudyNotes",
+        "type": "object"
+      },
+      "TimeSpan": {
+        "properties": {
+          "end_s": {
+            "title": "End S",
+            "type": "number"
+          },
+          "start_s": {
+            "title": "Start S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start_s",
+          "end_s"
+        ],
+        "title": "TimeSpan",
+        "type": "object"
+      },
+      "TimelineSegmentOut": {
+        "properties": {
+          "end_s": {
+            "title": "End S",
+            "type": "number"
+          },
+          "segment_id": {
+            "title": "Segment Id",
+            "type": "string"
+          },
+          "slide_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slide Id"
+          },
+          "start_s": {
+            "title": "Start S",
+            "type": "number"
+          },
+          "transcript": {
+            "title": "Transcript",
+            "type": "string"
+          }
+        },
+        "required": [
+          "segment_id",
+          "start_s",
+          "end_s",
+          "transcript",
+          "slide_id"
+        ],
+        "title": "TimelineSegmentOut",
+        "type": "object"
+      },
+      "TranscriptLineOut": {
+        "properties": {
+          "end_s": {
+            "title": "End S",
+            "type": "number"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "start_s": {
+            "title": "Start S",
+            "type": "number"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "start_s",
+          "end_s",
+          "text"
+        ],
+        "title": "TranscriptLineOut",
+        "type": "object"
+      },
+      "UploadTarget": {
+        "description": "Send the file with `method` to `url`, including `headers` exactly as given.",
+        "properties": {
+          "expires_in_s": {
+            "title": "Expires In S",
+            "type": "integer"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "object"
+          },
+          "method": {
+            "const": "PUT",
+            "default": "PUT",
+            "title": "Method",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "headers",
+          "expires_in_s"
+        ],
+        "title": "UploadTarget",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Lecture Summariser API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "description": "The process is up. Checks nothing else, so a database outage doesn't restart the API.",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Healthz Healthz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Healthz",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "description": "The API can serve traffic: Postgres and object storage both answer.",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Readyz Readyz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readyz",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/v1/lectures": {
+      "get": {
+        "operationId": "list_lectures_v1_lectures_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LectureOut"
+                  },
+                  "title": "Response List Lectures V1 Lectures Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Lectures",
+        "tags": [
+          "lectures"
+        ]
+      },
+      "post": {
+        "operationId": "create_lecture_v1_lectures_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LectureCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LectureCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Lecture",
+        "tags": [
+          "lectures"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}": {
+      "get": {
+        "operationId": "get_lecture_v1_lectures__lecture_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LectureOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Lecture",
+        "tags": [
+          "lectures"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/complete-upload": {
+      "post": {
+        "description": "Idempotent: confirming an upload that's already confirmed returns the lecture unchanged.",
+        "operationId": "complete_upload_v1_lectures__lecture_id__complete_upload_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LectureOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Upload",
+        "tags": [
+          "lectures"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/events": {
+      "get": {
+        "description": "Server-sent events: one JSON ProgressEvent per change, until the run finishes.",
+        "operationId": "events_v1_lectures__lecture_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressEvent"
+                }
+              }
+            },
+            "description": "Server-sent events. Each `data:` line is a ProgressEvent as JSON."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Events",
+        "tags": [
+          "processing"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/media": {
+      "get": {
+        "description": "A presigned URL for playing the uploaded video. Browsers play MP4 (H.264/AAC) directly;\nother formats will need the HLS renditions planned for later.",
+        "operationId": "media_v1_lectures__lecture_id__media_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Media",
+        "tags": [
+          "lectures"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/notes": {
+      "get": {
+        "operationId": "notes_v1_lectures__lecture_id__notes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Notes",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/process": {
+      "post": {
+        "description": "Idempotent: while a run is in progress, asking again returns that run.",
+        "operationId": "process_v1_lectures__lecture_id__process_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Process",
+        "tags": [
+          "processing"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/runs": {
+      "get": {
+        "operationId": "list_runs_v1_lectures__lecture_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RunOut"
+                  },
+                  "title": "Response List Runs V1 Lectures  Lecture Id  Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Runs",
+        "tags": [
+          "processing"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/slides": {
+      "get": {
+        "description": "Image URLs are presigned, so the browser loads slides straight from storage.",
+        "operationId": "slides_v1_lectures__lecture_id__slides_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SlideOut"
+                  },
+                  "title": "Response Slides V1 Lectures  Lecture Id  Slides Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Slides",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/timeline": {
+      "get": {
+        "operationId": "timeline_v1_lectures__lecture_id__timeline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TimelineSegmentOut"
+                  },
+                  "title": "Response Timeline V1 Lectures  Lecture Id  Timeline Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Timeline",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/transcript": {
+      "get": {
+        "operationId": "transcript_v1_lectures__lecture_id__transcript_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TranscriptLineOut"
+                  },
+                  "title": "Response Transcript V1 Lectures  Lecture Id  Transcript Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Transcript",
+        "tags": [
+          "results"
+        ]
+      }
+    }
+  }
+}

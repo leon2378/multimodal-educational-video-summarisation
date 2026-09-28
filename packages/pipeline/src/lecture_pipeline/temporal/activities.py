@@ -38,6 +38,7 @@ from lecture_perception.media import MediaError, MediaInfo
 from lecture_perception.slides import DetectorConfig
 from lecture_pipeline import stages
 from lecture_pipeline.cache import StageCache, StageResult
+from lecture_pipeline.fuse import split_sentences
 from lecture_pipeline.temporal.contracts import (
     AssembleInput,
     DraftInput,
@@ -241,16 +242,20 @@ def _result_rows(
     lecture_id = request.lecture_id
     readings = {r.slide_id: r for r in loaded.readings.readings}
     rows: list[TranscriptSegmentRow | SlideRow | TimelineSegmentRow | SummaryRow] = []
+    # Sentence by sentence, so the web page's transcript can follow playback line by line.
+    sentences = [
+        line for segment in loaded.transcript.segments for line in split_sentences(segment)
+    ]
     rows += [
         TranscriptSegmentRow(
             lecture_id=lecture_id,
             index=i,
-            start_s=segment.start_s,
-            end_s=segment.end_s,
-            text=segment.text,
-            words=[word.model_dump() for word in segment.words],
+            start_s=sentence.start_s,
+            end_s=sentence.end_s,
+            text=sentence.text,
+            words=[word.model_dump() for word in sentence.words],
         )
-        for i, segment in enumerate(loaded.transcript.segments)
+        for i, sentence in enumerate(sentences)
     ]
     for slide in loaded.deck.slides:
         reading = readings.get(slide.id)

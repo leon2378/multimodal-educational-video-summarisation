@@ -58,6 +58,16 @@ def test_upload_flow(client: TestClient) -> None:
     assert client.get(f"/v1/lectures/{lecture_id}").json()["status"] == "uploaded"
     assert lecture_id in {lecture["id"] for lecture in client.get("/v1/lectures").json()}
 
+    # The player streams the video straight from storage through a presigned URL.
+    media = client.get(f"/v1/lectures/{lecture_id}/media").json()
+    assert media["content_type"] == "video/mp4"
+    assert httpx2.get(media["url"]).content == FAKE_VIDEO
+
+
+def test_media_needs_an_upload(client: TestClient) -> None:
+    lecture_id = create_lecture(client)["lecture"]["id"]
+    assert client.get(f"/v1/lectures/{lecture_id}/media").status_code == 409
+
 
 def test_complete_upload_is_idempotent(client: TestClient) -> None:
     created = create_lecture(client)

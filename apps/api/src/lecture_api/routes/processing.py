@@ -92,7 +92,16 @@ async def list_runs(lecture_id: uuid.UUID, session: SessionDep) -> list[RunOut]:
     return [RunOut.model_validate(run) for run in runs]
 
 
-@router.get("/{lecture_id}/events")
+@router.get(
+    "/{lecture_id}/events",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "model": ProgressEvent,
+            "description": "Server-sent events. Each `data:` line is a ProgressEvent as JSON.",
+        }
+    },
+)
 async def events(
     lecture_id: uuid.UUID, request: Request, session: SessionDep, temporal: TemporalDep
 ) -> StreamingResponse:

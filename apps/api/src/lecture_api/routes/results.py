@@ -9,7 +9,13 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from lecture_api.deps import SessionDep, SettingsDep, StorageDep, lecture_or_404
-from lecture_api.schemas import NotesOut, SlideOut, TimelineSegmentOut, TranscriptLineOut
+from lecture_api.schemas import (
+    NotesOut,
+    SlideOut,
+    TimelineSegmentOut,
+    TimeSpan,
+    TranscriptLineOut,
+)
 from lecture_core.models import SlideRow, SummaryRow, TimelineSegmentRow, TranscriptSegmentRow
 from lecture_core.notes import StudyNotes
 
@@ -46,7 +52,7 @@ async def slides(
             figure_description=row.figure_description,
             latex=row.latex,
             code=row.code,
-            spans=row.spans,
+            spans=[TimeSpan.model_validate(span) for span in row.spans],
         )
         for row in rows
     ]
