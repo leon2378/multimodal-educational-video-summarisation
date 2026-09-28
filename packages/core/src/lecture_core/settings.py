@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # reranker on a GPU (Compose sets it); on a laptop CPU it takes over a minute a query.
     search_mode: Literal["dense", "bm25", "hybrid", "rerank"] = "hybrid"
 
+    # Q&A: how many retrieved segments an answer draws on, and how many earlier exchanges in a
+    # thread it sees.
+    qa_passages: int = 6
+    qa_history_turns: int = 3
+
     upload_url_ttl_s: int = 3600
     # A single presigned PUT tops out at 5 GiB on S3. Multipart uploads arrive with the web app.
     max_upload_bytes: int = 5 * 1024**3

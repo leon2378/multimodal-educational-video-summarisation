@@ -22,6 +22,10 @@ x-api: &api
     dockerfile: infra/docker/api.Dockerfile
   image: lecture-summariser/api:dev
   profiles: [app]
+  # GEMINI_API_KEY for Q&A.
+  env_file:
+    - path: ../.env
+      required: false
   environment: *app-env
 
 x-worker: &worker

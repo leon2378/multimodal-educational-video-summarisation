@@ -2,11 +2,11 @@
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
-from lecture_core.models import LectureStatus, RunStatus
+from lecture_core.models import LectureStatus, MessageRole, Rating, RunStatus
 from lecture_core.notes import StudyNotes
 from lecture_core.processing import Progress, StageInfo
 from lecture_rag.search import SearchMode
@@ -145,3 +145,124 @@ class SearchResults(BaseModel):
     query: str
     mode: SearchMode
     hits: list[SearchHitOut]
+
+
+# Q&A
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000, pattern=r"\S")
+    # Continue a conversation; leave out to start a new one.
+    thread_id: uuid.UUID | None = None
+
+
+class SourceOut(BaseModel):
+    """A retrieved segment the answer drew on."""
+
+    lecture_id: uuid.UUID
+    segment_id: str
+    start_s: float
+    end_s: float
+    slide_title: str | None
+    chapter: str | None
+    score: float
+
+
+class CitationOut(BaseModel):
+    # As written in the answer, e.g. "[12:34]".
+    label: str
+    at_s: float
+    segment_id: str | None
+    # False when it points outside every retrieved segment.
+    valid: bool
+
+
+class FeedbackIn(BaseModel):
+    message_id: uuid.UUID
+    rating: Rating
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class FeedbackOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    message_id: uuid.UUID
+    rating: Rating
+    reason: str | None
+    updated_at: datetime
+
+
+class MessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    role: MessageRole
+    content: str
+    created_at: datetime
+    # Answers only.
+    search_query: str | None = None
+    sources: list[SourceOut] | None = None
+    citations: list[CitationOut] | None = None
+    model: str | None = None
+    first_token_ms: int | None = None
+    total_ms: int | None = None
+    error: str | None = None
+    feedback: FeedbackOut | None = None
+
+
+class ThreadOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    lecture_id: uuid.UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ThreadDetail(ThreadOut):
+    messages: list[MessageOut]
+
+
+# What POST /lectures/{id}/ask streams, in order: start, sources, any number of deltas, then
+# done or error.
+
+
+class AskStart(BaseModel):
+    type: Literal["start"] = "start"
+    thread_id: uuid.UUID
+    question: MessageOut
+
+
+class AskSources(BaseModel):
+    type: Literal["sources"] = "sources"
+    # The question as searched: a follow-up is first rewritten to stand on its own.
+    search_query: str
+    sources: list[SourceOut]
+
+
+class AskDelta(BaseModel):
+    type: Literal["delta"] = "delta"
+    text: str
+
+
+class AskDone(BaseModel):
+    type: Literal["done"] = "done"
+    answer: MessageOut
+
+
+class AskError(BaseModel):
+    type: Literal["error"] = "error"
+    detail: str
+    # The failed answer as stored, when it got that far.
+    answer: MessageOut | None
+
+
+class AskEvent(
+    RootModel[
+        Annotated[
+            AskStart | AskSources | AskDelta | AskDone | AskError, Field(discriminator="type")
+        ]
+    ]
+):
+    pass

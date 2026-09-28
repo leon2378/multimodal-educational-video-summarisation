@@ -3,19 +3,19 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phase 2 of 6 done and Phase 3 under way: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, and search it. Cited answers come next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 and 2 of 6 done, and most of Phase 3: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask it questions with answers that cite the lecture. Course-wide search and Q&A come next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
 
 - A uv workspace: `apps/api` (FastAPI), `packages/core` (settings, models, storage, the timeline
   and study-notes formats), `packages/perception` (video, audio, slide detection, speech
-  recognition), `packages/llm` (Pydantic AI agents), `packages/pipeline` (stages, stage cache,
+  recognition), `packages/llm` (Pydantic AI agents for the pipeline and Q&A), `packages/pipeline` (stages, stage cache,
   local runner), `packages/rag` (chunking, embeddings, the search index, hybrid search) and
   `evals` (baselines, golden sets and scoring).
 - A web app ([below](#web-app)): upload with a progress bar, live processing progress, and a
   lecture page with the video, a transcript that follows playback, slides, chapters, notes, a
-  quiz and search, every timestamp clickable.
+  quiz, search and a Q&A chat, every timestamp clickable.
 - Processing through the API: a Temporal workflow per lecture, CPU and GPU workers, progress
   over server-sent events, and results in Postgres ([below](#processing-a-lecture)).
 - The processing pipeline: speech recognition, slide detection, a vision LLM reading each slide, a
@@ -24,6 +24,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - Search ([below](#search)): each processed lecture is indexed in Qdrant with dense vectors
   (Qwen3-Embedding-0.6B) and BM25, and `GET /v1/search` runs dense, BM25, hybrid or reranked
   search. A golden Q&A set for Lecture 10 and a retrieval eval score each mode.
+- Q&A ([below](#questions-and-answers)): ask about a lecture and get a streamed answer that
+  cites the moments it comes from as `[mm:ss]`, each citation checked against what was
+  retrieved. Follow-ups are rewritten to stand alone before searching. Threads, answers (with
+  sources, tokens and time to first token) and thumbs up/down feedback are stored.
 - A single-call Gemini baseline that summarises a lecture video and records tokens, cost and
   timings ([below](#gemini-baseline)).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
@@ -91,8 +95,9 @@ migrations in a one-off container, and starts the API on port 8000.
   its own, and the page switches to the lecture.
 - **Lecture page**: live processing progress, then the video with a slide strip that follows
   the slide on screen, chapters, and tabs for a transcript that highlights and scrolls with
-  playback, the notes (formulas rendered with KaTeX), a quiz and search. Every timestamp and
-  search result plays the video from there.
+  playback, the notes (formulas rendered with KaTeX), a quiz, search, and an Ask tab: a chat
+  whose answers stream in, with citations that play the video from where they point. Every
+  timestamp and search result plays the video from there.
 
 For hot reload while working on it, run `make web` (Node 24) alongside `make up`, `make api` and
 the workers. The web app calls the API from the browser: its address is baked in at build time
@@ -161,6 +166,31 @@ To score search, process MIT 6.0001 Lecture 10 (the eval finds it by the video's
 prints Recall@5, MRR@10, nDCG@10 and latency, and saves every question's hits to
 `data/evals/retrieval/`. The questions were drafted from the official captions and still need
 checking by hand against the video.
+
+## Questions and answers
+
+Ask about a processed lecture (the API needs `GEMINI_API_KEY`, like processing):
+
+```bash
+curl -sN -X POST "localhost:8000/v1/lectures/$ID/ask" -H 'Content-Type: application/json' \
+  -d '{"question": "Why do we ignore constants in big O notation?"}'
+```
+
+The answer streams as server-sent events: `start` (the thread and the saved question),
+`sources` (the segments it draws on), `delta`s of text, then `done` with the saved answer and its
+checked citations, or `error` with the reason. Send `thread_id` from `start` to ask a
+follow-up. `GET /v1/lectures/$ID/threads` and `GET /v1/threads/{id}` read conversations back,
+and `POST /v1/feedback` rates an answer:
+
+```bash
+curl -s -X POST localhost:8000/v1/feedback -H 'Content-Type: application/json' \
+  -d '{"message_id": "<answer id>", "rating": "down", "reason": "Missed the second example"}'
+```
+
+An answer uses only the lecture: asked about merge sort, Lecture 10's answer is that the lecture
+doesn't seem to cover it. How answers are built and checked is in
+[docs/architecture.md](docs/architecture.md#qa-phase-3b). On the free tier, the same caveat
+applies as for processing: public lectures only.
 
 ## Gemini baseline
 
@@ -271,7 +301,7 @@ packages/llm/              Pydantic AI agents: read slides, chapters, notes
 packages/pipeline/         stages, stage cache, timeline, local runner, Temporal workflow and workers
 packages/rag/              chunks, encoders (TEI, BM25), Qdrant index, hybrid search
 evals/                     Gemini baseline, retrieval eval, golden Q&A sets (evals/datasets/)
-prompts/                   versioned prompts (pipeline and baseline)
+prompts/                   versioned prompts (pipeline, Q&A and baseline)
 data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
 tests/integration/         real Postgres, SeaweedFS, Temporal and Qdrant via testcontainers
@@ -335,7 +365,7 @@ from the blueprint in these places:
 - [ ] **Phase 3, RAG Q&A**
   - [x] 3a: chunks, embeddings, Qdrant index, hybrid search and reranking, search API and tab,
         golden Q&A set and retrieval eval
-  - [ ] 3b: streamed answers with checked `[mm:ss]` citations, chat panel, threads and feedback
+  - [x] 3b: streamed answers with checked `[mm:ss]` citations, chat panel, threads and feedback
   - [ ] Courses: search and answers across a course's lectures
 - [ ] **Phase 4, evals and observability**: eval suites, Langfuse, OpenTelemetry, CI eval gate
 - [ ] **Phase 5, CV and optimisation**: YOLO26 fine-tune, OCR-vs-VLM routing, ONNX/TensorRT/int8

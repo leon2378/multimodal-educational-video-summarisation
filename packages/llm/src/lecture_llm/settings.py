@@ -1,4 +1,4 @@
-"""Which model runs the pipeline's LLM steps, and where the prompts live."""
+"""Which model runs the LLM steps (the pipeline's and Q&A), and where the prompts live."""
 
 from pathlib import Path
 
@@ -14,5 +14,6 @@ class LLMSettings(BaseSettings):
     llm_model: str = "google:gemini-3.5-flash-lite"
     gemini_api_key: SecretStr | None = None
     prompts_dir: Path = Path("prompts/pipeline")
+    qa_prompts_dir: Path = Path("prompts/qa")
     # Slide images per vision request. Fewer requests matter on free-tier daily limits.
     slides_per_request: int = 8

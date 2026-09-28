@@ -12,6 +12,7 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from lecture_core.models import Lecture
 from lecture_core.settings import Settings
 from lecture_core.storage import ObjectStorage
+from lecture_llm.qa import AnswerLLM
 from lecture_rag.search import Searcher
 
 
@@ -34,6 +35,16 @@ def get_storage(request: Request) -> ObjectStorage:
 def get_searcher(request: Request) -> Searcher:
     searcher: Searcher = request.app.state.searcher
     return searcher
+
+
+def get_answerer(request: Request) -> AnswerLLM:
+    answerer: AnswerLLM | None = request.app.state.answerer
+    if answerer is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Answers are unavailable: the server has no language model configured.",
+        )
+    return answerer
 
 
 async def get_temporal(request: Request) -> Client:
@@ -69,3 +80,4 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 StorageDep = Annotated[ObjectStorage, Depends(get_storage)]
 TemporalDep = Annotated[Client, Depends(get_temporal)]
 SearcherDep = Annotated[Searcher, Depends(get_searcher)]
+AnswererDep = Annotated[AnswerLLM, Depends(get_answerer)]

@@ -173,3 +173,78 @@ class SummaryRow(Base):
     content: Mapped[dict[str, Any]] = mapped_column(JSONB)
     model: Mapped[str] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# Q&A. Threads belong to a lecture for now; course-wide threads come with courses.
+
+
+class QAThread(Base):
+    __tablename__ = "qa_threads"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    lecture_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("lectures.id", ondelete="CASCADE"), index=True
+    )
+    # The first question, shortened.
+    title: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class MessageRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class QAMessage(Base):
+    """A question, or the answer to it. Answers record what was retrieved and cited, and what
+    they cost."""
+
+    __tablename__ = "qa_messages"
+    __table_args__ = (Index("ix_qa_messages_thread_created", "thread_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    thread_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("qa_threads.id", ondelete="CASCADE"))
+    role: Mapped[MessageRole] = mapped_column(
+        Enum(MessageRole, native_enum=False, length=16, values_callable=_enum_values)
+    )
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Answers only. The question as searched, when a follow-up was rewritten to stand alone.
+    search_query: Mapped[str | None] = mapped_column(Text)
+    # [{lecture_id, segment_id, start_s, end_s, slide_title, chapter, score}]
+    sources: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    # [{label, at_s, segment_id, valid}]
+    citations: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    model: Mapped[str | None] = mapped_column(String(100))
+    # {requests, input_tokens, output_tokens}
+    usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    first_token_ms: Mapped[int | None] = mapped_column(Integer)
+    total_ms: Mapped[int | None] = mapped_column(Integer)
+    # Why the answer failed, as shown to the reader; the details are in the API's log.
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class Rating(StrEnum):
+    UP = "up"
+    DOWN = "down"
+
+
+class Feedback(Base):
+    """A reader's rating of an answer. Rating it again replaces the earlier rating."""
+
+    __tablename__ = "feedback"
+
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("qa_messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    rating: Mapped[Rating] = mapped_column(
+        Enum(Rating, native_enum=False, length=8, values_callable=_enum_values)
+    )
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

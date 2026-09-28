@@ -1,13 +1,15 @@
 [project]
 name = "lecture-api"
 version = "0.1.0"
-description = "FastAPI service: uploads, processing, results and search."
+description = "FastAPI service: uploads, processing, results, search and Q&A."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141",
     "httpx>=0.28",
     "lecture-core",
+    "lecture-llm",
     "lecture-rag",
+    "pydantic-ai-slim[google]>=2.51",
     "qdrant-client>=1.19.1",
     "temporalio>=1.33",
     "uvicorn[standard]>=0.54",
@@ -15,6 +17,7 @@ dependencies = [
 
 [tool.uv.sources]
 lecture-core = { workspace = true }
+lecture-llm = { workspace = true }
 lecture-rag = { workspace = true }
 
 [build-system]

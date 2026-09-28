@@ -184,7 +184,7 @@ class LectureLLM:
     ) -> tuple[Overview, Usage]:
         parts = []
         for title, notes in chapters:
-            parts.append(f"<chapter title={_attr(title)}>\n{html.escape(notes.summary)}")
+            parts.append(f"<chapter title={attr(title)}>\n{html.escape(notes.summary)}")
             parts += [
                 f"- {html.escape(c.term)} ({c.segment}): {html.escape(c.definition)}"
                 for c in notes.concepts
@@ -206,7 +206,7 @@ def render(timeline: Timeline, segments: Sequence[TimelineSegment]) -> str:
         lines.append(f'<segment id="{segment.id}" time="{span}">')
         slide = timeline.slide(segment.slide_id)
         if slide is not None and segment.slide_id != shown:
-            lines.append(f'<slide id="{slide.slide_id}">\n{_render_slide(slide)}\n</slide>')
+            lines.append(f'<slide id="{slide.slide_id}">\n{render_slide(slide)}\n</slide>')
             shown = segment.slide_id
         elif slide is not None:
             lines.append(f'<slide id="{slide.slide_id}">(same slide as before)</slide>')
@@ -215,7 +215,8 @@ def render(timeline: Timeline, segments: Sequence[TimelineSegment]) -> str:
     return "\n".join(lines)
 
 
-def _render_slide(slide: SlideReading) -> str:
+def render_slide(slide: SlideReading) -> str:
+    """A slide's reading as labelled lines, HTML-escaped."""
     fields = [
         ("Title", slide.title),
         ("Text", slide.text),
@@ -226,5 +227,6 @@ def _render_slide(slide: SlideReading) -> str:
     return "\n".join(f"{name}: {html.escape(value)}" for name, value in fields if value)
 
 
-def _attr(value: str) -> str:
+def attr(value: str) -> str:
+    """An HTML-escaped, quoted attribute value."""
     return '"' + html.escape(value, quote=True) + '"'

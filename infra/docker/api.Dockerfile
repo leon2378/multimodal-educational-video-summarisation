@@ -37,6 +37,8 @@ COPY --from=build /app/.venv /app/.venv
 # Migrations run from this image too (the `migrate` service in infra/compose.yaml).
 COPY packages/core/alembic.ini packages/core/alembic.ini
 COPY packages/core/migrations packages/core/migrations
+# Q&A prompts.
+COPY prompts/qa prompts/qa
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 USER app

@@ -21,8 +21,8 @@ def make_model(settings: LLMSettings) -> Model:
             name,
             provider=GoogleProvider(
                 api_key=settings.gemini_api_key.get_secret_value(),
-                # 429 and 5xx ("high demand") are common on the free tier. These calls aren't
-                # streamed, so the SDK can retry them whole.
+                # 429 and 5xx ("high demand") are common on the free tier. The SDK retries
+                # whole requests: a streamed answer only until the response starts.
                 retry_options=HttpRetryOptions(
                     attempts=5,
                     initial_delay=5,

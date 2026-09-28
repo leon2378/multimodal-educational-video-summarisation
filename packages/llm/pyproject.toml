@@ -1,7 +1,7 @@
 [project]
 name = "lecture-llm"
 version = "0.1.0"
-description = "LLM agents (slide reading, chapters, notes) behind Pydantic AI, with usage tracking."
+description = "LLM agents (slide reading, chapters, notes, Q&A) behind Pydantic AI, with usage tracking."
 requires-python = ">=3.12"
 dependencies = [
     "lecture-core",

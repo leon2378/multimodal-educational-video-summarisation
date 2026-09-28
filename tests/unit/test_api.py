@@ -1,20 +1,24 @@
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from qdrant_client import QdrantClient
 
-from lecture_api.deps import get_searcher
+from lecture_api.deps import get_answerer, get_searcher
 from lecture_api.main import create_app
 from lecture_core.settings import Settings
 from lecture_core.timeline import Timeline, TimelineSegment
+from lecture_llm.qa import AnswerLLM, QAPrompts
 from lecture_rag.chunks import build_chunks
 from lecture_rag.encoders import embed_chunks
 from lecture_rag.index import SearchIndex
 from lecture_rag.search import Searcher
-from tests.unit.fakes import FakeDense, FakeReranker, FakeSparse
+from tests.unit.fakes import FakeDense, FakeQA, FakeReranker, FakeSparse
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 UNREACHABLE = "http://127.0.0.1:1"
 
@@ -106,6 +110,10 @@ def test_openapi_lists_the_routes(client: TestClient) -> None:
         "/v1/lectures/{lecture_id}/timeline",
         "/v1/lectures/{lecture_id}/notes",
         "/v1/search",
+        "/v1/lectures/{lecture_id}/ask",
+        "/v1/lectures/{lecture_id}/threads",
+        "/v1/threads/{thread_id}",
+        "/v1/feedback",
     } <= paths
 
 
@@ -143,3 +151,33 @@ def test_search_is_unavailable_while_its_services_are_down(client: TestClient) -
     response = client.get("/v1/search", params={"q": "binary search"})
     assert response.status_code == 503
     assert response.json()["detail"] == "Search is unavailable right now."
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"question": ""},
+        {"question": "   "},
+        {"question": "x" * 1001},
+        {"question": "Why?", "thread_id": "not-a-uuid"},
+    ],
+)
+def test_ask_rejects_bad_questions(app: FastAPI, client: TestClient, body: dict[str, str]) -> None:
+    app.dependency_overrides[get_answerer] = lambda: AnswerLLM(
+        FakeQA().model, QAPrompts.load(REPO_ROOT / "prompts" / "qa")
+    )
+    assert client.post(f"/v1/lectures/{uuid.uuid4()}/ask", json=body).status_code == 422
+
+
+def test_answers_are_unavailable_without_a_model(app: FastAPI, client: TestClient) -> None:
+    app.state.answerer = None
+
+    response = client.post(f"/v1/lectures/{uuid.uuid4()}/ask", json={"question": "Why?"})
+
+    assert response.status_code == 503
+    assert "no language model" in response.json()["detail"]
+
+
+def test_feedback_needs_a_known_rating(client: TestClient) -> None:
+    body = {"message_id": str(uuid.uuid4()), "rating": "meh"}
+    assert client.post("/v1/feedback", json=body).status_code == 422

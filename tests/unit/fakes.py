@@ -1,13 +1,15 @@
-"""Stand-ins for the speech model, the LLM and the search models, so tests run offline."""
+"""Stand-ins for the speech model, the LLMs and the search models, so tests run offline."""
 
+import html
 import math
 import re
 import zlib
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any, BinaryIO
 
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from lecture_core.timeline import Transcript, TranscriptSegment, Word
@@ -166,3 +168,36 @@ class FakeReranker:
     def rerank(self, query: str, texts: Sequence[str]) -> list[float]:
         words = set(_tokens(query))
         return [len(words & set(_tokens(text))) / max(len(words), 1) for text in texts]
+
+
+class FakeQA:
+    """The Q&A model. It rewrites a follow-up by marking it, and answers by citing the first
+    sentence it was shown plus a time outside every passage. `fail` makes answers fail the way
+    an overloaded Gemini does."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+        self.fail = False
+        self.model = FunctionModel(
+            self._rewrite, stream_function=self._answer, model_name="fake-qa"
+        )
+
+    def _rewrite(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        prompt = self._prompt(messages)
+        question = re.findall(r"<question>(.*?)</question>", prompt, re.DOTALL)[-1]
+        return ModelResponse(parts=[TextPart(f"{html.unescape(question)} (standalone)")])
+
+    async def _answer(self, messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        if self.fail:
+            raise ModelHTTPError(503, "fake-qa", {"error": "high demand"})
+        cited = re.search(r"\[\d+:\d{2}\]", self._prompt(messages))
+        yield "Memoisation stores results "
+        yield cited.group(0) if cited else ""
+        yield ", and more [59:59]."
+
+    def _prompt(self, messages: list[ModelMessage]) -> str:
+        prompt = " ".join(
+            str(part.content) for message in messages for part in getattr(message, "parts", [])
+        )
+        self.prompts.append(prompt)
+        return prompt

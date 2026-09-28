@@ -3,13 +3,13 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 3 under way (search done, cited answers next)
+## Current state: Phase 3 under way (search and Q&A done, courses next)
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
 pipeline stages; the results land in Postgres and the search index; the web app shows them in
-step with the video and searches them. The same stages also run on a local file without any of
-that (`lecture-process`, which stops before search).
+step with the video, searches them and answers questions about them. The same stages also run
+on a local file without any of that (`lecture-process`, which stops before search).
 
 ```
  client ── upload (presigned PUT) ──────────────────────────────► SeaweedFS
@@ -24,6 +24,8 @@ that (`lecture-process`, which stops before search).
                                                       └─ gpu queue ─► GPU worker (speech, 1 at a time)
 
  client ── GET /v1/search ─► FastAPI ─► TEI (query embedding) + BM25 ─► Qdrant ─► TEI reranker (GPU)
+ client ── POST .../ask ───► FastAPI ─► rewrite (LLM) ─► search ─► Postgres (sentences, slides)
+                                 ◄── SSE ── answer (LLM, streamed) ─► citations checked ─► Postgres
 ```
 
 ### Upload path (Phase 1)
@@ -106,6 +108,38 @@ Code in `packages/rag`; the choice of Qdrant is [ADR 0005](adr/0005-qdrant-for-h
 `evals/datasets/golden-qa/` through the API and scores each mode: Recall@5, MRR@10 and nDCG@10.
 A hit counts when its segment overlaps an answer span by at least 3 seconds.
 
+### Q&A (Phase 3b)
+
+Code in `apps/api/src/lecture_api/routes/qa.py`, `packages/llm` (`qa`) and `packages/core`
+(`qa`); prompts in `prompts/qa/`.
+
+1. `POST /v1/lectures/{id}/ask` saves the question, in a new thread or the one named by
+   `thread_id`, and returns a stream of server-sent events.
+2. A follow-up is rewritten to stand on its own, from the thread's last 3 answered exchanges
+   ("why does that help?" becomes "why does memoisation help?"), because search sees only the
+   question. A first question skips this call.
+3. Search (`SEARCH_MODE`) gives the top 6 segments. Their sentences come from the lecture's
+   transcript rows and their slides from its slide readings, so the model sees each sentence with
+   its `[mm:ss]`.
+4. The answer model gets the passages in delimited, HTML-escaped blocks, with the conversation
+   for context. It is told to use only the passages, to cite by copying a sentence's time, and to
+   say when the lecture doesn't cover the question. The answer streams out as it's written.
+5. Every `[mm:ss]` in the answer is checked: valid if it falls inside a retrieved segment. The
+   web app makes valid ones play the video and strikes the others through.
+6. The answer is saved with its sources, citations, model, tokens, time to first token and total
+   time. If search or the model fails, the answer is saved with the reason, and the stream ends
+   with an error event instead of done.
+
+Readers rate answers with thumbs up or down and an optional reason (`POST /v1/feedback`, one
+rating per answer), which Phase 4 turns into eval cases. Answers render through a small Markdown
+parser in the web app that produces text nodes only, and KaTeX runs with `trust` off, so an
+answer can't inject HTML.
+
+On Lecture 10, with `gemini-3.5-flash-lite` on the free tier and the reranker on the GPU, the
+first words arrived 2.4 to 4.7 seconds after asking in three tries (search, a rewrite for the
+follow-up, then the model's first chunk), and the rest within half a second: the model sends
+short answers in a few large chunks.
+
 ### Pipeline stages (Phase 2a)
 
 The stages the workers run. `lecture-process <video>` also runs them in order on a local file
@@ -154,6 +188,10 @@ so a second run only redoes stages whose inputs, version, model, params or promp
   previous slide, so its chunk leads with the wrong slide text, and search ranks the next
   segment (which shows the right slide) first. Chunking by sentences with some overlap, or
   indexing slides on their own, would help.
+- Q&A isn't scored yet: answer faithfulness and citation accuracy come with Phase 4's eval
+  suites. Until auth arrives in Phase 6, anyone who can reach the API can ask questions and
+  spend the LLM quota; Compose binds the API to 127.0.0.1. An answer the client disconnects
+  from isn't saved.
 - Embedding runs on the CPU, at about 95 tokens a second on a Ryzen 7 5800H: 5 minutes for a
   51-minute lecture, the slowest stage. A lecture is ready only once it's indexed, so a fresh
   run takes about 6 minutes rather than 2. The GPU could do it in seconds, next to speech
@@ -161,7 +199,4 @@ so a second run only redoes stages whose inputs, version, model, params or promp
 
 ## Next: the rest of Phase 3
 
-Answers: `POST /v1/lectures/{id}/ask` retrieves the top segments, streams an LLM answer over SSE
-with `[mm:ss]` citations checked against the retrieved segments, and stores threads, messages and
-feedback. Then a chat panel on the lecture page, and courses, so search and answers can span
-several lectures.
+Courses: a lecture belongs to a course, and search and answers can span all of its lectures.

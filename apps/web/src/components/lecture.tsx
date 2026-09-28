@@ -7,6 +7,7 @@ import { type ProgressEvent, type Slide, type StudyNotes, type TranscriptLine, a
 import { useLecture, useMedia, useNotes, useProgress, useSearch, useSlides, useTranscript } from "@/lib/queries";
 import { formatTime, indexAt, slideAt } from "@/lib/timeline";
 
+import { ChatPanel } from "./chat";
 import { Card, Latex, StatusBadge, TimeButton } from "./ui";
 
 type Seek = (seconds: number) => void;
@@ -88,7 +89,7 @@ export function LectureView({ id }: { id: string }) {
           ) : (
             <Card>
               <p className="text-sm text-slate-500">
-                The transcript, notes, quiz and search appear here once processing finishes.
+                The transcript, notes, quiz, search and Q&A appear here once processing finishes.
               </p>
             </Card>
           )}
@@ -239,7 +240,7 @@ function Chapters({ notes, time, onSeek }: { notes: StudyNotes; time: number; on
   );
 }
 
-type Tab = "transcript" | "notes" | "quiz" | "search";
+type Tab = "transcript" | "notes" | "quiz" | "search" | "ask";
 
 function SidePanel({
   id,
@@ -260,6 +261,7 @@ function SidePanel({
     ["notes", "Notes"],
     ["quiz", "Quiz"],
     ["search", "Search"],
+    ["ask", "Ask"],
   ];
   return (
     <section className="flex max-h-[calc(100vh-7rem)] flex-col rounded-xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-4 dark:border-slate-800 dark:bg-slate-900">
@@ -284,6 +286,7 @@ function SidePanel({
         {tab === "notes" && notes && <NotesPanel notes={notes} onSeek={onSeek} />}
         {tab === "quiz" && notes && <Quiz notes={notes} onSeek={onSeek} />}
         {tab === "search" && <SearchPanel id={id} onSeek={onSeek} />}
+        {tab === "ask" && <ChatPanel lectureId={id} onSeek={onSeek} />}
       </div>
     </section>
   );

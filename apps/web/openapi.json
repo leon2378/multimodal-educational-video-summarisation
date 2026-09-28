@@ -1,6 +1,182 @@
 {
   "components": {
     "schemas": {
+      "AskDelta": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "delta",
+            "default": "delta",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AskDelta",
+        "type": "object"
+      },
+      "AskDone": {
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/MessageOut"
+          },
+          "type": {
+            "const": "done",
+            "default": "done",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer"
+        ],
+        "title": "AskDone",
+        "type": "object"
+      },
+      "AskError": {
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "type": {
+            "const": "error",
+            "default": "error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail",
+          "answer"
+        ],
+        "title": "AskError",
+        "type": "object"
+      },
+      "AskEvent": {
+        "discriminator": {
+          "mapping": {
+            "delta": "#/components/schemas/AskDelta",
+            "done": "#/components/schemas/AskDone",
+            "error": "#/components/schemas/AskError",
+            "sources": "#/components/schemas/AskSources",
+            "start": "#/components/schemas/AskStart"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AskStart"
+          },
+          {
+            "$ref": "#/components/schemas/AskSources"
+          },
+          {
+            "$ref": "#/components/schemas/AskDelta"
+          },
+          {
+            "$ref": "#/components/schemas/AskDone"
+          },
+          {
+            "$ref": "#/components/schemas/AskError"
+          }
+        ],
+        "title": "AskEvent"
+      },
+      "AskRequest": {
+        "properties": {
+          "question": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Question",
+            "type": "string"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "AskRequest",
+        "type": "object"
+      },
+      "AskSources": {
+        "properties": {
+          "search_query": {
+            "title": "Search Query",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "type": {
+            "const": "sources",
+            "default": "sources",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "search_query",
+          "sources"
+        ],
+        "title": "AskSources",
+        "type": "object"
+      },
+      "AskStart": {
+        "properties": {
+          "question": {
+            "$ref": "#/components/schemas/MessageOut"
+          },
+          "thread_id": {
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "start",
+            "default": "start",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "question"
+        ],
+        "title": "AskStart",
+        "type": "object"
+      },
       "Chapter": {
         "properties": {
           "end_s": {
@@ -29,6 +205,41 @@
         "title": "Chapter",
         "type": "object"
       },
+      "CitationOut": {
+        "properties": {
+          "at_s": {
+            "title": "At S",
+            "type": "number"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "segment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment Id"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "label",
+          "at_s",
+          "segment_id",
+          "valid"
+        ],
+        "title": "CitationOut",
+        "type": "object"
+      },
       "Concept": {
         "properties": {
           "at_s": {
@@ -50,6 +261,72 @@
           "at_s"
         ],
         "title": "Concept",
+        "type": "object"
+      },
+      "FeedbackIn": {
+        "properties": {
+          "message_id": {
+            "format": "uuid",
+            "title": "Message Id",
+            "type": "string"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/Rating"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "message_id",
+          "rating"
+        ],
+        "title": "FeedbackIn",
+        "type": "object"
+      },
+      "FeedbackOut": {
+        "properties": {
+          "message_id": {
+            "format": "uuid",
+            "title": "Message Id",
+            "type": "string"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/Rating"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "rating",
+          "reason",
+          "updated_at"
+        ],
+        "title": "FeedbackOut",
         "type": "object"
       },
       "Formula": {
@@ -305,6 +582,136 @@
         "title": "MediaOut",
         "type": "object"
       },
+      "MessageOut": {
+        "properties": {
+          "citations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CitationOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citations"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeedbackOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "first_token_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Token Ms"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          },
+          "search_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Query"
+          },
+          "sources": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SourceOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sources"
+          },
+          "total_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Ms"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "MessageOut",
+        "type": "object"
+      },
+      "MessageRole": {
+        "enum": [
+          "user",
+          "assistant"
+        ],
+        "title": "MessageRole",
+        "type": "string"
+      },
       "NotesOut": {
         "properties": {
           "created_at": {
@@ -443,6 +850,14 @@
         ],
         "title": "QuizQuestion",
         "type": "object"
+      },
+      "Rating": {
+        "enum": [
+          "up",
+          "down"
+        ],
+        "title": "Rating",
+        "type": "string"
       },
       "RunOut": {
         "properties": {
@@ -703,6 +1118,65 @@
         "title": "SlideOut",
         "type": "object"
       },
+      "SourceOut": {
+        "description": "A retrieved segment the answer drew on.",
+        "properties": {
+          "chapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter"
+          },
+          "end_s": {
+            "title": "End S",
+            "type": "number"
+          },
+          "lecture_id": {
+            "format": "uuid",
+            "title": "Lecture Id",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "segment_id": {
+            "title": "Segment Id",
+            "type": "string"
+          },
+          "slide_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slide Title"
+          },
+          "start_s": {
+            "title": "Start S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lecture_id",
+          "segment_id",
+          "start_s",
+          "end_s",
+          "slide_title",
+          "chapter",
+          "score"
+        ],
+        "title": "SourceOut",
+        "type": "object"
+      },
       "StageInfo": {
         "properties": {
           "cached": {
@@ -769,6 +1243,88 @@
           "quiz"
         ],
         "title": "StudyNotes",
+        "type": "object"
+      },
+      "ThreadDetail": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lecture_id": {
+            "format": "uuid",
+            "title": "Lecture Id",
+            "type": "string"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageOut"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "lecture_id",
+          "title",
+          "created_at",
+          "updated_at",
+          "messages"
+        ],
+        "title": "ThreadDetail",
+        "type": "object"
+      },
+      "ThreadOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lecture_id": {
+            "format": "uuid",
+            "title": "Lecture Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "lecture_id",
+          "title",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ThreadOut",
         "type": "object"
       },
       "TimeSpan": {
@@ -990,6 +1546,48 @@
         ]
       }
     },
+    "/v1/feedback": {
+      "post": {
+        "description": "Rate an answer. Rating it again replaces the earlier rating.",
+        "operationId": "feedback_v1_feedback_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Feedback",
+        "tags": [
+          "qa"
+        ]
+      }
+    },
     "/v1/lectures": {
       "get": {
         "operationId": "list_lectures_v1_lectures_get",
@@ -1118,6 +1716,60 @@
         "summary": "Get Lecture",
         "tags": [
           "lectures"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/ask": {
+      "post": {
+        "description": "Answer a question from the lecture. The question and answer are saved in a thread; send\nits `thread_id` to ask a follow-up. An answer the client disconnects from isn't saved.",
+        "operationId": "ask_v1_lectures__lecture_id__ask_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskEvent"
+                }
+              }
+            },
+            "description": "Server-sent events. Each `data:` line is an AskEvent as JSON: start, sources, the answer in deltas, then done (or error)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask",
+        "tags": [
+          "qa"
         ]
       }
     },
@@ -1435,6 +2087,53 @@
         ]
       }
     },
+    "/v1/lectures/{lecture_id}/threads": {
+      "get": {
+        "operationId": "list_threads_v1_lectures__lecture_id__threads_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ThreadOut"
+                  },
+                  "title": "Response List Threads V1 Lectures  Lecture Id  Threads Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Threads",
+        "tags": [
+          "qa"
+        ]
+      }
+    },
     "/v1/lectures/{lecture_id}/timeline": {
       "get": {
         "operationId": "timeline_v1_lectures__lecture_id__timeline_get",
@@ -1624,6 +2323,49 @@
         "summary": "Search",
         "tags": [
           "search"
+        ]
+      }
+    },
+    "/v1/threads/{thread_id}": {
+      "get": {
+        "operationId": "get_thread_v1_threads__thread_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Thread",
+        "tags": [
+          "qa"
         ]
       }
     }

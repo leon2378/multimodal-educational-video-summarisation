@@ -37,15 +37,19 @@ export function TimeButton({ seconds, onSeek }: { seconds: number; onSeek: (t: n
   );
 }
 
-/** LaTeX from the notes, rendered by KaTeX. The LaTeX comes from an LLM reading slides, so it's
- *  untrusted: KaTeX escapes its input, and with `trust` off it refuses \href, \url and raw HTML. */
-export function Latex({ source }: { source: string }) {
+/** LaTeX from the notes or an answer, rendered by KaTeX. It comes from an LLM, so it's untrusted:
+ *  KaTeX escapes its input, and with `trust` off it refuses \href, \url and raw HTML. */
+export function Latex({ source, inline = false }: { source: string; inline?: boolean }) {
   const html = useMemo(
     () =>
-      katex.renderToString(source, { throwOnError: false, displayMode: true, trust: false }),
-    [source],
+      katex.renderToString(source, { throwOnError: false, displayMode: !inline, trust: false }),
+    [source, inline],
   );
-  return <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: html }} />;
+  return inline ? (
+    <span dangerouslySetInnerHTML={{ __html: html }} />
+  ) : (
+    <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: html }} />
+  );
 }
 
 export function Card({ title, children }: { title?: string; children: React.ReactNode }) {

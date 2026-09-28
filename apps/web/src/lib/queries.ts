@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 import { API_URL, type ProgressEvent, api, unwrap } from "./api";
 
 /** Every query for a lecture starts with ["lecture", id], so one invalidation refreshes it all. */
-const key = (id: string, ...rest: string[]) => ["lecture", id, ...rest];
+export const lectureKey = (id: string, ...rest: string[]) => ["lecture", id, ...rest];
+const key = lectureKey;
 const path = (id: string) => ({ params: { path: { lecture_id: id } } });
 
 export function useLectures() {
@@ -66,6 +67,25 @@ export function useSearch(id: string, query: string) {
       unwrap(await api.GET("/v1/search", { params: { query: { q: query, lecture_id: [id], limit: 6 } } })),
     enabled: query.length > 0,
     staleTime: Infinity,
+  });
+}
+
+/** The lecture's Q&A threads, most recent first. */
+export function useThreads(id: string) {
+  return useQuery({
+    queryKey: key(id, "threads"),
+    queryFn: async () => unwrap(await api.GET("/v1/lectures/{lecture_id}/threads", path(id))),
+  });
+}
+
+export const threadKey = (threadId: string | null) => ["thread", threadId];
+
+export function useThread(threadId: string | null) {
+  return useQuery({
+    queryKey: threadKey(threadId),
+    queryFn: async () =>
+      unwrap(await api.GET("/v1/threads/{thread_id}", { params: { path: { thread_id: threadId ?? "" } } })),
+    enabled: threadId !== null,
   });
 }
 

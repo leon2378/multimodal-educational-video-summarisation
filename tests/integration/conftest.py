@@ -19,18 +19,26 @@ from temporalio.client import Client
 from testcontainers.community.postgres import PostgresContainer
 from testcontainers.core.container import DockerContainer
 
-from lecture_api.deps import get_searcher
+from lecture_api.deps import get_answerer, get_searcher
 from lecture_api.main import create_app
 from lecture_core.db import create_engine, create_sessionmaker
 from lecture_core.processing import QUEUE_CPU, QUEUE_GPU, QUEUE_LLM
 from lecture_core.settings import Settings
 from lecture_core.storage import ObjectStorage
 from lecture_llm.agents import LectureLLM, Prompts
+from lecture_llm.qa import AnswerLLM, QAPrompts
 from lecture_pipeline.temporal.activities import PipelineActivities, Resources, SearchResources
 from lecture_pipeline.temporal.worker import build_workers, connect
 from lecture_rag.index import SearchIndex
 from lecture_rag.search import Searcher
-from tests.unit.fakes import FakeDense, FakeLLM, FakeReranker, FakeSparse, FakeTranscriber
+from tests.unit.fakes import (
+    FakeDense,
+    FakeLLM,
+    FakeQA,
+    FakeReranker,
+    FakeSparse,
+    FakeTranscriber,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # Keep these in step with infra/compose.yaml.
@@ -117,12 +125,21 @@ def workers(
 
 
 @pytest.fixture
-def processing_client(processing_settings: Settings, workers: None) -> Iterator[TestClient]:
+def fake_qa() -> FakeQA:
+    return FakeQA()
+
+
+@pytest.fixture
+def processing_client(
+    processing_settings: Settings, workers: None, fake_qa: FakeQA
+) -> Iterator[TestClient]:
     app = create_app(processing_settings)
     index = _search_index(processing_settings)
     app.dependency_overrides[get_searcher] = lambda: Searcher(
         index, FakeDense(), FakeSparse(), FakeReranker()
     )
+    answerer = AnswerLLM(fake_qa.model, QAPrompts.load(REPO_ROOT / "prompts" / "qa"))
+    app.dependency_overrides[get_answerer] = lambda: answerer
     with TestClient(app) as client:
         yield client
     index.close()
