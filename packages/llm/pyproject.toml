@@ -1,0 +1,16 @@
+[project]
+name = "lecture-llm"
+version = "0.1.0"
+description = "LLM agents (slide reading, chapters, notes) behind Pydantic AI, with usage tracking."
+requires-python = ">=3.12"
+dependencies = [
+    "lecture-core",
+    "pydantic-ai-slim[google]>=2.51",
+]
+
+[tool.uv.sources]
+lecture-core = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13"]
+build-backend = "uv_build"

@@ -4,7 +4,13 @@ from dataclasses import replace
 import pytest
 from pydantic import BaseModel
 
-from lecture_pipeline.cache import StageCache, StageSpec, artifact_path, cache_key
+from lecture_pipeline.cache import (
+    StageCache,
+    StageSpec,
+    artifact_path,
+    cache_key,
+    files_prefix,
+)
 
 ASR = StageSpec(
     name="asr",
@@ -58,7 +64,7 @@ def test_run_computes_once_then_hits_cache() -> None:
     cache = StageCache(InMemoryStore())
     calls: list[str] = []
 
-    def transcribe() -> Transcript:
+    def transcribe(key: str) -> Transcript:
         calls.append("called")
         return Transcript(text="today we cover dynamic programming")
 
@@ -76,7 +82,7 @@ def test_get_misses_before_run() -> None:
 
 def test_artifact_records_provenance() -> None:
     store = InMemoryStore()
-    result = StageCache(store).run(ASR, INPUTS, Transcript, lambda: Transcript(text="hi"))
+    result = StageCache(store).run(ASR, INPUTS, Transcript, lambda _key: Transcript(text="hi"))
 
     stored = json.loads(store.objects[artifact_path("asr", result.key)])
 
@@ -85,3 +91,18 @@ def test_artifact_records_provenance() -> None:
     assert stored["params"] == dict(ASR.params)
     assert stored["inputs"] == INPUTS
     assert stored["output"] == {"text": "hi"}
+
+
+def test_compute_gets_the_key_for_its_files() -> None:
+    store = InMemoryStore()
+    seen: list[str] = []
+
+    def compute(key: str) -> Transcript:
+        seen.append(key)
+        store.put_bytes(f"{files_prefix('asr', key)}/audio.flac", b"fLaC", "audio/flac")
+        return Transcript(text="hi")
+
+    result = StageCache(store).run(ASR, INPUTS, Transcript, compute)
+
+    assert seen == [result.key]
+    assert store.objects[f"artifacts/asr/{result.key}/audio.flac"] == b"fLaC"

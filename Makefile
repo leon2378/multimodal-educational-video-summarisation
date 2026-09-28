@@ -3,7 +3,7 @@ COMPOSE := docker compose -f infra/compose.yaml
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app down reset migrate revision api test test-unit lint fmt typecheck audit check
+.PHONY: help install up app down reset migrate revision api process test test-unit lint fmt typecheck audit check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -36,6 +36,10 @@ revision: ## Generate a migration from model changes: make revision m="add chapt
 api: ## Run the API on the host with auto-reload (http://localhost:8000/docs)
 	uv run uvicorn lecture_api.main:create_app --factory --reload --port 8000
 
+process: ## Run the pipeline on a video, speech recognition on the GPU: make process video=... title=...
+	@test -n "$(video)" || (echo 'usage: make process video=data/lectures/lecture.mp4 title="Title"' && exit 1)
+	HOST_UID=$$(id -u) HOST_GID=$$(id -g) $(COMPOSE) --profile gpu run --rm --build pipeline "$(video)" --title "$(title)"
+
 test: ## Run all tests (integration tests need Docker)
 	uv run pytest
 
@@ -55,7 +59,7 @@ typecheck: ## Type-check with mypy
 
 audit: ## Check locked dependencies for known vulnerabilities
 	@req=$$(mktemp) && \
-	uv export --locked --no-emit-workspace --format requirements-txt --output-file $$req -q && \
+	uv export --locked --all-packages --all-extras --no-emit-workspace --format requirements-txt --output-file $$req -q && \
 	uv run pip-audit --disable-pip --requirement $$req; status=$$?; rm -f $$req; exit $$status
 
 check: lint typecheck test ## What CI runs, minus the image build

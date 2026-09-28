@@ -9,12 +9,12 @@ old one "Superseded by NNNN" instead of editing it.
 | [0001](0001-stage-cache.md) | Content-addressed stage cache in object storage | Accepted |
 | [0002](0002-temporal-for-orchestration.md) | Temporal for pipeline orchestration, from Phase 2 | Accepted |
 | [0003](0003-seaweedfs-for-local-object-storage.md) | SeaweedFS as the local S3-compatible store | Accepted |
+| [0004](0004-hosted-llms-through-pydantic-ai.md) | Hosted LLMs through Pydantic AI, Gemini's free tier for development | Accepted |
 
 ## Still to write
 
 | Decision | Write it by |
 |---|---|
-| Hosted vs self-hosted models (and which provider for the vision LLM) | Phase 2 |
 | Qdrant vs pgvector | Phase 3, with Recall@5 numbers for both if you can |
 | YOLO26 (AGPL-3.0) vs RF-DETR (Apache-2.0) | Phase 5 |
 | Scale-out path: Kubernetes, Temporal Cloud, autoscaled GPU workers | Phase 6 |

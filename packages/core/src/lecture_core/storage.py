@@ -1,18 +1,17 @@
-"""S3-compatible object storage: SeaweedFS locally, S3 or R2 in the cloud.
+"""Object storage: S3-compatible (SeaweedFS locally, S3 or R2 in the cloud), or a local
+directory for running the pipeline without the stack.
 
-Key layout (docs/blueprint.md, section 8):
-    raw/{lecture}/source.{ext}           uploaded original
-    media/{lecture}/hls/...              playback renditions        (Phase 2)
-    media/{lecture}/audio.flac           16 kHz mono audio          (Phase 2)
-    frames/{lecture}/...                 sampled frames             (Phase 2)
-    slides/{lecture}/{n}.jpg             unique slide images        (Phase 2)
-    artifacts/{stage}/{cache_key}.json   stage cache entries
+Key layout:
+    raw/{lecture}/source.{ext}             uploaded original
+    artifacts/{stage}/{cache_key}.json     stage cache entries (ADR 0001)
+    artifacts/{stage}/{cache_key}/...      files a stage writes: audio, slide images
+    media/{lecture}/hls/...                playback renditions (later)
 """
 
 import re
 import uuid
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import boto3
@@ -111,3 +110,30 @@ def _make_client(settings: Settings, endpoint_url: str | None) -> "S3Client":
 
 def _is_not_found(error: ClientError) -> bool:
     return error.response.get("Error", {}).get("Code") in _NOT_FOUND_CODES
+
+
+class LocalStorage:
+    """Same interface as ObjectStorage, backed by a directory. For local pipeline runs and tests."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def get_bytes(self, key: str) -> bytes | None:
+        path = self._path(key)
+        return path.read_bytes() if path.is_file() else None
+
+    def put_bytes(
+        self, key: str, data: bytes, content_type: str = "application/octet-stream"
+    ) -> None:
+        path = self._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Write then rename, so a crash never leaves a half-written file under the real name.
+        partial = path.with_name(path.name + ".partial")
+        partial.write_bytes(data)
+        partial.replace(path)
+
+    def _path(self, key: str) -> Path:
+        parts = PurePosixPath(key).parts
+        if not parts or any(part in {"..", "/"} for part in parts):
+            raise ValueError(f"unsafe storage key: {key!r}")
+        return self.root.joinpath(*parts)

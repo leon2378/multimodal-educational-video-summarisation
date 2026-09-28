@@ -39,10 +39,10 @@ from lecture_core.notes import (
     StudyNotes,
     format_timestamp,
     parse_timestamp,
+    to_markdown,
 )
 from lecture_evals.checks import NotesChecks, check_notes
 from lecture_evals.pricing import Price, TokenUsage, cost_usd, price_for
-from lecture_evals.report import notes_to_markdown
 
 DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_PROMPT = Path("prompts/baseline-gemini/v1.md")
@@ -233,7 +233,7 @@ def run_baseline(client: genai.Client, options: Options) -> tuple[Path, Baseline
         notes=notes,
     )
     (run_dir / "result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
-    (run_dir / "notes.md").write_text(notes_to_markdown(notes, options.title), encoding="utf-8")
+    (run_dir / "notes.md").write_text(to_markdown(notes, options.title), encoding="utf-8")
     return run_dir, result
 
 
@@ -355,6 +355,7 @@ def _generate(client: genai.Client, file: types.File, prompt: str, options: Opti
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
+    contents: list[types.PartUnionDict] = [video, prompt]
     started = time.monotonic()
     first_token_s: float | None = None
     parts: list[str] = []
@@ -365,7 +366,7 @@ def _generate(client: genai.Client, file: types.File, prompt: str, options: Opti
     try:
         # Streaming keeps the connection busy during long generations over long videos.
         for chunk in client.models.generate_content_stream(
-            model=options.model, contents=[video, prompt], config=config
+            model=options.model, contents=contents, config=config
         ):
             if text := _text(chunk):
                 if first_token_s is None:

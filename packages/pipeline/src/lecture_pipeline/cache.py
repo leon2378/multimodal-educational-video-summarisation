@@ -46,6 +46,11 @@ def artifact_path(stage: str, key: str) -> str:
     return f"artifacts/{stage}/{key}.json"
 
 
+def files_prefix(stage: str, key: str) -> str:
+    """Where a stage keeps the files that belong to one cache entry."""
+    return f"artifacts/{stage}/{key}"
+
+
 class ArtifactStore(Protocol):
     def get_bytes(self, key: str) -> bytes | None: ...
 
@@ -86,9 +91,13 @@ class StageCache:
         spec: StageSpec,
         inputs: Mapping[str, str],
         output_type: type[T],
-        compute: Callable[[], T],
+        compute: Callable[[str], T],
     ) -> StageResult[T]:
         """Return the cached output, or compute and store it.
+
+        `compute` gets the cache key, so a stage that writes files (audio, slide images) can
+        put them under `files_prefix(stage, key)`. The JSON envelope is written last and marks
+        the entry complete: after a crash mid-stage the files are simply overwritten next time.
 
         Two workers racing on the same key both compute and write the same artifact.
         That wastes work but is safe, since the output depends only on the key.
@@ -96,7 +105,7 @@ class StageCache:
         key = cache_key(spec, inputs)
         if (hit := self._read(spec, key, output_type)) is not None:
             return hit
-        output = compute()
+        output = compute(key)
         envelope = ArtifactEnvelope(
             key=key,
             stage=spec.name,

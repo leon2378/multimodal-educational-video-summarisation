@@ -1,11 +1,28 @@
 [project]
 name = "lecture-pipeline"
 version = "0.1.0"
-description = "Pipeline stages and the content-addressed stage cache. Temporal workflows arrive in Phase 2."
+description = "Pipeline stages, the content-addressed stage cache, and the local runner."
 requires-python = ">=3.12"
 dependencies = [
+    "lecture-core",
+    "lecture-llm",
+    "lecture-perception",
     "pydantic>=2.13",
 ]
+
+[project.optional-dependencies]
+# Speech recognition on CPU.
+asr = ["lecture-perception[asr]"]
+# Speech recognition on an NVIDIA GPU (the GPU worker image).
+gpu = ["lecture-perception[asr,cuda]"]
+
+[project.scripts]
+lecture-process = "lecture_pipeline.cli:main"
+
+[tool.uv.sources]
+lecture-core = { workspace = true }
+lecture-llm = { workspace = true }
+lecture-perception = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13"]

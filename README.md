@@ -3,14 +3,18 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phase 1 of 6 (foundation).** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phase 2 of 6 in progress: the pipeline stages (2a) run end to end.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
 
-- A uv workspace with four packages: `apps/api` (FastAPI), `packages/core` (settings, models,
-  storage, the study-notes format), `packages/pipeline` (the content-addressed stage cache), and
-  `evals` (baselines and scoring).
+- A uv workspace: `apps/api` (FastAPI), `packages/core` (settings, models, storage, the timeline
+  and study-notes formats), `packages/perception` (video, audio, slide detection, speech
+  recognition), `packages/llm` (Pydantic AI agents), `packages/pipeline` (stages, stage cache,
+  local runner) and `evals` (baselines and scoring).
+- The processing pipeline: speech recognition, slide detection, a vision LLM reading each slide, a
+  time-aligned timeline, then chapters and study notes with timestamps
+  ([below](#processing-a-lecture)).
 - A single-call Gemini baseline that summarises a lecture video and records tokens, cost and
   timings ([below](#gemini-baseline)).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
@@ -63,6 +67,24 @@ To browse stored files, open the SeaweedFS filer UI at http://localhost:8888.
 To run the API in Docker instead of on the host, use `make app`. It builds the image, runs
 migrations in a one-off container, and starts the API on port 8000.
 
+## Processing a lecture
+
+`make process` runs the whole pipeline on a local video, with speech recognition on your NVIDIA
+GPU inside Docker. It needs the model in `data/models/faster-whisper-large-v3-turbo` (see
+[data/models](#data-and-licensing)) and `GEMINI_API_KEY` in `.env`:
+
+```bash
+make process video=data/lectures/MIT6_0001F16_Lecture_10_300k.mp4 title="Understanding Program Efficiency, Part 1"
+```
+
+Each stage is cached, so running it again only redoes what changed: edit a prompt in
+`prompts/pipeline/` and only the LLM stages re-run. Output goes to
+`data/pipeline-runs/<video>/<time>/`: `notes.md` to read, and `result.json` with stage timings,
+cache hits, LLM usage and the notes in the same format as the Gemini baseline. Without a GPU,
+`uv sync --extra asr` (pipeline package) and `uv run lecture-process ...` runs on the CPU.
+
+How it works, and its known limitations, are in [docs/architecture.md](docs/architecture.md).
+
 ## Gemini baseline
 
 `gemini-baseline` sends a whole lecture video to Gemini in one call and asks for the study notes
@@ -102,6 +124,22 @@ At low resolution a one-hour lecture is roughly 360k input tokens, so a run on
 `gemini-3.8-flash` costs about $0.30. That model's prices double on 1 January 2027. Uploads are
 reused for 48 hours, so repeat runs on the same video skip the upload.
 
+## Results so far
+
+One lecture so far: MIT 6.0001 Lecture 10 (51 min), scored the same way for both producers.
+
+| | Gemini, one call | Pipeline |
+|---|---|---|
+| Notes | 8 chapters, 8 concepts, 3 formulas, 9 quiz | 5 chapters, 13 concepts, 12 formulas, 9 quiz |
+| Concept citations within 10 s of where the captions say the term | 6 of 8, median 1.7 s | 11 of 13, median 0.5 s |
+| API cost | $0.21 (`gemini-3.8-flash`) | about $0.04 (`gemini-3.5-flash-lite`, paid-tier prices) |
+| Time | 135 s | 136 s from scratch, 15 s when only the notes change |
+| Speech recognition | | 65 s on an RTX 3060 Laptop (6 GB): 47× real time, 2.3 GB VRAM peak |
+
+Caveats: one lecture, two different Gemini models, and a rough citation measure (caption text
+matching). Whether the notes are faithful to the lecture isn't scored yet; that's the Phase 4
+LLM judge.
+
 ## Commands
 
 | Command | What it does |
@@ -121,14 +159,16 @@ reused for 48 hours, so repeat runs on the same video skip the upload.
 ```
 apps/api/                  FastAPI service (routes, schemas, dependencies)
 packages/core/             settings, SQLAlchemy models, Alembic migrations, S3 client
-packages/pipeline/         stage cache; stages and Temporal workflows from Phase 2
+packages/perception/       PyAV media reading, slide detection, speech recognition
+packages/llm/              Pydantic AI agents: read slides, chapters, notes
+packages/pipeline/         stages, stage cache, timeline, local runner (lecture-process)
 evals/                     baselines (Gemini) now; eval suites and datasets from Phase 4
-prompts/                   versioned prompts
+prompts/                   versioned prompts (pipeline and baseline)
 data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
 tests/integration/         real Postgres and SeaweedFS via testcontainers
 infra/compose.yaml         local stack (`app` profile adds the API)
-infra/docker/              Dockerfiles
+infra/docker/              Dockerfiles: API, GPU worker
 infra/seaweedfs/s3.json    dev-only S3 credentials
 docs/                      blueprint, architecture, ADRs
 ```
@@ -159,19 +199,33 @@ blueprint in four places:
 
 - [x] **Phase 1, foundation**: workspace, Compose, API skeleton, migrations, stage cache, CI, first ADRs
 - [ ] **Before Phase 2** (a few evenings):
-  - [ ] Pick 3 slide-based MIT OCW lectures that have captions and slide PDFs. Many OCW lectures
+  - [ ] Pick 3 slide-based MIT OCW lectures that have captions and slide PDFs (1 so far:
+        6.0001 Lecture 10). Many OCW lectures
         are chalkboard-only, which slide detection won't handle.
-  - [ ] Run the single-call Gemini baseline on them to set the bar the pipeline has to beat.
-  - [ ] Check faster-whisper int8 on the GPU inside Docker in WSL2, and note peak VRAM.
+  - [x] Run the single-call Gemini baseline on them to set the bar the pipeline has to beat
+        (static mode on Lecture 10; agentic mode still to do).
+  - [x] Check faster-whisper int8 on the GPU inside Docker, and note peak VRAM.
   - [ ] Draft 30 golden Q&A questions, so Phase 3 retrieval choices can be measured.
-- [ ] **Phase 2, vertical slice**: ingest → ASR → slide changes → vision LLM → timeline → chapter
-      summaries → lecture page
+- [ ] **Phase 2, vertical slice**
+  - [x] 2a: pipeline stages (ASR, slide detection, vision LLM, timeline, chapters, notes), stage
+        cache, GPU worker image, local runner
+  - [ ] 2b: Temporal workers, process/status/results API, new tables
+  - [ ] 2c: web lecture page (player, chapters, synced transcript, slides)
 - [ ] **Phase 3, RAG Q&A**: hybrid search, reranking, streamed cited answers
 - [ ] **Phase 4, evals and observability**: eval suites, Langfuse, OpenTelemetry, CI eval gate
 - [ ] **Phase 5, CV and optimisation**: YOLO26 fine-tune, OCR-vs-VLM routing, ONNX/TensorRT/int8
 - [ ] **Phase 6, ship**: auth, quotas, Terraform and Modal deploy, results write-up
 
 ## Data and licensing
+
+The speech model isn't in git. Download it, pinned to the revision the code expects, with:
+
+```bash
+mkdir -p data/models/faster-whisper-large-v3-turbo && cd data/models/faster-whisper-large-v3-turbo && for f in config.json preprocessor_config.json tokenizer.json vocabulary.json model.bin; do curl -fLO "https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo/resolve/0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf/$f"; done
+```
+
+`model.bin` should have SHA-256 `e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da`
+(1.62 GB, MIT licence).
 
 Lecture videos never go in git (`.gitignore` blocks common video formats). MIT OCW material is
 CC BY-NC-SA 4.0: record the licence and attribution on each lecture (the API has fields for both),

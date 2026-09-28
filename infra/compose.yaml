@@ -69,6 +69,32 @@ services:
       timeout: 3s
       retries: 20
 
+  # One-off pipeline runs on the GPU: `make process video=... title=...`. Becomes the GPU
+  # Temporal worker in Phase 2b.
+  pipeline:
+    profiles: [gpu]
+    build:
+      context: ..
+      dockerfile: infra/docker/gpu-worker.Dockerfile
+    image: lecture-summariser/gpu-worker:dev
+    # Your host user, so files written to data/ stay yours (set by the Makefile).
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      WHISPER_DEVICE: cuda
+    volumes:
+      - ../data:/app/data
+      - ../prompts:/app/prompts:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
 volumes:
   postgres-data:
   seaweedfs-data:

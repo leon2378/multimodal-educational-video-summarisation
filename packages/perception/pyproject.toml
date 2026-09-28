@@ -1,0 +1,28 @@
+[project]
+name = "lecture-perception"
+version = "0.1.0"
+description = "Media decoding, slide-change detection, and speech recognition adapters."
+requires-python = ">=3.12"
+dependencies = [
+    "av>=18.1",
+    "lecture-core",
+    "numpy>=2.5",
+    "pillow>=12.3",
+]
+
+[project.optional-dependencies]
+asr = [
+    "faster-whisper>=1.2.1",
+]
+# CUDA 12 libraries that CTranslate2 loads at runtime (Linux only: the GPU worker image).
+cuda = [
+    "nvidia-cublas-cu12>=12.9 ; sys_platform == 'linux'",
+    "nvidia-cudnn-cu12>=9.26,<10 ; sys_platform == 'linux'",
+]
+
+[tool.uv.sources]
+lecture-core = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13"]
+build-backend = "uv_build"

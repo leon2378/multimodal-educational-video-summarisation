@@ -60,7 +60,8 @@ jobs:
         with:
           version: "0.12.19"
           enable-cache: true
-      - run: uv export --locked --no-emit-workspace --format requirements-txt --output-file "$RUNNER_TEMP/requirements.txt"
+      # Every workspace package with every extra: the GPU image ships faster-whisper and CUDA.
+      - run: uv export --locked --all-packages --all-extras --no-emit-workspace --format requirements-txt --output-file "$RUNNER_TEMP/requirements.txt"
       - run: uv run --locked pip-audit --disable-pip --requirement "$RUNNER_TEMP/requirements.txt"
 
   image:

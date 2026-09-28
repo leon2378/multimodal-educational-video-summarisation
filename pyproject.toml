@@ -8,6 +8,8 @@ dependencies = [
     "lecture-api",
     "lecture-core",
     "lecture-evals",
+    "lecture-llm",
+    "lecture-perception",
     "lecture-pipeline",
 ]
 
@@ -31,6 +33,8 @@ members = ["apps/api", "evals", "packages/*"]
 lecture-api = { workspace = true }
 lecture-core = { workspace = true }
 lecture-evals = { workspace = true }
+lecture-llm = { workspace = true }
+lecture-perception = { workspace = true }
 lecture-pipeline = { workspace = true }
 
 [tool.ruff]
@@ -55,18 +59,19 @@ select = [
 "tests/**" = ["S101"]  # assert is how pytest works
 
 [tool.ruff.lint.isort]
-known-first-party = ["lecture_api", "lecture_core", "lecture_evals", "lecture_pipeline"]
+known-first-party = ["lecture_api", "lecture_core", "lecture_evals", "lecture_llm", "lecture_perception", "lecture_pipeline"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-mypy_path = ["apps/api/src", "evals/src", "packages/core/src", "packages/pipeline/src"]
-files = ["apps/api/src", "evals/src", "packages/core/src", "packages/pipeline/src", "tests"]
+mypy_path = ["apps/api/src", "evals/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src"]
+files = ["apps/api/src", "evals/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "tests"]
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["docker.*", "testcontainers.*"]
+# Optional extras, not installed in the dev environment or CI.
+module = ["ctranslate2.*", "docker.*", "faster_whisper.*", "testcontainers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

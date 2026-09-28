@@ -30,7 +30,9 @@ def test_stage_cache_round_trips_through_object_storage(settings: Settings) -> N
     spec = StageSpec(name="chapters", version="1", model="gemini-flash-lite", params={"max": 12})
     inputs = {"timeline": "sha256:9a7e"}
 
-    first = cache.run(spec, inputs, Chapters, lambda: Chapters(titles=["Intro", "Memoisation"]))
+    first = cache.run(
+        spec, inputs, Chapters, lambda _key: Chapters(titles=["Intro", "Memoisation"])
+    )
     second = cache.get(spec, inputs, Chapters)
 
     assert not first.cached
