@@ -119,6 +119,8 @@ class RunRecord(BaseModel):
     price: Price | None
     cost_usd: float | None
     finish_reason: str | None
+    # More than 1 when Gemini returned a transient error (e.g. 503 high demand) and we retried.
+    generation_attempts: int
     sdk_version: str
 
 
@@ -143,6 +145,8 @@ class Options:
     out_root: Path = DEFAULT_OUT
     price_override: Price | None = None
     poll_s: float = 5.0
+    # First wait before retrying a failed generation; doubles each time.
+    retry_delay_s: float = 15.0
 
 
 @dataclass(frozen=True)
@@ -174,7 +178,7 @@ def run_baseline(client: genai.Client, options: Options) -> tuple[Path, Baseline
     context = f"\n\nLecture title: {options.title}"
     if duration_s is not None:
         context += f"\nVideo length: {format_timestamp(duration_s)}"
-    generation = _generate(client, file, prompt + context, options)
+    generation, attempts = _generate_with_retries(client, file, prompt + context, options)
 
     run_dir = (
         options.out_root
@@ -220,6 +224,7 @@ def run_baseline(client: genai.Client, options: Options) -> tuple[Path, Baseline
             price=price,
             cost_usd=cost_usd(generation.usage, price) if price else None,
             finish_reason=generation.finish_reason,
+            generation_attempts=attempts,
             sdk_version=version("google-genai"),
         ),
         checks=check_notes(notes, duration_s),
@@ -305,6 +310,30 @@ def _wait_until_active(
     return file
 
 
+_TRANSIENT = {429, 500, 502, 503, 504}
+_GENERATION_ATTEMPTS = 4
+
+
+def _generate_with_retries(
+    client: genai.Client, file: types.File, prompt: str, options: Options
+) -> tuple[Generation, int]:
+    """The SDK retries a request that fails outright, but not a stream that fails partway
+    (Gemini can return 503 "high demand" mid-stream), so retry the whole generation."""
+    for attempt in range(1, _GENERATION_ATTEMPTS + 1):
+        try:
+            return _generate(client, file, prompt, options), attempt
+        except errors.APIError as error:
+            if error.code not in _TRANSIENT or attempt == _GENERATION_ATTEMPTS:
+                raise
+            delay = options.retry_delay_s * 2 ** (attempt - 1)
+            print(
+                f"Gemini error {error.code} ({error.status}); retrying in {delay:.0f}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
 def _generate(client: genai.Client, file: types.File, prompt: str, options: Options) -> Generation:
     if file.uri is None:
         raise RuntimeError("uploaded file has no URI")
@@ -333,10 +362,10 @@ def _generate(client: genai.Client, file: types.File, prompt: str, options: Opti
     for chunk in client.models.generate_content_stream(
         model=options.model, contents=[video, prompt], config=config
     ):
-        if chunk.text:
+        if text := _text(chunk):
             if first_token_s is None:
                 first_token_s = time.monotonic() - started
-            parts.append(chunk.text)
+            parts.append(text)
         last = chunk
     total_s = time.monotonic() - started
 
@@ -351,6 +380,15 @@ def _generate(client: genai.Client, file: types.File, prompt: str, options: Opti
         first_token_s=first_token_s,
         total_s=total_s,
     )
+
+
+def _text(chunk: types.GenerateContentResponse) -> str:
+    """The answer's text parts only. In agentic mode the stream also carries the model's own
+    tool calls (moving around the video), which `chunk.text` would warn about on every chunk."""
+    if not chunk.candidates or chunk.candidates[0].content is None:
+        return ""
+    parts = chunk.candidates[0].content.parts or []
+    return "".join(part.text for part in parts if part.text and not part.thought)
 
 
 def _usage(meta: types.GenerateContentResponseUsageMetadata | None) -> TokenUsage:

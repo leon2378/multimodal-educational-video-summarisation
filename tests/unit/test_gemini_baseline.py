@@ -70,13 +70,19 @@ class FakeModels:
     def __init__(self, output: dict[str, Any]) -> None:
         self.text = json.dumps(output)
         self.calls: list[dict[str, Any]] = []
+        # Raised partway through the stream, one per call, like Gemini's mid-stream 503s.
+        self.failures: list[errors.APIError] = []
+        # Streamed before the text, like agentic mode's server-side tool calls.
+        self.extra_parts: list[types.Part] = []
 
     def generate_content_stream(
         self, *, model: str, contents: list[Any], config: types.GenerateContentConfig
     ) -> Iterator[types.GenerateContentResponse]:
         self.calls.append({"model": model, "contents": contents, "config": config})
         half = len(self.text) // 2
-        yield _chunk(self.text[:half])
+        yield _chunk(self.text[:half], extra_parts=self.extra_parts)
+        if self.failures:
+            raise self.failures.pop(0)
         yield _chunk(
             self.text[half:],
             finish_reason=types.FinishReason.STOP,
@@ -101,11 +107,13 @@ def _chunk(
     text: str,
     finish_reason: types.FinishReason | None = None,
     usage: types.GenerateContentResponseUsageMetadata | None = None,
+    extra_parts: list[types.Part] | None = None,
 ) -> types.GenerateContentResponse:
+    parts = [*(extra_parts or []), types.Part(text=text)]
     return types.GenerateContentResponse(
         candidates=[
             types.Candidate(
-                content=types.Content(role="model", parts=[types.Part(text=text)]),
+                content=types.Content(role="model", parts=parts),
                 finish_reason=finish_reason,
             )
         ],
@@ -132,6 +140,7 @@ def options(tmp_path: Path) -> Options:
         out_root=tmp_path / "out",
         price_override=Price(input=0.75, output=3.75),
         poll_s=0,
+        retry_delay_s=0,
     )
 
 
@@ -271,3 +280,41 @@ def test_real_sdk_accepts_the_request(fake: SimpleNamespace, options: Options) -
     assert request["generationConfig"]["responseMimeType"] == "application/json"
     assert request["generationConfig"]["mediaResolution"] == "MEDIA_RESOLUTION_LOW"
     assert len(result.notes.chapters) == 2
+
+
+def test_mid_stream_503_retries_the_generation(fake: SimpleNamespace, options: Options) -> None:
+    fake.models.failures = [
+        errors.ServerError(503, {"error": {"message": "high demand", "status": "UNAVAILABLE"}})
+    ]
+
+    _, result = run_baseline(cast(genai.Client, fake), options)
+
+    assert len(fake.models.calls) == 2
+    assert result.run.generation_attempts == 2
+    assert len(result.notes.chapters) == 2  # nothing left over from the failed attempt
+
+
+def test_client_errors_are_not_retried(fake: SimpleNamespace, options: Options) -> None:
+    fake.models.failures = [errors.ClientError(400, {"error": {"message": "bad request"}})]
+
+    with pytest.raises(errors.ClientError):
+        run_baseline(cast(genai.Client, fake), options)
+    assert len(fake.models.calls) == 1
+
+
+def test_agentic_tool_calls_are_skipped_quietly(
+    fake: SimpleNamespace,
+    options: Options,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The SDK logs its non-text warning once per process; re-arm it so this test can see it.
+    monkeypatch.setattr(types, "_response_text_non_text_warning_logged", False)
+    fake.models.extra_parts = [
+        types.Part(tool_call=types.ToolCall(id="seek-1", args={"start": "05:00"}))
+    ]
+
+    _, result = run_baseline(cast(genai.Client, fake), replace(options, processing="agentic"))
+
+    assert len(result.notes.chapters) == 2
+    assert "non-text parts" not in caplog.text
