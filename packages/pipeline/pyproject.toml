@@ -7,6 +7,7 @@ dependencies = [
     "lecture-core",
     "lecture-llm",
     "lecture-perception",
+    "lecture-rag",
     "pydantic>=2.13",
     "temporalio>=1.33",
 ]
@@ -25,6 +26,7 @@ lecture-worker = "lecture_pipeline.temporal.worker:main"
 lecture-core = { workspace = true }
 lecture-llm = { workspace = true }
 lecture-perception = { workspace = true }
+lecture-rag = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13"]

@@ -43,6 +43,7 @@ from lecture_pipeline.temporal.contracts import (
     AssembleInput,
     DraftInput,
     FailInput,
+    IndexInput,
     IngestOutcome,
     PersistInput,
     SlidesInput,
@@ -50,6 +51,15 @@ from lecture_pipeline.temporal.contracts import (
     StageRef,
     TimelineInput,
 )
+from lecture_rag.encoders import ChunkEmbeddings, DenseEncoder, SparseEncoder
+from lecture_rag.index import SearchIndex
+
+
+@dataclass
+class SearchResources:
+    index: SearchIndex
+    dense: DenseEncoder
+    sparse: SparseEncoder
 
 
 @dataclass
@@ -62,6 +72,7 @@ class Resources:
     sessionmaker: async_sessionmaker[AsyncSession] | None = None
     llm: LectureLLM | None = None
     transcriber: Transcriber | None = None
+    search: SearchResources | None = None
 
 
 class PipelineActivities:
@@ -104,6 +115,24 @@ class PipelineActivities:
         timeline = self._load(request.timeline, Timeline)
         draft = self._load(request.draft, stages.NotesDraft)
         return _outcome("notes", lambda: stages.notes(self.ctx, timeline, draft))
+
+    @activity.defn(name="embed_segments")
+    def embed_segments(self, timeline: StageRef) -> StageOutcome:
+        search = self._search()
+        timeline_result = self._load(timeline, Timeline)
+        return _outcome(
+            "embed", lambda: stages.embed(self.ctx, timeline_result, search.dense, search.sparse)
+        )
+
+    @activity.defn(name="index_lecture")
+    def index_lecture(self, request: IndexInput) -> StageInfo:
+        """Replace the lecture's points in the search index. Not cached: it writes to Qdrant,
+        and it's quick."""
+        started = time.monotonic()
+        embeddings = self._load(request.embeddings, ChunkEmbeddings).output
+        notes = self._load(request.notes, stages.NotesResult).output.notes
+        self._search().index.replace_lecture(request.lecture_id, embeddings.chunks, notes.chapters)
+        return StageInfo(stage="index", seconds=time.monotonic() - started, cached=False)
 
     @activity.defn(name="persist_results")
     async def persist_results(self, request: PersistInput) -> None:
@@ -203,6 +232,11 @@ class PipelineActivities:
         if self.resources.llm is None:
             raise ApplicationError("this worker has no LLM configured", non_retryable=True)
         return self.resources.llm
+
+    def _search(self) -> SearchResources:
+        if self.resources.search is None:
+            raise ApplicationError("this worker has no search index", non_retryable=True)
+        return self.resources.search
 
     def _sessionmaker(self) -> async_sessionmaker[AsyncSession]:
         if self.resources.sessionmaker is None:

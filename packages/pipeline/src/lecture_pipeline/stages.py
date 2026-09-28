@@ -21,6 +21,8 @@ from lecture_perception.slides import DetectorConfig, detect_slides
 from lecture_pipeline.assemble import ChapterRange, assemble, chapter_ranges
 from lecture_pipeline.cache import ArtifactStore, StageCache, StageResult, StageSpec, files_prefix
 from lecture_pipeline.fuse import build_timeline
+from lecture_rag.chunks import CHUNKING_VERSION, build_chunks
+from lecture_rag.encoders import ChunkEmbeddings, DenseEncoder, SparseEncoder, embed_chunks
 
 
 @dataclass(frozen=True)
@@ -244,6 +246,24 @@ def notes(
         {"timeline": timeline.key, "draft": draft.key},
         NotesResult,
         compute,
+    )
+
+
+def embed(
+    ctx: Context, timeline: StageResult[Timeline], dense: DenseEncoder, sparse: SparseEncoder
+) -> StageResult[ChunkEmbeddings]:
+    """Dense and BM25 vectors for each segment's chunk, ready to index for search."""
+    spec = StageSpec(
+        "embed",
+        "1",
+        model=dense.model_id,
+        params={"sparse": sparse.model_id, "chunking": CHUNKING_VERSION},
+    )
+    return ctx.cache.run(
+        spec,
+        {"timeline": timeline.key},
+        ChunkEmbeddings,
+        lambda _key: embed_chunks(build_chunks(timeline.output), dense, sparse),
     )
 
 

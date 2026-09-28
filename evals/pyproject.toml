@@ -5,11 +5,13 @@ description = "Baselines and evaluation suites that score pipeline outputs."
 requires-python = ">=3.12"
 dependencies = [
     "google-genai>=2.25",
+    "httpx>=0.28",
     "lecture-core",
 ]
 
 [project.scripts]
 gemini-baseline = "lecture_evals.baselines.gemini:main"
+retrieval-eval = "lecture_evals.suites.retrieval:main"
 
 [tool.uv.sources]
 lecture-core = { workspace = true }

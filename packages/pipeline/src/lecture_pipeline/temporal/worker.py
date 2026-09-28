@@ -28,8 +28,9 @@ from lecture_llm.models import make_model
 from lecture_llm.settings import LLMSettings
 from lecture_perception.asr import FasterWhisperTranscriber, WhisperConfig
 from lecture_pipeline.settings import PipelineSettings
-from lecture_pipeline.temporal.activities import PipelineActivities, Resources
+from lecture_pipeline.temporal.activities import PipelineActivities, Resources, SearchResources
 from lecture_pipeline.temporal.workflow import ProcessLecture
+from lecture_rag.services import SearchServices
 
 QUEUES = (QUEUE_CPU, QUEUE_GPU, QUEUE_LLM)
 
@@ -50,6 +51,8 @@ def build_resources(queues: Sequence[str]) -> Resources:
     resources = Resources(storage=ObjectStorage(settings), media_dir=worker.worker_media_dir)
     if QUEUE_CPU in queues:
         resources.sessionmaker = create_sessionmaker(create_engine(settings))
+        search = SearchServices.from_settings(settings)
+        resources.search = SearchResources(search.index, search.dense, search.sparse)
     if QUEUE_LLM in queues:
         llm_settings = LLMSettings()
         resources.llm = LectureLLM(
@@ -87,6 +90,8 @@ def build_workers(
                     activities.detect_slides,
                     activities.build_timeline,
                     activities.assemble_notes,
+                    activities.embed_segments,
+                    activities.index_lecture,
                     activities.persist_results,
                     activities.mark_failed,
                 ],

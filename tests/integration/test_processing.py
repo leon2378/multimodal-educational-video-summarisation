@@ -1,7 +1,8 @@
 """Phase 2b end to end: upload through the API, process with Temporal workers, read results.
 
 The workers run in this process with the fake speech model and LLM (tests/unit/fakes.py), so
-this exercises the workflow, activities, stage cache in object storage, and persistence.
+this exercises the workflow, activities, stage cache in object storage, persistence and the
+search index.
 """
 
 import json
@@ -50,7 +51,9 @@ def test_upload_process_and_read_results(
 
     assert started.status_code == 202, started.text
     assert again.json()["id"] == started.json()["id"]  # idempotent while running
-    assert wait_for(client, lecture_id)["status"] == "ready"
+    lecture = wait_for(client, lecture_id)
+    assert lecture["status"] == "ready"
+    assert len(lecture["content_hash"]) == 64
 
     notes = client.get(f"/v1/lectures/{lecture_id}/notes").json()
     assert [c["title"] for c in notes["notes"]["chapters"]] == ["Memoisation", "Growth"]
@@ -73,9 +76,16 @@ def test_upload_process_and_read_results(
     assert image.status_code == 200
     assert image.content[:3] == b"\xff\xd8\xff"  # a JPEG, served straight from storage
 
+    # Indexed for search before it was marked ready.
+    search = client.get("/v1/search", params={"q": "big O notation", "lecture_id": lecture_id})
+    hits = search.json()["hits"]
+    assert (hits[0]["segment_id"], hits[0]["chapter"]) == ("s002", "Growth")
+    assert {hit["lecture_id"] for hit in hits} == {lecture_id}
+
     (run,) = client.get(f"/v1/lectures/{lecture_id}/runs").json()
     assert run["status"] == "succeeded"
-    assert {s["stage"] for s in run["stages"]} >= {"probe", "asr", "slides", "notes"}
+    stages = {s["stage"] for s in run["stages"]}
+    assert stages >= {"probe", "asr", "slides", "notes", "embed", "index"}
     assert run["llm_usage"]["requests"] > 0
 
 

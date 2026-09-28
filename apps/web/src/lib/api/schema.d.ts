@@ -248,6 +248,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search
+         * @description The passages that best match `q`, best first, each with its place in the video.
+         */
+        get: operations["search_v1_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -317,6 +337,8 @@ export interface components {
         LectureOut: {
             /** Attribution */
             attribution: string | null;
+            /** Content Hash */
+            content_hash: string | null;
             /** Content Type */
             content_type: string;
             /**
@@ -450,6 +472,45 @@ export interface components {
          * @enum {string}
          */
         RunStatus: "running" | "succeeded" | "failed";
+        /** SearchHitOut */
+        SearchHitOut: {
+            /** Chapter */
+            chapter: string | null;
+            /** End S */
+            end_s: number;
+            /**
+             * Lecture Id
+             * Format: uuid
+             */
+            lecture_id: string;
+            /** Score */
+            score: number;
+            /** Segment Id */
+            segment_id: string;
+            /** Slide Id */
+            slide_id: number | null;
+            /** Slide Title */
+            slide_title: string | null;
+            /** Start S */
+            start_s: number;
+            /** Text */
+            text: string;
+            /** Transcript */
+            transcript: string;
+        };
+        /**
+         * SearchMode
+         * @enum {string}
+         */
+        SearchMode: "dense" | "bm25" | "hybrid" | "rerank";
+        /** SearchResults */
+        SearchResults: {
+            /** Hits */
+            hits: components["schemas"]["SearchHitOut"][];
+            mode: components["schemas"]["SearchMode"];
+            /** Query */
+            query: string;
+        };
         /** SlideOut */
         SlideOut: {
             /** Code */
@@ -971,6 +1032,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TranscriptLineOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_v1_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                /** @description Search only these lectures (repeatable). */
+                lecture_id?: string[] | null;
+                limit?: number;
+                /** @description Default: the server's `SEARCH_MODE`. `rerank` ranks best. */
+                mode?: components["schemas"]["SearchMode"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
                 };
             };
             /** @description Validation Error */

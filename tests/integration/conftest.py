@@ -1,4 +1,5 @@
-"""Real Postgres, SeaweedFS and Temporal in throwaway containers, shared across the session."""
+"""Real Postgres, SeaweedFS, Temporal and Qdrant in throwaway containers, shared across the
+session. The models (speech, LLM, embeddings, reranker) are fakes."""
 
 import asyncio
 import contextlib
@@ -8,29 +9,35 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import boto3
+import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from qdrant_client import QdrantClient
 from temporalio.client import Client
 from testcontainers.community.postgres import PostgresContainer
 from testcontainers.core.container import DockerContainer
 
+from lecture_api.deps import get_searcher
 from lecture_api.main import create_app
 from lecture_core.db import create_engine, create_sessionmaker
 from lecture_core.processing import QUEUE_CPU, QUEUE_GPU, QUEUE_LLM
 from lecture_core.settings import Settings
 from lecture_core.storage import ObjectStorage
 from lecture_llm.agents import LectureLLM, Prompts
-from lecture_pipeline.temporal.activities import PipelineActivities, Resources
+from lecture_pipeline.temporal.activities import PipelineActivities, Resources, SearchResources
 from lecture_pipeline.temporal.worker import build_workers, connect
-from tests.unit.fakes import FakeLLM, FakeTranscriber
+from lecture_rag.index import SearchIndex
+from lecture_rag.search import Searcher
+from tests.unit.fakes import FakeDense, FakeLLM, FakeReranker, FakeSparse, FakeTranscriber
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # Keep these in step with infra/compose.yaml.
 POSTGRES_IMAGE = "postgres:17-alpine"
 SEAWEEDFS_IMAGE = "chrislusf/seaweedfs:4.47"
 TEMPORAL_IMAGE = "temporalio/temporal:1.9.1"
+QDRANT_IMAGE = "qdrant/qdrant:v1.19.1"
 BUCKET = "lectures"
 
 
@@ -85,8 +92,19 @@ def temporal_address() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def processing_settings(settings: Settings, temporal_address: str) -> Settings:
-    return settings.model_copy(update={"temporal_address": temporal_address})
+def qdrant_url() -> Iterator[str]:
+    container = DockerContainer(QDRANT_IMAGE).with_exposed_ports(6333)
+    with container:
+        url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(6333)}"
+        _wait_for_http(f"{url}/readyz")
+        yield url
+
+
+@pytest.fixture(scope="session")
+def processing_settings(settings: Settings, temporal_address: str, qdrant_url: str) -> Settings:
+    return settings.model_copy(
+        update={"temporal_address": temporal_address, "qdrant_url": qdrant_url}
+    )
 
 
 @pytest.fixture(scope="session")
@@ -100,8 +118,18 @@ def workers(
 
 @pytest.fixture
 def processing_client(processing_settings: Settings, workers: None) -> Iterator[TestClient]:
-    with TestClient(create_app(processing_settings)) as client:
+    app = create_app(processing_settings)
+    index = _search_index(processing_settings)
+    app.dependency_overrides[get_searcher] = lambda: Searcher(
+        index, FakeDense(), FakeSparse(), FakeReranker()
+    )
+    with TestClient(app) as client:
         yield client
+    index.close()
+
+
+def _search_index(settings: Settings) -> SearchIndex:
+    return SearchIndex(QdrantClient(url=settings.qdrant_url), settings.qdrant_collection)
 
 
 class InProcessWorkers:
@@ -138,6 +166,7 @@ class InProcessWorkers:
                 sessionmaker=create_sessionmaker(engine),
                 llm=LectureLLM(FakeLLM().model, Prompts.load(REPO_ROOT / "prompts" / "pipeline")),
                 transcriber=FakeTranscriber(),
+                search=SearchResources(_search_index(self.settings), FakeDense(), FakeSparse()),
             )
             queues = [QUEUE_CPU, QUEUE_GPU, QUEUE_LLM]
             async with contextlib.AsyncExitStack() as stack:
@@ -163,6 +192,18 @@ def _wait_for_temporal(address: str, timeout_s: float = 60) -> None:
             asyncio.run(attempt())
             return
         except Exception:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.5)
+
+
+def _wait_for_http(url: str, timeout_s: float = 60) -> None:
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            httpx.get(url).raise_for_status()
+            return
+        except httpx.HTTPError:
             if time.monotonic() > deadline:
                 raise
             time.sleep(0.5)

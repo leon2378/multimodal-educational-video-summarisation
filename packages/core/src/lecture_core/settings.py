@@ -1,5 +1,7 @@
 """Runtime configuration, read from environment variables (and `.env` in development)."""
 
+from typing import Literal
+
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,6 +28,16 @@ class Settings(BaseSettings):
 
     # Browser origins allowed to call the API (the web app). JSON list in the environment.
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    # Search: Qdrant, and Text Embeddings Inference servers for the embedding model and the
+    # reranker (infra/compose.yaml).
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "segments"
+    embeddings_url: str = "http://localhost:8081"
+    reranker_url: str = "http://localhost:8082"
+    # The search mode when a request doesn't name one. "rerank" ranks best but needs the
+    # reranker on a GPU (Compose sets it); on a laptop CPU it takes over a minute a query.
+    search_mode: Literal["dense", "bm25", "hybrid", "rerank"] = "hybrid"
 
     upload_url_ttl_s: int = 3600
     # A single presigned PUT tops out at 5 GiB on S3. Multipart uploads arrive with the web app.

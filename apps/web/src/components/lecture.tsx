@@ -4,8 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { type ProgressEvent, type Slide, type StudyNotes, type TranscriptLine, api, unwrap } from "@/lib/api";
-import { useLecture, useMedia, useNotes, useProgress, useSlides, useTranscript } from "@/lib/queries";
-import { indexAt, slideAt } from "@/lib/timeline";
+import { useLecture, useMedia, useNotes, useProgress, useSearch, useSlides, useTranscript } from "@/lib/queries";
+import { formatTime, indexAt, slideAt } from "@/lib/timeline";
 
 import { Card, Latex, StatusBadge, TimeButton } from "./ui";
 
@@ -79,6 +79,7 @@ export function LectureView({ id }: { id: string }) {
         <div className="lg:col-span-2">
           {ready ? (
             <SidePanel
+              id={id}
               transcript={transcript.data ?? []}
               notes={notes.data?.notes}
               time={time}
@@ -87,7 +88,7 @@ export function LectureView({ id }: { id: string }) {
           ) : (
             <Card>
               <p className="text-sm text-slate-500">
-                The transcript, notes and quiz appear here once processing finishes.
+                The transcript, notes, quiz and search appear here once processing finishes.
               </p>
             </Card>
           )}
@@ -140,6 +141,8 @@ const STAGES: [string, string][] = [
   ["chapters", "Planning chapters"],
   ["draft_notes", "Writing notes"],
   ["notes", "Assembling notes"],
+  ["embed", "Embedding for search"],
+  ["index", "Indexing for search"],
 ];
 
 function ProcessingPanel({ event }: { event: ProgressEvent | null }) {
@@ -236,14 +239,16 @@ function Chapters({ notes, time, onSeek }: { notes: StudyNotes; time: number; on
   );
 }
 
-type Tab = "transcript" | "notes" | "quiz";
+type Tab = "transcript" | "notes" | "quiz" | "search";
 
 function SidePanel({
+  id,
   transcript,
   notes,
   time,
   onSeek,
 }: {
+  id: string;
   transcript: TranscriptLine[];
   notes: StudyNotes | undefined;
   time: number;
@@ -254,6 +259,7 @@ function SidePanel({
     ["transcript", "Transcript"],
     ["notes", "Notes"],
     ["quiz", "Quiz"],
+    ["search", "Search"],
   ];
   return (
     <section className="flex max-h-[calc(100vh-7rem)] flex-col rounded-xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-4 dark:border-slate-800 dark:bg-slate-900">
@@ -277,6 +283,7 @@ function SidePanel({
         {tab === "transcript" && <Transcript lines={transcript} time={time} onSeek={onSeek} />}
         {tab === "notes" && notes && <NotesPanel notes={notes} onSeek={onSeek} />}
         {tab === "quiz" && notes && <Quiz notes={notes} onSeek={onSeek} />}
+        {tab === "search" && <SearchPanel id={id} onSeek={onSeek} />}
       </div>
     </section>
   );
@@ -371,5 +378,69 @@ function Quiz({ notes, onSeek }: { notes: StudyNotes; onSeek: Seek }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+function SearchPanel({ id, onSeek }: { id: string; onSeek: Seek }) {
+  const [draft, setDraft] = useState("");
+  const [query, setQuery] = useState("");
+  const results = useSearch(id, query);
+
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <form
+        role="search"
+        className="flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setQuery(draft.trim());
+        }}
+      >
+        <input
+          type="search"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="Ask about this lecture"
+          aria-label="Search this lecture"
+          maxLength={500}
+          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-950"
+        />
+        <button
+          type="submit"
+          disabled={!draft.trim()}
+          className="rounded-lg bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+        >
+          Search
+        </button>
+      </form>
+      {results.isFetching && <p className="text-slate-500">Searching…</p>}
+      {results.isError && (
+        <p className="text-rose-600" role="alert">
+          {results.error.message}
+        </p>
+      )}
+      {results.data?.hits.length === 0 && <p className="text-slate-500">Nothing in this lecture matches.</p>}
+      {results.data && results.data.hits.length > 0 && (
+        <ol className="flex flex-col gap-1" aria-label="Search results">
+          {results.data.hits.map((hit) => (
+            <li key={hit.segment_id}>
+              <button
+                type="button"
+                onClick={() => onSeek(hit.start_s)}
+                aria-label={`Play from ${formatTime(hit.start_s)}`}
+                className="w-full rounded-lg p-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <span className="flex items-baseline gap-2 text-xs text-slate-500">
+                  <span className="font-mono text-indigo-700 dark:text-indigo-300">[{formatTime(hit.start_s)}]</span>
+                  {hit.chapter && <span className="truncate">{hit.chapter}</span>}
+                </span>
+                {hit.slide_title && <span className="block font-medium">{hit.slide_title}</span>}
+                <span className="line-clamp-3 leading-relaxed text-slate-700 dark:text-slate-300">{hit.transcript}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }

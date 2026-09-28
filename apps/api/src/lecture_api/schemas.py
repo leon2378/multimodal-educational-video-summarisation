@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from lecture_core.models import LectureStatus, RunStatus
 from lecture_core.notes import StudyNotes
 from lecture_core.processing import Progress, StageInfo
+from lecture_rag.search import SearchMode
 
 
 class LectureCreate(BaseModel):
@@ -30,6 +31,8 @@ class LectureOut(BaseModel):
     content_type: str
     size_bytes: int | None
     duration_s: float | None
+    # SHA-256 of the video, set by processing.
+    content_hash: str | None
     licence: str | None
     attribution: str | None
     created_at: datetime
@@ -121,3 +124,24 @@ class NotesOut(BaseModel):
     model: str
     run_id: uuid.UUID | None
     created_at: datetime
+
+
+class SearchHitOut(BaseModel):
+    lecture_id: uuid.UUID
+    segment_id: str
+    start_s: float
+    end_s: float
+    slide_id: int | None
+    slide_title: str | None
+    chapter: str | None
+    transcript: str
+    # The slide's title and text, then the transcript: what the search matched.
+    text: str
+    # Only comparable between hits of one search.
+    score: float
+
+
+class SearchResults(BaseModel):
+    query: str
+    mode: SearchMode
+    hits: list[SearchHitOut]

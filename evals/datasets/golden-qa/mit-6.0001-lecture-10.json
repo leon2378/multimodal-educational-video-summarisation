@@ -1,0 +1,266 @@
+{
+  "lecture": {
+    "title": "MIT 6.0001 (Fall 2016) Lecture 10: Understanding Program Efficiency, Part 1",
+    "video": "MIT6_0001F16_Lecture_10_300k.mp4",
+    "video_sha256": "55b4834e0eb6c48158e1ef14bbb4ff07a994e3fcad8d38aa9e6f124143721919",
+    "duration": "51:25",
+    "source": "https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/",
+    "licence": "CC BY-NC-SA 4.0",
+    "attribution": "Eric Grimson, John Guttag and Ana Bell. 6.0001 Introduction to Computer Science and Programming in Python, Fall 2016. MIT OpenCourseWare."
+  },
+  "status": "draft: spans taken from the official captions, not yet checked against the video",
+  "questions": [
+    {
+      "id": "q01",
+      "kind": "concept",
+      "question": "What two kinds of efficiency does the lecture mention, and which one does it focus on?",
+      "answer": "Time and space (memory). The lecture and the next one focus on time.",
+      "spans": [["02:09", "02:20"], ["07:08", "07:28"], ["07:49", "08:05"]]
+    },
+    {
+      "id": "q02",
+      "kind": "paraphrase",
+      "question": "If computers keep getting faster, why should I still care how efficient my code is?",
+      "answer": "Because the problems grow faster than the hardware: data sets are becoming massive, so a naive algorithm stays too slow.",
+      "spans": [["05:03", "05:23"], ["06:26", "06:50"]]
+    },
+    {
+      "id": "q03",
+      "kind": "fact",
+      "question": "How much did Google serve in 2014, according to the lecture?",
+      "answer": "About 30 trillion web pages, covering 100 million gigabytes of data.",
+      "spans": [["05:23", "05:45"]]
+    },
+    {
+      "id": "q04",
+      "kind": "paraphrase",
+      "question": "What earlier example traded memory for speed?",
+      "answer": "Computing Fibonacci with a dictionary that stores intermediate values, which greatly reduces the time.",
+      "spans": [["07:20", "07:55"]]
+    },
+    {
+      "id": "q05",
+      "kind": "concept",
+      "question": "What three approaches to measuring an algorithm's efficiency are compared?",
+      "answer": "Timing the code, counting operations, and the more abstract order of growth.",
+      "spans": [["08:54", "10:10"]]
+    },
+    {
+      "id": "q06",
+      "kind": "code",
+      "question": "Which function from the time module is used to time a function call?",
+      "answer": "time.clock: call it before and after the function and take the difference.",
+      "spans": [["10:21", "11:00"]]
+    },
+    {
+      "id": "q07",
+      "kind": "paraphrase",
+      "question": "Why isn't measuring how long my program runs a good way to compare algorithms?",
+      "answer": "Running time also depends on the implementation and on the computer, and timings on small inputs don't predict large ones.",
+      "spans": [["11:20", "12:26"]]
+    },
+    {
+      "id": "q08",
+      "kind": "fact",
+      "question": "What counts as a primitive operation when counting steps?",
+      "answer": "Arithmetic, comparisons, assignments and retrieving values from memory, each assumed to take the same constant time.",
+      "spans": [["12:30", "13:15"]]
+    },
+    {
+      "id": "q09",
+      "kind": "code",
+      "question": "How many operations does the loop that adds up the integers from 0 to x take?",
+      "answer": "1 + 3x, or 3x + 2 counting the return.",
+      "spans": [["13:45", "15:05"]]
+    },
+    {
+      "id": "q10",
+      "kind": "fact",
+      "question": "How many operations does the summing function take when x is 1,000?",
+      "answer": "3,002 (32 for x = 10 and 302 for x = 100).",
+      "spans": [["15:10", "15:30"]]
+    },
+    {
+      "id": "q11",
+      "kind": "code",
+      "question": "What happens to the operation count if the for loop is rewritten as a while loop?",
+      "answer": "Each iteration gains an operation (setting and testing i), so 3x + 1 becomes 4x + 1: counting still depends on the implementation.",
+      "spans": [["15:57", "16:40"]]
+    },
+    {
+      "id": "q12",
+      "kind": "concept",
+      "question": "What are the best, average and worst cases when searching a list for an element?",
+      "answer": "Best: the element is first, so the time doesn't depend on the length. Average: about half the list. Worst: the element isn't there and every item is checked.",
+      "spans": [["22:03", "23:54"]]
+    },
+    {
+      "id": "q13",
+      "kind": "paraphrase",
+      "question": "Why analyse the unluckiest input rather than the typical one?",
+      "answer": "The worst case gives an upper bound on the time, and it's often the bottleneck.",
+      "spans": [["22:48", "23:11"], ["26:19", "26:40"]]
+    },
+    {
+      "id": "q14",
+      "kind": "concept",
+      "question": "If the list doubles in length, what happens to the worst-case time of a linear search?",
+      "answer": "It doubles; ten times longer takes ten times as long. The relationship is linear.",
+      "spans": [["23:54", "24:16"]]
+    },
+    {
+      "id": "q15",
+      "kind": "fact",
+      "question": "Where does the name Big O come from?",
+      "answer": "The professor thinks it comes from the Greek letter omicron.",
+      "spans": [["25:57", "26:25"]]
+    },
+    {
+      "id": "q16",
+      "kind": "code",
+      "question": "How many steps does the iterative factorial function take?",
+      "answer": "5n + 2, which is order n.",
+      "spans": [["27:40", "28:26"]]
+    },
+    {
+      "id": "q17",
+      "kind": "concept",
+      "question": "Why are additive and multiplicative constants ignored in orders of growth?",
+      "answer": "Orders of growth describe behaviour as n gets very large, where the constants don't matter, so only the fastest-growing term counts.",
+      "spans": [["29:09", "30:11"]]
+    },
+    {
+      "id": "q18",
+      "kind": "fact",
+      "question": "What is the order of growth of n squared plus 2n plus 2?",
+      "answer": "Order n squared.",
+      "spans": [["30:11", "30:35"]]
+    },
+    {
+      "id": "q19",
+      "kind": "fact",
+      "question": "Which grows faster: n to the 30th or 3 to the n?",
+      "answer": "3 to the n: exponentials eventually beat any power.",
+      "spans": [["31:33", "32:18"]]
+    },
+    {
+      "id": "q20",
+      "kind": "concept",
+      "question": "Is logarithmic growth better or worse than linear growth?",
+      "answer": "Better: a logarithm grows more and more slowly as the input grows.",
+      "spans": [["32:39", "33:01"]]
+    },
+    {
+      "id": "q21",
+      "kind": "concept",
+      "question": "Where does n log n sit compared with linear and quadratic growth?",
+      "answer": "Between them. Log-linear is common for valuable algorithms and behaves well.",
+      "spans": [["33:01", "33:20"]]
+    },
+    {
+      "id": "q22",
+      "kind": "concept",
+      "question": "What is the law of addition for orders of growth?",
+      "answer": "For code run one piece after another, O(f) + O(g) is O(f + g). A linear loop followed by a quadratic one is O(n squared).",
+      "spans": [["33:22", "34:50"]]
+    },
+    {
+      "id": "q23",
+      "kind": "concept",
+      "question": "What is the law of multiplication for orders of growth?",
+      "answer": "For nested code, multiply the orders of growth of the inner and outer parts: two nested loops over n are O(n squared).",
+      "spans": [["34:50", "36:16"]]
+    },
+    {
+      "id": "q24",
+      "kind": "fact",
+      "question": "Who does the professor impersonate while printing A in a nested loop?",
+      "answer": "The Fonz, saying \"heyyy\".",
+      "spans": [["35:33", "35:54"]]
+    },
+    {
+      "id": "q25",
+      "kind": "paraphrase",
+      "question": "Why does putting a loop inside another loop usually make code quadratic?",
+      "answer": "The inner loop does order n work for each of the outer loop's n iterations, so n times n.",
+      "spans": [["35:54", "36:16"], ["50:49", "51:10"]]
+    },
+    {
+      "id": "q26",
+      "kind": "fact",
+      "question": "By how much does log n grow when the input grows tenfold?",
+      "answer": "By about a factor of 2 from 10 to 100, then only about 50% more for the next factor of ten.",
+      "spans": [["37:23", "37:44"]]
+    },
+    {
+      "id": "q27",
+      "kind": "fact",
+      "question": "What should you bring if your algorithm is at the bottom of the complexity table?",
+      "answer": "A sleeping bag and some coffee: you'll be waiting a long time.",
+      "spans": [["38:40", "38:55"]]
+    },
+    {
+      "id": "q28",
+      "kind": "code",
+      "question": "Does returning True as soon as the element is found change the order of growth of linear search?",
+      "answer": "No. It lowers the average time, but in the worst case (the element isn't there) every item is still checked, so it stays order n.",
+      "spans": [["40:32", "41:14"]]
+    },
+    {
+      "id": "q29",
+      "kind": "concept",
+      "question": "How can Python reach any element of a list in constant time?",
+      "answer": "Elements sit in consecutive memory, so element i is at the base address plus i times the element size. For mixed types, the list stores pointers (indirection).",
+      "spans": [["42:16", "43:42"]]
+    },
+    {
+      "id": "q30",
+      "kind": "concept",
+      "question": "Does a sorted list make linear search faster in terms of order of growth?",
+      "answer": "No. The search can stop once items are bigger than the target, which helps on average, but the worst case is still order n.",
+      "spans": [["43:42", "45:08"]]
+    },
+    {
+      "id": "q31",
+      "kind": "code",
+      "question": "What is the complexity of adding up the digits in a string?",
+      "answer": "Linear in the length of the string: one loop with constant work per character.",
+      "spans": [["45:08", "45:52"]]
+    },
+    {
+      "id": "q32",
+      "kind": "code",
+      "question": "What is the worst-case complexity of checking whether one list is a subset of another?",
+      "answer": "Quadratic: length of L1 times length of L2, worst when the lists are the same length and share no elements.",
+      "spans": [["47:40", "49:00"]]
+    },
+    {
+      "id": "q33",
+      "kind": "code",
+      "question": "Why is the second loop of the intersection function also quadratic?",
+      "answer": "Checking whether an element is in a list is itself a loop over the list, so the second loop hides a nested loop.",
+      "spans": [["50:08", "50:49"]]
+    },
+    {
+      "id": "u01",
+      "kind": "unanswerable",
+      "question": "How does merge sort work?",
+      "answer": null,
+      "spans": []
+    },
+    {
+      "id": "u02",
+      "kind": "unanswerable",
+      "question": "How long does it take to look up a key in a Python dictionary?",
+      "answer": null,
+      "spans": []
+    },
+    {
+      "id": "u03",
+      "kind": "unanswerable",
+      "question": "What is a hash collision?",
+      "answer": null,
+      "spans": []
+    }
+  ]
+}

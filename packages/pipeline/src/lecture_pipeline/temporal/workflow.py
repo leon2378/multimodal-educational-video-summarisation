@@ -2,7 +2,7 @@
 
 Workflow code must be deterministic, so it only sequences activities and tracks progress; all
 I/O happens in activities. Speech recognition (GPU queue) and slide detection (CPU queue) run
-in parallel.
+in parallel, and so do embedding for search and writing the notes.
 """
 
 import asyncio
@@ -22,11 +22,13 @@ with workflow.unsafe.imports_passed_through():
         WORKFLOW,
         ProcessInput,
         Progress,
+        StageInfo,
     )
     from lecture_pipeline.temporal.contracts import (
         AssembleInput,
         DraftInput,
         FailInput,
+        IndexInput,
         IngestOutcome,
         PersistInput,
         SlidesInput,
@@ -101,20 +103,20 @@ class ProcessLecture:
             QUEUE_CPU,
             minutes=10,
         )
-        chapters = await self._stage("chapters", "plan_chapters", timeline, QUEUE_LLM, minutes=15)
-        draft = await self._stage(
-            "draft_notes",
-            "draft_notes",
-            DraftInput(timeline=timeline, chapters=chapters),
-            QUEUE_LLM,
-            minutes=30,
+        embeddings, (chapters, draft, notes) = await asyncio.gather(
+            self._stage("embed", "embed_segments", timeline, QUEUE_CPU, minutes=30),
+            self._notes(timeline),
         )
-        notes = await self._stage(
-            "notes",
-            "assemble_notes",
-            AssembleInput(timeline=timeline, draft=draft),
-            QUEUE_CPU,
-            minutes=5,
+        # Indexed before the lecture is marked ready, so a ready lecture is searchable.
+        self._progress.done.append(
+            await self._step(
+                ["index"],
+                "index_lecture",
+                IndexInput(lecture_id=request.lecture_id, embeddings=embeddings, notes=notes),
+                StageInfo,
+                QUEUE_CPU,
+                minutes=10,
+            )
         )
         await self._step(
             ["save"],
@@ -137,6 +139,24 @@ class ProcessLecture:
             QUEUE_CPU,
             minutes=5,
         )
+
+    async def _notes(self, timeline: StageRef) -> tuple[StageRef, StageRef, StageRef]:
+        chapters = await self._stage("chapters", "plan_chapters", timeline, QUEUE_LLM, minutes=15)
+        draft = await self._stage(
+            "draft_notes",
+            "draft_notes",
+            DraftInput(timeline=timeline, chapters=chapters),
+            QUEUE_LLM,
+            minutes=30,
+        )
+        notes = await self._stage(
+            "notes",
+            "assemble_notes",
+            AssembleInput(timeline=timeline, draft=draft),
+            QUEUE_CPU,
+            minutes=5,
+        )
+        return chapters, draft, notes
 
     async def _stage(
         self,

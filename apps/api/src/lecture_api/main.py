@@ -7,10 +7,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from lecture_api.routes import health, lectures, processing, results
+from lecture_api.routes import health, lectures, processing, results, search
 from lecture_core.db import create_engine, create_sessionmaker
 from lecture_core.settings import Settings
 from lecture_core.storage import ObjectStorage
+from lecture_rag.services import SearchServices
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -23,7 +24,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.storage = ObjectStorage(settings)
         app.state.temporal = None
         app.state.temporal_lock = asyncio.Lock()
+        search_services = SearchServices.from_settings(settings)
+        app.state.searcher = search_services.searcher()
         yield
+        search_services.close()
         await engine.dispose()
 
     app = FastAPI(title="Lecture Summariser API", version="0.1.0", lifespan=lifespan)
@@ -39,4 +43,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(lectures.router, prefix="/v1")
     app.include_router(processing.router, prefix="/v1")
     app.include_router(results.router, prefix="/v1")
+    app.include_router(search.router, prefix="/v1")
     return app

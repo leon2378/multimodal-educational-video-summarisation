@@ -10,11 +10,11 @@ old one "Superseded by NNNN" instead of editing it.
 | [0002](0002-temporal-for-orchestration.md) | Temporal for pipeline orchestration, from Phase 2 | Accepted |
 | [0003](0003-seaweedfs-for-local-object-storage.md) | SeaweedFS as the local S3-compatible store | Accepted |
 | [0004](0004-hosted-llms-through-pydantic-ai.md) | Hosted LLMs through Pydantic AI, Gemini's free tier for development | Accepted |
+| [0005](0005-qdrant-for-hybrid-search.md) | Qdrant for hybrid search, next to Postgres | Accepted |
 
 ## Still to write
 
 | Decision | Write it by |
 |---|---|
-| Qdrant vs pgvector | Phase 3, with Recall@5 numbers for both if you can |
 | YOLO26 (AGPL-3.0) vs RF-DETR (Apache-2.0) | Phase 5 |
 | Scale-out path: Kubernetes, Temporal Cloud, autoscaled GPU workers | Phase 6 |

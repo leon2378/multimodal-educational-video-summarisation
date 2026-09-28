@@ -16,6 +16,7 @@ export type Slide = Schemas["SlideOut"];
 export type NotesResponse = Schemas["NotesOut"];
 export type StudyNotes = Schemas["StudyNotes"];
 export type ProgressEvent = Schemas["ProgressEvent"];
+export type SearchHit = Schemas["SearchHitOut"];
 
 /** The response body, or an Error carrying the API's message, so TanStack Query shows it. */
 export function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {

@@ -1,13 +1,17 @@
-"""Stand-ins for the speech model and the LLM, so pipeline tests run offline."""
+"""Stand-ins for the speech model, the LLM and the search models, so tests run offline."""
 
+import math
 import re
-from collections.abc import Callable
+import zlib
+from collections import Counter
+from collections.abc import Callable, Sequence
 from typing import Any, BinaryIO
 
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from lecture_core.timeline import Transcript, TranscriptSegment, Word
+from lecture_rag.encoders import SparseVector
 
 
 def _segment(start: float, text: str) -> TranscriptSegment:
@@ -116,3 +120,49 @@ class FakeLLM:
                 ],
             }
         return ModelResponse(parts=[ToolCallPart(tool.name, args)])
+
+
+def _tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _bucket(token: str, size: int) -> int:
+    return zlib.crc32(token.encode()) % size
+
+
+class FakeDense:
+    """A hashed bag of words: texts that share words point the same way."""
+
+    model_id = "fake-dense"
+    size = 64
+
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        return [self.embed_query(text) for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        vector = [0.0] * self.size
+        for token in _tokens(text):
+            vector[_bucket(token, self.size)] += 1.0
+        norm = math.sqrt(sum(v * v for v in vector)) or 1.0
+        return [v / norm for v in vector]
+
+
+class FakeSparse:
+    """Word counts by hashed token id; Qdrant adds the IDF weighting."""
+
+    model_id = "fake-bm25"
+
+    def embed_documents(self, texts: Sequence[str]) -> list[SparseVector]:
+        return [self.embed_query(text) for text in texts]
+
+    def embed_query(self, text: str) -> SparseVector:
+        counts = Counter(_bucket(token, 1 << 20) for token in _tokens(text))
+        return SparseVector(indices=list(counts), values=[float(n) for n in counts.values()])
+
+
+class FakeReranker:
+    """The share of the query's words that appear in each text."""
+
+    def rerank(self, query: str, texts: Sequence[str]) -> list[float]:
+        words = set(_tokens(query))
+        return [len(words & set(_tokens(text))) / max(len(words), 1) for text in texts]

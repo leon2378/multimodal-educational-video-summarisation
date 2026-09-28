@@ -1,21 +1,17 @@
 [project]
-name = "lecture-api"
+name = "lecture-rag"
 version = "0.1.0"
-description = "FastAPI service: uploads, processing, results and search."
+description = "Retrieval over lecture timelines: chunking, hybrid search (dense and BM25) and reranking."
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.141",
+    "fastembed>=0.8.1",
     "httpx>=0.28",
     "lecture-core",
-    "lecture-rag",
     "qdrant-client>=1.19.1",
-    "temporalio>=1.33",
-    "uvicorn[standard]>=0.54",
 ]
 
 [tool.uv.sources]
 lecture-core = { workspace = true }
-lecture-rag = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13"]

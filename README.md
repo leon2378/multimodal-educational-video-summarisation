@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phase 2 of 6 done: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phase 2 of 6 done and Phase 3 under way: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, and search it. Cited answers come next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -11,22 +11,27 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - A uv workspace: `apps/api` (FastAPI), `packages/core` (settings, models, storage, the timeline
   and study-notes formats), `packages/perception` (video, audio, slide detection, speech
   recognition), `packages/llm` (Pydantic AI agents), `packages/pipeline` (stages, stage cache,
-  local runner) and `evals` (baselines and scoring).
+  local runner), `packages/rag` (chunking, embeddings, the search index, hybrid search) and
+  `evals` (baselines, golden sets and scoring).
 - A web app ([below](#web-app)): upload with a progress bar, live processing progress, and a
-  lecture page with the video, a transcript that follows playback, slides, chapters, notes and a
-  quiz, every timestamp clickable.
+  lecture page with the video, a transcript that follows playback, slides, chapters, notes, a
+  quiz and search, every timestamp clickable.
 - Processing through the API: a Temporal workflow per lecture, CPU and GPU workers, progress
   over server-sent events, and results in Postgres ([below](#processing-a-lecture)).
 - The processing pipeline: speech recognition, slide detection, a vision LLM reading each slide, a
   time-aligned timeline, then chapters and study notes with timestamps
   ([below](#processing-a-lecture)).
+- Search ([below](#search)): each processed lecture is indexed in Qdrant with dense vectors
+  (Qwen3-Embedding-0.6B) and BM25, and `GET /v1/search` runs dense, BM25, hybrid or reranked
+  search. A golden Q&A set for Lecture 10 and a retrieval eval score each mode.
 - A single-call Gemini baseline that summarises a lecture video and records tokens, cost and
   timings ([below](#gemini-baseline)).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
   uploads the file to storage, and the API confirms it.
-- Postgres with Alembic migrations, and SeaweedFS as local S3, both in Docker Compose.
-- Unit tests, plus integration tests that start real Postgres, SeaweedFS and Temporal with
-  testcontainers and drive the whole flow through the API.
+- Postgres with Alembic migrations, SeaweedFS as local S3, Temporal, Qdrant, and Text Embeddings
+  Inference servers for the embedding model and reranker, all in Docker Compose.
+- Unit tests, plus integration tests that start real Postgres, SeaweedFS, Temporal and Qdrant
+  with testcontainers and drive the whole flow through the API.
 - CI: lint, type-check, tests, the web app's checks and build, dependency audits (Python and
   npm), image builds. Actions are pinned to commit SHAs.
 
@@ -46,13 +51,15 @@ Then:
 
 ```bash
 make install   # Python deps (uv picks Python 3.12) and git hooks
-make up        # Postgres, SeaweedFS and Temporal
+make up        # Postgres, SeaweedFS, Temporal, Qdrant and the embedding server
 make migrate   # create the tables
 make api       # API with auto-reload on http://localhost:8000 (docs at /docs)
 ```
 
 No `.env` is needed: the defaults match the Compose stack. See [.env.example](.env.example) for
-what can be changed.
+what can be changed. The first `make up` downloads the embedding model (1.1 GB) into a Docker
+volume, and the first `make gpu-worker` the reranker (2.1 GB) and its GPU image, which takes a
+few minutes.
 
 ### Try the upload flow
 
@@ -78,14 +85,14 @@ migrations in a one-off container, and starts the API on port 8000.
 ## Web app
 
 `make app` builds and runs the API, the CPU worker and the web app in Docker; add
-`make gpu-worker` for speech recognition. Then open http://localhost:3000:
+`make gpu-worker` for speech recognition and the reranker. Then open http://localhost:3000:
 
 - **Library**: upload a lecture (straight to storage, with a progress bar). Processing starts on
   its own, and the page switches to the lecture.
 - **Lecture page**: live processing progress, then the video with a slide strip that follows
   the slide on screen, chapters, and tabs for a transcript that highlights and scrolls with
-  playback, the notes (formulas rendered with KaTeX) and a quiz. Every timestamp plays the video
-  from there.
+  playback, the notes (formulas rendered with KaTeX), a quiz and search. Every timestamp and
+  search result plays the video from there.
 
 For hot reload while working on it, run `make web` (Node 24) alongside `make up`, `make api` and
 the workers. The web app calls the API from the browser: its address is baked in at build time
@@ -134,6 +141,27 @@ run speech recognition on the CPU.
 
 How it works, and its known limitations, are in [docs/architecture.md](docs/architecture.md).
 
+## Search
+
+Processing indexes each lecture for search ([how it works](docs/architecture.md#search-phase-3a)).
+Search one lecture, or leave out `lecture_id` to search them all:
+
+```bash
+curl -s "localhost:8000/v1/search?q=why+are+constants+ignored&lecture_id=$ID"              # SEARCH_MODE
+curl -s "localhost:8000/v1/search?q=why+are+constants+ignored&lecture_id=$ID&mode=hybrid"  # no reranker
+```
+
+`mode` is `dense`, `bm25`, `hybrid` or `rerank`. Without it, the API uses `SEARCH_MODE`: `rerank`
+in Docker, where the reranker runs on the GPU (`make gpu-worker` starts it), and `hybrid` for
+an API run on the host. Each hit has the segment's times, slide title, chapter and transcript.
+
+To score search, process MIT 6.0001 Lecture 10 (the eval finds it by the video's hash), then run
+`make eval-retrieval`. It asks the golden questions in
+[evals/datasets/golden-qa](evals/datasets/golden-qa/mit-6.0001-lecture-10.json) in each mode,
+prints Recall@5, MRR@10, nDCG@10 and latency, and saves every question's hits to
+`data/evals/retrieval/`. The questions were drafted from the official captions and still need
+checking by hand against the video.
+
 ## Gemini baseline
 
 `gemini-baseline` sends a whole lecture video to Gemini in one call and asks for the study notes
@@ -175,7 +203,11 @@ reused for 48 hours, so repeat runs on the same video skip the upload.
 
 ## Results so far
 
-One lecture so far: MIT 6.0001 Lecture 10 (51 min), scored the same way for both producers.
+One lecture so far: MIT 6.0001 Lecture 10 (51 min).
+
+### Study notes
+
+Scored the same way for both producers.
 
 | | Gemini, one call | Pipeline |
 |---|---|---|
@@ -189,17 +221,38 @@ Caveats: one lecture, two different Gemini models, and a rough citation measure 
 matching). Whether the notes are faithful to the lecture isn't scored yet; that's the Phase 4
 LLM judge.
 
+### Search
+
+The 33 golden questions against the lecture's 47 segments (`make eval-retrieval`). A hit counts
+when its segment overlaps the answer by at least 3 seconds. Latency is through the API, with the
+reranker on the GPU.
+
+| Mode | Recall@5 | MRR@10 | nDCG@10 | Median latency |
+|---|---|---|---|---|
+| dense | 0.97 | 0.84 | 0.82 | 0.4 s |
+| BM25 | 0.91 | 0.76 | 0.74 | 8 ms |
+| hybrid (RRF) | 0.97 | 0.84 | 0.84 | 0.4 s |
+| hybrid + rerank | **1.00** | **0.89** | **0.86** | 0.8 s |
+
+The reranker is the only step that clearly helps: it puts the answer first for 26 questions,
+against 24 for hybrid. On the CPU it took 77 seconds a query, which is why it runs on the GPU.
+With a single lecture there's little for hybrid to beat dense on (one question is 0.03 of
+Recall@5); more lectures, and course-wide search, should separate them. Embedding a lecture
+takes 5 minutes on the CPU, so a fresh run now takes about 6 minutes, up from 2. More in
+[ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md).
+
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `make up` / `make down` | Start or stop Postgres, SeaweedFS and Temporal (`make reset` also deletes their data) |
-| `make app` | Build and run the API and the CPU worker in Docker |
-| `make gpu-worker` | Build and run the GPU worker (speech recognition) in Docker |
+| `make up` / `make down` | Start or stop Postgres, SeaweedFS, Temporal, Qdrant and the embedding server (`make reset` also deletes their data) |
+| `make app` | Build and run the API, the web app and the CPU worker in Docker |
+| `make gpu-worker` | Build and run the GPU services in Docker: speech recognition and the reranker |
 | `make worker` | Run a CPU worker on the host instead |
 | `make api` | Run the API on the host with auto-reload |
 | `make web` | Run the web app on the host with hot reload (Node 24) |
 | `make openapi` | Regenerate the web app's typed API client after an API change |
+| `make eval-retrieval` | Score search on the golden Q&A set (needs the stack running and Lecture 10 processed) |
 | `make migrate` | Apply migrations |
 | `make revision m="add chapters"` | Generate a migration after changing `packages/core/src/lecture_core/models.py` |
 | `make test` / `make test-unit` | All tests / unit tests only |
@@ -216,12 +269,13 @@ packages/core/             settings, SQLAlchemy models, Alembic migrations, S3 c
 packages/perception/       PyAV media reading, slide detection, speech recognition
 packages/llm/              Pydantic AI agents: read slides, chapters, notes
 packages/pipeline/         stages, stage cache, timeline, local runner, Temporal workflow and workers
-evals/                     baselines (Gemini) now; eval suites and datasets from Phase 4
+packages/rag/              chunks, encoders (TEI, BM25), Qdrant index, hybrid search
+evals/                     Gemini baseline, retrieval eval, golden Q&A sets (evals/datasets/)
 prompts/                   versioned prompts (pipeline and baseline)
 data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
-tests/integration/         real Postgres and SeaweedFS via testcontainers
-infra/compose.yaml         local stack (`app` profile adds the API)
+tests/integration/         real Postgres, SeaweedFS, Temporal and Qdrant via testcontainers
+infra/compose.yaml         local stack (`app` profile adds the API, web app and CPU worker)
 infra/docker/              Dockerfiles: API, worker (CPU and GPU variants)
 infra/seaweedfs/s3.json    dev-only S3 credentials
 docs/                      blueprint, architecture, ADRs
@@ -237,11 +291,16 @@ One integration test runs `alembic check`: it fails if a model changed without a
 
 ## Decisions
 
-Architecture decisions are recorded in [docs/adr](docs/adr/README.md). Phase 1 differs from the
-blueprint in these places:
+Architecture decisions are recorded in [docs/adr](docs/adr/README.md). The build so far differs
+from the blueprint in these places:
 
-- **Temporal and Qdrant aren't in Compose yet.** They're added when first used: Temporal in Phase 2
-  ([ADR 0002](docs/adr/0002-temporal-for-orchestration.md)), Qdrant in Phase 3.
+- **Temporal and Qdrant came into Compose when first used**, not in Phase 1: Temporal in Phase 2
+  ([ADR 0002](docs/adr/0002-temporal-for-orchestration.md)), Qdrant in Phase 3
+  ([ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md)).
+- **The reranker runs on the GPU locally**, not the CPU: on a laptop CPU it took 77 seconds to
+  rerank one query's passages. It needs 1.3 GB of VRAM beside speech recognition. The embedding
+  model stays on the CPU. Without a GPU, set `SEARCH_MODE=hybrid`
+  ([ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md)).
 - **Uploads are a single presigned PUT** (up to 5 GiB), not resumable multipart through Uppy.
   Worth adding when uploads get large or flaky.
 - **The player streams the uploaded MP4 directly** (a presigned URL with range requests) rather
@@ -265,14 +324,19 @@ blueprint in these places:
   - [x] Run the single-call Gemini baseline on them to set the bar the pipeline has to beat
         (static mode on Lecture 10; agentic mode still to do).
   - [x] Check faster-whisper int8 on the GPU inside Docker, and note peak VRAM.
-  - [ ] Draft 30 golden Q&A questions, so Phase 3 retrieval choices can be measured.
+  - [x] Draft 30 golden Q&A questions, so Phase 3 retrieval choices can be measured (33 for
+        Lecture 10, plus 3 it doesn't answer; still to check by hand).
 - [x] **Phase 2, vertical slice**
   - [x] 2a: pipeline stages (ASR, slide detection, vision LLM, timeline, chapters, notes), stage
         cache, GPU worker image, local runner
   - [x] 2b: Temporal workers, process/progress/results API, new tables
   - [x] 2c: web app (upload, live progress, lecture page with player, synced transcript, slides,
         chapters, notes, quiz)
-- [ ] **Phase 3, RAG Q&A**: hybrid search, reranking, streamed cited answers
+- [ ] **Phase 3, RAG Q&A**
+  - [x] 3a: chunks, embeddings, Qdrant index, hybrid search and reranking, search API and tab,
+        golden Q&A set and retrieval eval
+  - [ ] 3b: streamed answers with checked `[mm:ss]` citations, chat panel, threads and feedback
+  - [ ] Courses: search and answers across a course's lectures
 - [ ] **Phase 4, evals and observability**: eval suites, Langfuse, OpenTelemetry, CI eval gate
 - [ ] **Phase 5, CV and optimisation**: YOLO26 fine-tune, OCR-vs-VLM routing, ONNX/TensorRT/int8
 - [ ] **Phase 6, ship**: auth, quotas, Terraform and Modal deploy, results write-up
@@ -288,7 +352,13 @@ mkdir -p data/models/faster-whisper-large-v3-turbo && cd data/models/faster-whis
 `model.bin` should have SHA-256 `e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da`
 (1.62 GB, MIT licence).
 
+The embedding model (Qwen3-Embedding-0.6B) and the reranker (bge-reranker-v2-m3), both
+Apache-2.0, download into the `tei-data` Docker volume the first time their containers start,
+pinned to the revisions in `infra/compose.yaml`. FastEmbed downloads its BM25 files
+(`Qdrant/bm25`, a few kB) on first use.
+
 Lecture videos never go in git (`.gitignore` blocks common video formats). MIT OCW material is
 CC BY-NC-SA 4.0: record the licence and attribution on each lecture (the API has fields for both),
-and keep the demo non-commercial. The repo itself has no licence yet. Choose one with the
+and keep the demo non-commercial. The golden Q&A sets are questions written for this project about
+those lectures, with the lecture's attribution in each file. The repo itself has no licence yet. Choose one with the
 YOLO26/RF-DETR decision in Phase 5, since YOLO26 is AGPL-3.0.

@@ -19,6 +19,7 @@ COPY packages/core/pyproject.toml packages/core/
 COPY packages/llm/pyproject.toml packages/llm/
 COPY packages/perception/pyproject.toml packages/perception/
 COPY packages/pipeline/pyproject.toml packages/pipeline/
+COPY packages/rag/pyproject.toml packages/rag/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --package lecture-api --no-install-workspace
 

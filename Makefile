@@ -3,23 +3,23 @@ COMPOSE := docker compose -f infra/compose.yaml
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app gpu-worker worker web openapi down reset migrate revision api process test test-unit lint fmt typecheck audit check
+.PHONY: help install up app gpu-worker worker web openapi down reset migrate revision api process eval-retrieval test test-unit lint fmt typecheck audit check
 
 help: ## List targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
 install: ## Install Python dependencies and git hooks
 	uv sync
 	uv run pre-commit install
 
-up: ## Start Postgres, SeaweedFS and Temporal (UI on http://localhost:8233)
-	$(COMPOSE) up -d --wait postgres seaweedfs temporal
+up: ## Start Postgres, SeaweedFS, Temporal (UI on http://localhost:8233), Qdrant and the embedding server
+	$(COMPOSE) up -d --wait postgres seaweedfs temporal qdrant embeddings
 
 app: ## Build and run the API, the web app and the CPU worker in Docker (http://localhost:3000)
 	$(COMPOSE) --profile app up -d --build --wait
 
-gpu-worker: ## Build and run the GPU worker (speech recognition) in Docker
-	$(COMPOSE) --profile gpu up -d --build --wait gpu-worker
+gpu-worker: ## Build and run the GPU services in Docker: speech recognition and the reranker
+	$(COMPOSE) --profile gpu up -d --build --wait gpu-worker reranker
 
 worker: ## Run a CPU worker on the host instead of in Docker
 	uv run lecture-worker --queues cpu,llm
@@ -52,6 +52,9 @@ api: ## Run the API on the host with auto-reload (http://localhost:8000/docs)
 process: ## Run the pipeline on a local video without Temporal (GPU): make process video=... title=...
 	@test -n "$(video)" || (echo 'usage: make process video=data/lectures/lecture.mp4 title="Title"' && exit 1)
 	HOST_UID=$$(id -u) HOST_GID=$$(id -g) $(COMPOSE) --profile gpu run --rm --build pipeline "$(video)" --title "$(title)"
+
+eval-retrieval: ## Score search on the golden Q&A set (the app running, Lecture 10 processed)
+	uv run retrieval-eval
 
 test: ## Run all tests (integration tests need Docker)
 	uv run pytest

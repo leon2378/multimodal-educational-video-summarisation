@@ -58,6 +58,17 @@ export function useNotes(id: string, enabled: boolean) {
   });
 }
 
+/** Search within one lecture. Cached per query until the lecture is processed again. */
+export function useSearch(id: string, query: string) {
+  return useQuery({
+    queryKey: key(id, "search", query),
+    queryFn: async () =>
+      unwrap(await api.GET("/v1/search", { params: { query: { q: query, lecture_id: [id], limit: 6 } } })),
+    enabled: query.length > 0,
+    staleTime: Infinity,
+  });
+}
+
 /** Live progress while a lecture processes, from the API's server-sent events. When the run
  *  ends, every query for the lecture refreshes, so results appear without a reload. */
 export function useProgress(id: string, active: boolean): ProgressEvent | null {

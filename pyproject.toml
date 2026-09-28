@@ -11,6 +11,7 @@ dependencies = [
     "lecture-llm",
     "lecture-perception",
     "lecture-pipeline",
+    "lecture-rag",
 ]
 
 [dependency-groups]
@@ -36,6 +37,7 @@ lecture-evals = { workspace = true }
 lecture-llm = { workspace = true }
 lecture-perception = { workspace = true }
 lecture-pipeline = { workspace = true }
+lecture-rag = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -59,14 +61,14 @@ select = [
 "tests/**" = ["S101"]  # assert is how pytest works
 
 [tool.ruff.lint.isort]
-known-first-party = ["lecture_api", "lecture_core", "lecture_evals", "lecture_llm", "lecture_perception", "lecture_pipeline"]
+known-first-party = ["lecture_api", "lecture_core", "lecture_evals", "lecture_llm", "lecture_perception", "lecture_pipeline", "lecture_rag"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-mypy_path = ["apps/api/src", "evals/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src"]
-files = ["apps/api/src", "evals/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "tests"]
+mypy_path = ["apps/api/src", "evals/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src"]
+files = ["apps/api/src", "evals/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src", "tests"]
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
@@ -78,5 +80,9 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 markers = [
-    "integration: needs Docker; starts Postgres and SeaweedFS with testcontainers",
+    "integration: needs Docker; starts Postgres, SeaweedFS, Temporal and Qdrant with testcontainers",
+]
+filterwarnings = [
+    # Unit tests use Qdrant's in-memory mode, which has no use for the payload index.
+    "ignore:Payload indexes have no effect in the local Qdrant:UserWarning",
 ]

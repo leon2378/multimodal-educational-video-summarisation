@@ -178,6 +178,17 @@
             ],
             "title": "Attribution"
           },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Hash"
+          },
           "content_type": {
             "title": "Content Type",
             "type": "string"
@@ -250,6 +261,7 @@
           "content_type",
           "size_bytes",
           "duration_s",
+          "content_hash",
           "licence",
           "attribution",
           "created_at",
@@ -516,6 +528,121 @@
         ],
         "title": "RunStatus",
         "type": "string"
+      },
+      "SearchHitOut": {
+        "properties": {
+          "chapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter"
+          },
+          "end_s": {
+            "title": "End S",
+            "type": "number"
+          },
+          "lecture_id": {
+            "format": "uuid",
+            "title": "Lecture Id",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "segment_id": {
+            "title": "Segment Id",
+            "type": "string"
+          },
+          "slide_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slide Id"
+          },
+          "slide_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slide Title"
+          },
+          "start_s": {
+            "title": "Start S",
+            "type": "number"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "transcript": {
+            "title": "Transcript",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lecture_id",
+          "segment_id",
+          "start_s",
+          "end_s",
+          "slide_id",
+          "slide_title",
+          "chapter",
+          "transcript",
+          "text",
+          "score"
+        ],
+        "title": "SearchHitOut",
+        "type": "object"
+      },
+      "SearchMode": {
+        "enum": [
+          "dense",
+          "bm25",
+          "hybrid",
+          "rerank"
+        ],
+        "title": "SearchMode",
+        "type": "string"
+      },
+      "SearchResults": {
+        "properties": {
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHitOut"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/SearchMode"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "mode",
+          "hits"
+        ],
+        "title": "SearchResults",
+        "type": "object"
       },
       "SlideOut": {
         "properties": {
@@ -1399,6 +1526,104 @@
         "summary": "Transcript",
         "tags": [
           "results"
+        ]
+      }
+    },
+    "/v1/search": {
+      "get": {
+        "description": "The passages that best match `q`, best first, each with its place in the video.",
+        "operationId": "search_v1_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 500,
+              "minLength": 1,
+              "pattern": "\\S",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Search only these lectures (repeatable).",
+            "in": "query",
+            "name": "lecture_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search only these lectures (repeatable).",
+              "title": "Lecture Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 6,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Default: the server's `SEARCH_MODE`. `rerank` ranks best.",
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SearchMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the server's `SEARCH_MODE`. `rerank` ranks best.",
+              "title": "Mode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResults"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "search"
         ]
       }
     }

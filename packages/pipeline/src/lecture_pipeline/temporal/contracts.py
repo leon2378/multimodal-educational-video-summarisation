@@ -50,6 +50,12 @@ class AssembleInput(BaseModel):
     draft: StageRef
 
 
+class IndexInput(BaseModel):
+    lecture_id: uuid.UUID
+    embeddings: StageRef
+    notes: StageRef
+
+
 class PersistInput(BaseModel):
     lecture_id: uuid.UUID
     run_id: uuid.UUID
