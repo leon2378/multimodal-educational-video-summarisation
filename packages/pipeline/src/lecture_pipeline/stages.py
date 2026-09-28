@@ -6,6 +6,7 @@ passing cache keys between them rather than payloads.
 
 import hashlib
 import io
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -55,6 +56,7 @@ class NotesDraft(BaseModel):
 
     chapters: list[ChapterDraft]
     overview: Overview
+    model: str
     usage: Usage
 
 
@@ -97,10 +99,14 @@ def audio(ctx: Context, video: Path, video_sha256: str) -> StageResult[AudioArti
 
 
 def transcribe(
-    ctx: Context, audio: StageResult[AudioArtifact], transcriber: Transcriber
+    ctx: Context,
+    audio: StageResult[AudioArtifact],
+    transcriber: Transcriber,
+    on_progress: Callable[[float], None] | None = None,
 ) -> StageResult[Transcript]:
     def compute(_key: str) -> Transcript:
-        return transcriber.transcribe(io.BytesIO(_require(ctx.store, audio.output.key)))
+        audio_bytes = _require(ctx.store, audio.output.key)
+        return transcriber.transcribe(io.BytesIO(audio_bytes), on_progress)
 
     spec = StageSpec("asr", "1", model=transcriber.model_id, params=transcriber.cache_params())
     return ctx.cache.run(spec, {"audio": audio.key}, Transcript, compute)
@@ -200,11 +206,14 @@ def draft_notes(
             usage = usage + used
             drafts.append(ChapterDraft(chapter=chapter, notes=chapter_notes))
         overview, used = llm.overview(timeline.output, [(d.chapter.title, d.notes) for d in drafts])
-        return NotesDraft(chapters=drafts, overview=overview, usage=usage + used)
+        return NotesDraft(
+            chapters=drafts, overview=overview, model=llm.model_name, usage=usage + used
+        )
 
+    # Version 2: the output records the model.
     spec = StageSpec(
         "draft_notes",
-        "1",
+        "2",
         model=llm.model_name,
         params={
             "chapter_prompt": llm.prompts.chapter_notes.fingerprint,

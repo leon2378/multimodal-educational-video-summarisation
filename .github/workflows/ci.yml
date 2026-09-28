@@ -65,7 +65,7 @@ jobs:
       - run: uv run --locked pip-audit --disable-pip --requirement "$RUNNER_TEMP/requirements.txt"
 
   image:
-    name: Build API image
+    name: Build images
     needs: [lint, test]
     runs-on: ubuntu-24.04
     steps:
@@ -79,5 +79,14 @@ jobs:
           context: .
           file: infra/docker/api.Dockerfile
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      # The CPU variant of the worker image. The GPU variant adds 1.4 GB of CUDA wheels from
+      # the same Dockerfile, so it isn't built here.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infra/docker/worker.Dockerfile
+          push: false
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker

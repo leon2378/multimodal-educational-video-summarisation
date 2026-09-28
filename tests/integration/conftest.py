@@ -1,5 +1,8 @@
-"""Real Postgres and SeaweedFS in throwaway containers, shared across the test session."""
+"""Real Postgres, SeaweedFS and Temporal in throwaway containers, shared across the session."""
 
+import asyncio
+import contextlib
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -9,16 +12,25 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from temporalio.client import Client
 from testcontainers.community.postgres import PostgresContainer
 from testcontainers.core.container import DockerContainer
 
 from lecture_api.main import create_app
+from lecture_core.db import create_engine, create_sessionmaker
+from lecture_core.processing import QUEUE_CPU, QUEUE_GPU, QUEUE_LLM
 from lecture_core.settings import Settings
+from lecture_core.storage import ObjectStorage
+from lecture_llm.agents import LectureLLM, Prompts
+from lecture_pipeline.temporal.activities import PipelineActivities, Resources
+from lecture_pipeline.temporal.worker import build_workers, connect
+from tests.unit.fakes import FakeLLM, FakeTranscriber
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # Keep these in step with infra/compose.yaml.
 POSTGRES_IMAGE = "postgres:17-alpine"
 SEAWEEDFS_IMAGE = "chrislusf/seaweedfs:4.47"
+TEMPORAL_IMAGE = "temporalio/temporal:1.9.1"
 BUCKET = "lectures"
 
 
@@ -57,6 +69,103 @@ def settings(database_url: str, s3_endpoint: str) -> Settings:
 def client(settings: Settings) -> Iterator[TestClient]:
     with TestClient(create_app(settings)) as client:
         yield client
+
+
+@pytest.fixture(scope="session")
+def temporal_address() -> Iterator[str]:
+    container = (
+        DockerContainer(TEMPORAL_IMAGE)
+        .with_command("server start-dev --ip 0.0.0.0 --headless")
+        .with_exposed_ports(7233)
+    )
+    with container:
+        address = f"{container.get_container_host_ip()}:{container.get_exposed_port(7233)}"
+        _wait_for_temporal(address)
+        yield address
+
+
+@pytest.fixture(scope="session")
+def processing_settings(settings: Settings, temporal_address: str) -> Settings:
+    return settings.model_copy(update={"temporal_address": temporal_address})
+
+
+@pytest.fixture(scope="session")
+def workers(
+    processing_settings: Settings, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[None]:
+    """All three task queues served in this process, with fake speech and LLM models."""
+    with InProcessWorkers(processing_settings, tmp_path_factory.mktemp("worker-media")):
+        yield
+
+
+@pytest.fixture
+def processing_client(processing_settings: Settings, workers: None) -> Iterator[TestClient]:
+    with TestClient(create_app(processing_settings)) as client:
+        yield client
+
+
+class InProcessWorkers:
+    """Temporal workers on their own thread and event loop: the async engine and the Temporal
+    client must be created on the loop that uses them."""
+
+    def __init__(self, settings: Settings, media_dir: Path) -> None:
+        self.settings, self.media_dir = settings, media_dir
+        self._ready = threading.Event()
+        self._thread = threading.Thread(target=lambda: asyncio.run(self._main()), daemon=True)
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._stop: asyncio.Event | None = None
+        self._error: BaseException | None = None
+
+    def __enter__(self) -> "InProcessWorkers":
+        self._thread.start()
+        if not self._ready.wait(60) or self._error is not None:
+            raise RuntimeError("workers didn't start") from self._error
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        if self._loop is not None and self._stop is not None:
+            self._loop.call_soon_threadsafe(self._stop.set)
+        self._thread.join(30)
+
+    async def _main(self) -> None:
+        try:
+            self._loop, self._stop = asyncio.get_running_loop(), asyncio.Event()
+            client = await connect(self.settings)
+            engine = create_engine(self.settings)
+            resources = Resources(
+                storage=ObjectStorage(self.settings),
+                media_dir=self.media_dir,
+                sessionmaker=create_sessionmaker(engine),
+                llm=LectureLLM(FakeLLM().model, Prompts.load(REPO_ROOT / "prompts" / "pipeline")),
+                transcriber=FakeTranscriber(),
+            )
+            queues = [QUEUE_CPU, QUEUE_GPU, QUEUE_LLM]
+            async with contextlib.AsyncExitStack() as stack:
+                for worker in build_workers(client, PipelineActivities(resources), queues):
+                    await stack.enter_async_context(worker)
+                self._ready.set()
+                await self._stop.wait()
+            await engine.dispose()
+        except BaseException as error:
+            self._error = error
+            self._ready.set()
+            raise
+
+
+def _wait_for_temporal(address: str, timeout_s: float = 60) -> None:
+    async def attempt() -> None:
+        client = await Client.connect(address)
+        await client.count_workflows()
+
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            asyncio.run(attempt())
+            return
+        except Exception:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.5)
 
 
 def _wait_for_bucket(endpoint: str, timeout_s: float = 60) -> None:

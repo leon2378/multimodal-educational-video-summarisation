@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phase 2 of 6 in progress: the pipeline stages (2a) run end to end.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phase 2 of 6 in progress: lectures go from upload to study notes through the API (2a, 2b); the web page (2c) is next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -12,6 +12,8 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   and study-notes formats), `packages/perception` (video, audio, slide detection, speech
   recognition), `packages/llm` (Pydantic AI agents), `packages/pipeline` (stages, stage cache,
   local runner) and `evals` (baselines and scoring).
+- Processing through the API: a Temporal workflow per lecture, CPU and GPU workers, progress
+  over server-sent events, and results in Postgres ([below](#processing-a-lecture)).
 - The processing pipeline: speech recognition, slide detection, a vision LLM reading each slide, a
   time-aligned timeline, then chapters and study notes with timestamps
   ([below](#processing-a-lecture)).
@@ -69,19 +71,42 @@ migrations in a one-off container, and starts the API on port 8000.
 
 ## Processing a lecture
 
-`make process` runs the whole pipeline on a local video, with speech recognition on your NVIDIA
-GPU inside Docker. It needs the model in `data/models/faster-whisper-large-v3-turbo` (see
-[data/models](#data-and-licensing)) and `GEMINI_API_KEY` in `.env`:
+Processing needs the speech model in `data/models/faster-whisper-large-v3-turbo` (see
+[Data and licensing](#data-and-licensing)), `GEMINI_API_KEY` in `.env`, and an NVIDIA GPU for
+speech recognition.
+
+### Through the API
+
+Start the stack, with the API and CPU worker in Docker and the GPU worker for speech:
+
+```bash
+make up && make app && make gpu-worker
+```
+
+Then upload a lecture as in [Try the upload flow](#try-the-upload-flow), and:
+
+```bash
+curl -s -X POST "localhost:8000/v1/lectures/$ID/process"      # start (asking again returns the same run)
+curl -sN "localhost:8000/v1/lectures/$ID/events"               # progress, streamed until it finishes
+curl -s "localhost:8000/v1/lectures/$ID/notes"                 # also /transcript, /slides, /timeline, /runs
+```
+
+Watch the workflow in the Temporal UI at http://localhost:8233. The API docs at
+http://localhost:8000/docs list every endpoint.
+
+### On a local file
+
+`make process` runs the same stages in order on a video file, with no API, database or Temporal,
+and writes `notes.md` and `result.json` to `data/pipeline-runs/<video>/<time>/`:
 
 ```bash
 make process video=data/lectures/MIT6_0001F16_Lecture_10_300k.mp4 title="Understanding Program Efficiency, Part 1"
 ```
 
-Each stage is cached, so running it again only redoes what changed: edit a prompt in
-`prompts/pipeline/` and only the LLM stages re-run. Output goes to
-`data/pipeline-runs/<video>/<time>/`: `notes.md` to read, and `result.json` with stage timings,
-cache hits, LLM usage and the notes in the same format as the Gemini baseline. Without a GPU,
-`uv sync --extra asr` (pipeline package) and `uv run lecture-process ...` runs on the CPU.
+Both paths cache every stage, so running again only redoes what changed: edit a prompt in
+`prompts/pipeline/` and only the LLM stages re-run. The notes use the same format as the Gemini
+baseline. Without a GPU, `uv sync --extra asr` (pipeline package) and `uv run lecture-process ...`
+run speech recognition on the CPU.
 
 How it works, and its known limitations, are in [docs/architecture.md](docs/architecture.md).
 
@@ -133,7 +158,7 @@ One lecture so far: MIT 6.0001 Lecture 10 (51 min), scored the same way for both
 | Notes | 8 chapters, 8 concepts, 3 formulas, 9 quiz | 5 chapters, 13 concepts, 12 formulas, 9 quiz |
 | Concept citations within 10 s of where the captions say the term | 6 of 8, median 1.7 s | 11 of 13, median 0.5 s |
 | API cost | $0.21 (`gemini-3.8-flash`) | about $0.04 (`gemini-3.5-flash-lite`, paid-tier prices) |
-| Time | 135 s | 136 s from scratch, 15 s when only the notes change |
+| Time | 135 s | 119 s through the API and workers (speech and slides in parallel), 15 s when only the notes change |
 | Speech recognition | | 65 s on an RTX 3060 Laptop (6 GB): 47× real time, 2.3 GB VRAM peak |
 
 Caveats: one lecture, two different Gemini models, and a rough citation measure (caption text
@@ -144,8 +169,10 @@ LLM judge.
 
 | Command | What it does |
 |---|---|
-| `make up` / `make down` | Start or stop the backing services (`make reset` also deletes their data) |
-| `make app` | Build and run the API in Docker alongside them |
+| `make up` / `make down` | Start or stop Postgres, SeaweedFS and Temporal (`make reset` also deletes their data) |
+| `make app` | Build and run the API and the CPU worker in Docker |
+| `make gpu-worker` | Build and run the GPU worker (speech recognition) in Docker |
+| `make worker` | Run a CPU worker on the host instead |
 | `make api` | Run the API on the host with auto-reload |
 | `make migrate` | Apply migrations |
 | `make revision m="add chapters"` | Generate a migration after changing `packages/core/src/lecture_core/models.py` |
@@ -161,14 +188,14 @@ apps/api/                  FastAPI service (routes, schemas, dependencies)
 packages/core/             settings, SQLAlchemy models, Alembic migrations, S3 client
 packages/perception/       PyAV media reading, slide detection, speech recognition
 packages/llm/              Pydantic AI agents: read slides, chapters, notes
-packages/pipeline/         stages, stage cache, timeline, local runner (lecture-process)
+packages/pipeline/         stages, stage cache, timeline, local runner, Temporal workflow and workers
 evals/                     baselines (Gemini) now; eval suites and datasets from Phase 4
 prompts/                   versioned prompts (pipeline and baseline)
 data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
 tests/integration/         real Postgres and SeaweedFS via testcontainers
 infra/compose.yaml         local stack (`app` profile adds the API)
-infra/docker/              Dockerfiles: API, GPU worker
+infra/docker/              Dockerfiles: API, worker (CPU and GPU variants)
 infra/seaweedfs/s3.json    dev-only S3 credentials
 docs/                      blueprint, architecture, ADRs
 ```
@@ -209,7 +236,7 @@ blueprint in four places:
 - [ ] **Phase 2, vertical slice**
   - [x] 2a: pipeline stages (ASR, slide detection, vision LLM, timeline, chapters, notes), stage
         cache, GPU worker image, local runner
-  - [ ] 2b: Temporal workers, process/status/results API, new tables
+  - [x] 2b: Temporal workers, process/progress/results API, new tables
   - [ ] 2c: web lecture page (player, chapters, synced transcript, slides)
 - [ ] **Phase 3, RAG Q&A**: hybrid search, reranking, streamed cited answers
 - [ ] **Phase 4, evals and observability**: eval suites, Langfuse, OpenTelemetry, CI eval gate

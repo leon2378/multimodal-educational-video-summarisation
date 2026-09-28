@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
 
 import docker
 import pytest
+
+from tests.unit import synthetic
 
 
 def _docker_available() -> bool:
@@ -20,3 +23,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         if "integration" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(scope="session")
+def synthetic_video(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A 12-second lecture: slides, camera shots, a build and a revisit (see synthetic.py)."""
+    return synthetic.write_video(tmp_path_factory.mktemp("media") / "lecture.mp4")

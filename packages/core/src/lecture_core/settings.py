@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     s3_secret_access_key: SecretStr = SecretStr("lecture-dev-secret")
     s3_bucket: str = "lectures"
 
+    temporal_address: str = "localhost:7233"
+    temporal_namespace: str = "default"
+
     upload_url_ttl_s: int = 3600
     # A single presigned PUT tops out at 5 GiB on S3. Multipart uploads arrive with the web app.
     max_upload_bytes: int = 5 * 1024**3

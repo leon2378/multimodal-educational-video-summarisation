@@ -3,10 +3,23 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 2a (pipeline stages)
+## Current state: Phase 2b (orchestration and storage)
 
-Two separate paths exist so far: the API handles uploads, and the pipeline runs on a local file.
-Phase 2b joins them with Temporal workers.
+A lecture goes from upload to study notes through the API: the API starts a Temporal workflow,
+workers run the pipeline stages, and the results land in Postgres. The same stages also run
+on a local file without any of that (`lecture-process`).
+
+```
+ client ── upload (presigned PUT) ──────────────────────────────► SeaweedFS
+   │                                                                 ▲  ▲
+   ├── POST /v1/lectures/{id}/process ─► FastAPI ─► Temporal         │  │ stage cache,
+   ├── GET  .../events (SSE progress)       │         │ ProcessLecture  │  │ artifacts
+   └── GET  .../notes|transcript|slides     │         ├─ cpu queue ─► CPU worker ─┤ (media, slides,
+                                            ▼         │                │           timeline, save)
+                                         Postgres ◄───┼────────────────┘
+                                                      ├─ llm queue ─► CPU worker (Gemini calls)
+                                                      └─ gpu queue ─► GPU worker (speech, 1 at a time)
+```
 
 ### Upload path (Phase 1)
 
@@ -24,13 +37,34 @@ Phase 2b joins them with Temporal workers.
 3. `POST /v1/lectures/{id}/complete-upload` checks the object exists and is within the size limit,
    then sets the status to `uploaded`. Calling it again returns the same result.
 
-Lecture status: `awaiting_upload → uploaded → processing → ready`, and `failed` from any
-processing step. Only the first two are used so far.
+Lecture status: `awaiting_upload → uploaded → processing → ready`, or `failed` when a run
+fails. A ready or failed lecture can be processed again.
 
-### Pipeline (Phase 2a)
+### Processing (Phase 2b)
 
-`lecture-process <video>` runs every stage in order on a local file (`make process` runs it in the
-GPU worker image). Each stage goes through the stage cache ([ADR 0001](adr/0001-stage-cache.md)),
+1. `POST /v1/lectures/{id}/process` records a `pipeline_runs` row and starts the
+   `ProcessLecture` workflow, with workflow id `process-{lecture_id}`. While a run is in progress,
+   asking again returns that run; a partial unique index keeps it to one running run per lecture.
+2. The workflow runs each stage as an activity on its queue: `cpu` (probe, audio, slides,
+   timeline, notes assembly, saving), `gpu` (speech recognition, one activity at a time for a
+   6 GB card, with heartbeats) and `llm` (slide reading, chapters, notes drafts). Speech
+   recognition and slide detection run in parallel.
+3. Activities hand each other stage-cache refs, never payloads: a 51-minute transcript with word
+   timings can pass Temporal's 2 MB limit. Results and files live in the stage cache in object
+   storage, so a retried activity, or a re-run with one prompt changed, reuses everything else.
+4. The last activity replaces the lecture's `transcript_segments`, `slides`,
+   `timeline_segments` and `summaries` rows in one transaction and marks the lecture ready. A
+   failure marks the run and lecture failed. Bad input (not a video) isn't retried.
+5. `GET /v1/lectures/{id}/events` streams progress as server-sent events: the workflow's
+   `progress` query while it runs, then the stored run.
+
+Results: `GET /v1/lectures/{id}/transcript`, `/slides` (with presigned image URLs), `/timeline`
+and `/notes`, plus `/runs` for each run's stage timings and LLM usage.
+
+### Pipeline stages (Phase 2a)
+
+The stages the workers run. `lecture-process <video>` also runs them in order on a local file
+(`make process` runs it in the GPU worker image). Each stage goes through the stage cache ([ADR 0001](adr/0001-stage-cache.md)),
 so a second run only redoes stages whose inputs, version, model, params or prompt changed.
 
 ```
@@ -71,11 +105,7 @@ so a second run only redoes stages whose inputs, version, model, params or promp
 - No verification pass yet (flagging claims the cited segments don't support). It comes with the
   eval suites in Phase 4.
 
-## Next: Phase 2b and 2c
+## Next: Phase 2c
 
-- **2b**: Temporal workers (`workers/cpu`, `workers/gpu`) whose activities call these same stage
-  functions with object storage in place of the local directory. `POST /v1/lectures/{id}/process`
-  starts the `ProcessLecture` workflow, with progress over SSE. New tables for runs, timeline,
-  chapters and notes.
-- **2c**: `apps/web`, a Next.js lecture page with the player, chapters, a transcript that follows
-  playback, and the slides. Uploads move to multipart through Uppy.
+`apps/web`: a Next.js lecture page with the player, chapters, a transcript that follows
+playback, and the slides, reading the API above. Uploads move to multipart through Uppy.

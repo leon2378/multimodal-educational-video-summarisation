@@ -1,6 +1,14 @@
-# Local stack. `make up` starts the backing services; `make app` also runs the API in a container.
-# Ports bind to 127.0.0.1 only. Credentials here are dev-only defaults (see .env.example).
+# Local stack. `make up` starts the backing services; `make app` adds the API and CPU worker in
+# containers, `make gpu-worker` the GPU worker. Ports bind to 127.0.0.1 only. Credentials here
+# are dev-only defaults (see .env.example).
 name: lecture-summariser
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://lecture:lecture@postgres:5432/lecture
+  S3_ENDPOINT_URL: http://seaweedfs:8333
+  # Presigned URLs must name a host your browser or curl can reach, not the Compose service.
+  S3_PUBLIC_ENDPOINT_URL: http://localhost:8333
+  TEMPORAL_ADDRESS: temporal:7233
 
 x-api: &api
   build:
@@ -8,11 +16,28 @@ x-api: &api
     dockerfile: infra/docker/api.Dockerfile
   image: lecture-summariser/api:dev
   profiles: [app]
-  environment:
-    DATABASE_URL: postgresql+asyncpg://lecture:lecture@postgres:5432/lecture
-    S3_ENDPOINT_URL: http://seaweedfs:8333
-    # Presigned URLs must name a host your browser or curl can reach, not the Compose service.
-    S3_PUBLIC_ENDPOINT_URL: http://localhost:8333
+  environment: *app-env
+
+x-worker: &worker
+  env_file:
+    - path: ../.env
+      required: false
+  environment: *app-env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    seaweedfs:
+      condition: service_healthy
+    temporal:
+      condition: service_healthy
+
+x-gpu: &gpu
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]
 
 services:
   postgres:
@@ -47,6 +72,23 @@ services:
       timeout: 3s
       retries: 30
 
+  # Temporal dev server: workflow history in SQLite, web UI on http://localhost:8233.
+  temporal:
+    image: temporalio/temporal:1.9.1
+    # The image runs as user "temporal", which owns /home/temporal; a new named volume mounted
+    # there takes that ownership, so the server can write its SQLite file.
+    command: server start-dev --ip 0.0.0.0 --db-filename /home/temporal/temporal.db
+    ports:
+      - "127.0.0.1:7233:7233"  # gRPC, for the API and workers
+      - "127.0.0.1:8233:8233"  # web UI
+    volumes:
+      - temporal-home:/home/temporal
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "namespace", "describe", "--namespace", "default", "--address", "127.0.0.1:7233"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
   migrate:
     <<: *api
     command: ["alembic", "-c", "packages/core/alembic.ini", "upgrade", "head"]
@@ -63,20 +105,53 @@ services:
         condition: service_completed_successfully
       seaweedfs:
         condition: service_healthy
+      temporal:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
       interval: 5s
       timeout: 3s
       retries: 20
 
-  # One-off pipeline runs on the GPU: `make process video=... title=...`. Becomes the GPU
-  # Temporal worker in Phase 2b.
-  pipeline:
+  # Serves the cpu and llm queues: media, slides, timeline, LLM calls, saving results.
+  cpu-worker:
+    <<: *worker
+    profiles: [app]
+    build:
+      context: ..
+      dockerfile: infra/docker/worker.Dockerfile
+    image: lecture-summariser/worker:cpu
+    command: ["lecture-worker", "--queues", "cpu,llm"]
+
+  # Serves the gpu queue: speech recognition, one lecture at a time.
+  gpu-worker:
+    <<: *worker
     profiles: [gpu]
     build:
       context: ..
-      dockerfile: infra/docker/gpu-worker.Dockerfile
-    image: lecture-summariser/gpu-worker:dev
+      dockerfile: infra/docker/worker.Dockerfile
+      args:
+        EXTRA: gpu
+    image: lecture-summariser/worker:gpu
+    command: ["lecture-worker", "--queues", "gpu"]
+    environment:
+      <<: *app-env
+      WHISPER_DEVICE: cuda
+      WHISPER_MODEL_PATH: /app/data/models/faster-whisper-large-v3-turbo
+    volumes:
+      - ../data/models:/app/data/models:ro
+    deploy: *gpu
+
+  # One-off local runs without Temporal: `make process video=... title=...`.
+  pipeline:
+    profiles: [gpu]
+    image: lecture-summariser/worker:gpu
+    build:
+      context: ..
+      dockerfile: infra/docker/worker.Dockerfile
+      args:
+        EXTRA: gpu
+    entrypoint: ["lecture-process"]
     # Your host user, so files written to data/ stay yours (set by the Makefile).
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     env_file:
@@ -87,14 +162,9 @@ services:
     volumes:
       - ../data:/app/data
       - ../prompts:/app/prompts:ro
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    deploy: *gpu
 
 volumes:
   postgres-data:
   seaweedfs-data:
+  temporal-home:

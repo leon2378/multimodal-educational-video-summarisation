@@ -2,11 +2,13 @@
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lecture_core.models import LectureStatus
+from lecture_core.models import LectureStatus, RunStatus
+from lecture_core.notes import StudyNotes
+from lecture_core.processing import Progress, StageInfo
 
 
 class LectureCreate(BaseModel):
@@ -46,3 +48,62 @@ class UploadTarget(BaseModel):
 class LectureCreated(BaseModel):
     lecture: LectureOut
     upload: UploadTarget
+
+
+class RunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    lecture_id: uuid.UUID
+    status: RunStatus
+    started_at: datetime
+    finished_at: datetime | None
+    error: str | None
+    stages: list[StageInfo]
+    llm_usage: dict[str, Any] | None
+
+
+class ProgressEvent(BaseModel):
+    """One server-sent event: the lecture's status and its latest run's progress."""
+
+    lecture_status: LectureStatus
+    run_id: uuid.UUID | None
+    progress: Progress | None
+
+
+class TranscriptLineOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    index: int
+    start_s: float
+    end_s: float
+    text: str
+
+
+class SlideOut(BaseModel):
+    slide_id: int
+    image_url: str
+    first_seen_s: float
+    title: str
+    text: str
+    figure_description: str
+    latex: list[str]
+    code: str
+    spans: list[dict[str, float]]
+
+
+class TimelineSegmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    segment_id: str
+    start_s: float
+    end_s: float
+    transcript: str
+    slide_id: int | None
+
+
+class NotesOut(BaseModel):
+    notes: StudyNotes
+    model: str
+    run_id: uuid.UUID | None
+    created_at: datetime

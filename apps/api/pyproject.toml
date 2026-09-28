@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141",
     "lecture-core",
+    "temporalio>=1.33",
     "uvicorn[standard]>=0.54",
 ]
 

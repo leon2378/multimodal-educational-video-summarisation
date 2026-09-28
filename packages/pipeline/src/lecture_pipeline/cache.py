@@ -84,7 +84,14 @@ class StageCache:
     def get[T: BaseModel](
         self, spec: StageSpec, inputs: Mapping[str, str], output_type: type[T]
     ) -> StageResult[T] | None:
-        return self._read(spec, cache_key(spec, inputs), output_type)
+        return self._read(spec.name, cache_key(spec, inputs), output_type)
+
+    def load[T: BaseModel](self, stage: str, key: str, output_type: type[T]) -> StageResult[T]:
+        """A stored result by its key: how Temporal activities hand results to each other."""
+        result = self._read(stage, key, output_type)
+        if result is None:
+            raise KeyError(f"no cached {stage} result under {key}")
+        return result
 
     def run[T: BaseModel](
         self,
@@ -103,7 +110,7 @@ class StageCache:
         That wastes work but is safe, since the output depends only on the key.
         """
         key = cache_key(spec, inputs)
-        if (hit := self._read(spec, key, output_type)) is not None:
+        if (hit := self._read(spec.name, key, output_type)) is not None:
             return hit
         output = compute(key)
         envelope = ArtifactEnvelope(
@@ -122,9 +129,9 @@ class StageCache:
         return StageResult(key=key, output=output, cached=False)
 
     def _read[T: BaseModel](
-        self, spec: StageSpec, key: str, output_type: type[T]
+        self, stage: str, key: str, output_type: type[T]
     ) -> StageResult[T] | None:
-        raw = self._store.get_bytes(artifact_path(spec.name, key))
+        raw = self._store.get_bytes(artifact_path(stage, key))
         if raw is None:
             return None
         envelope = ArtifactEnvelope.model_validate_json(raw)

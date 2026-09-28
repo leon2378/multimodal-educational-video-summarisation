@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -9,8 +10,11 @@ from lecture_core.settings import Settings
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    # Nothing here touches Postgres or storage: engines and boto3 clients connect lazily.
-    settings = Settings(database_url="postgresql+asyncpg://unused:unused@127.0.0.1:1/unused")
+    # Nothing here touches Postgres, storage or Temporal: they all connect lazily.
+    settings = Settings(
+        database_url="postgresql+asyncpg://unused:unused@127.0.0.1:1/unused",
+        temporal_address="127.0.0.1:1",
+    )
     with TestClient(create_app(settings)) as client:
         yield client
 
@@ -29,7 +33,13 @@ def test_create_lecture_rejects_non_video(client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_openapi_lists_phase_1_routes(client: TestClient) -> None:
+def test_processing_is_unavailable_while_temporal_is_down(client: TestClient) -> None:
+    response = client.post(f"/v1/lectures/{uuid.uuid4()}/process")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Processing is unavailable right now."
+
+
+def test_openapi_lists_the_routes(client: TestClient) -> None:
     paths = set(client.get("/openapi.json").json()["paths"])
     assert {
         "/healthz",
@@ -37,4 +47,11 @@ def test_openapi_lists_phase_1_routes(client: TestClient) -> None:
         "/v1/lectures",
         "/v1/lectures/{lecture_id}",
         "/v1/lectures/{lecture_id}/complete-upload",
+        "/v1/lectures/{lecture_id}/process",
+        "/v1/lectures/{lecture_id}/runs",
+        "/v1/lectures/{lecture_id}/events",
+        "/v1/lectures/{lecture_id}/transcript",
+        "/v1/lectures/{lecture_id}/slides",
+        "/v1/lectures/{lecture_id}/timeline",
+        "/v1/lectures/{lecture_id}/notes",
     } <= paths

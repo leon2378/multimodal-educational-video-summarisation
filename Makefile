@@ -3,7 +3,7 @@ COMPOSE := docker compose -f infra/compose.yaml
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app down reset migrate revision api process test test-unit lint fmt typecheck audit check
+.PHONY: help install up app gpu-worker worker down reset migrate revision api process test test-unit lint fmt typecheck audit check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -12,17 +12,23 @@ install: ## Install Python dependencies and git hooks
 	uv sync
 	uv run pre-commit install
 
-up: ## Start Postgres and SeaweedFS
-	$(COMPOSE) up -d --wait postgres seaweedfs
+up: ## Start Postgres, SeaweedFS and Temporal (UI on http://localhost:8233)
+	$(COMPOSE) up -d --wait postgres seaweedfs temporal
 
-app: ## Build and run the API in Docker too (http://localhost:8000/docs)
+app: ## Build and run the API and the CPU worker in Docker too (http://localhost:8000/docs)
 	$(COMPOSE) --profile app up -d --build --wait
 
+gpu-worker: ## Build and run the GPU worker (speech recognition) in Docker
+	$(COMPOSE) --profile gpu up -d --build --wait gpu-worker
+
+worker: ## Run a CPU worker on the host instead of in Docker
+	uv run lecture-worker --queues cpu,llm
+
 down: ## Stop everything, keeping data
-	$(COMPOSE) --profile app down
+	$(COMPOSE) --profile app --profile gpu down
 
 reset: ## Stop everything and delete the data volumes
-	$(COMPOSE) --profile app down --volumes
+	$(COMPOSE) --profile app --profile gpu down --volumes
 
 migrate: ## Apply database migrations
 	$(ALEMBIC) upgrade head
@@ -36,7 +42,7 @@ revision: ## Generate a migration from model changes: make revision m="add chapt
 api: ## Run the API on the host with auto-reload (http://localhost:8000/docs)
 	uv run uvicorn lecture_api.main:create_app --factory --reload --port 8000
 
-process: ## Run the pipeline on a video, speech recognition on the GPU: make process video=... title=...
+process: ## Run the pipeline on a local video without Temporal (GPU): make process video=... title=...
 	@test -n "$(video)" || (echo 'usage: make process video=data/lectures/lecture.mp4 title="Title"' && exit 1)
 	HOST_UID=$$(id -u) HOST_GID=$$(id -g) $(COMPOSE) --profile gpu run --rm --build pipeline "$(video)" --title "$(title)"
 

@@ -61,6 +61,17 @@ class ObjectStorage:
             ExpiresIn=expires_in_s,
         )
 
+    def presign_get(self, key: str, expires_in_s: int) -> str:
+        """URL a browser can fetch directly: slide images, and later the video for playback."""
+        return self._presign_client.generate_presigned_url(
+            "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=expires_in_s
+        )
+
+    def download_file(self, key: str, path: Path) -> None:
+        """Stream an object to disk: source videos are too big to hold in memory."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._client.download_file(self.bucket, key, str(path))
+
     def head(self, key: str) -> ObjectInfo | None:
         try:
             response = self._client.head_object(Bucket=self.bucket, Key=key)

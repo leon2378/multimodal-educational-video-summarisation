@@ -1,4 +1,4 @@
-"""Lecture lifecycle. Phase 1 covers create, direct upload, and confirm; processing is Phase 2.
+"""Lecture lifecycle: create, direct upload, and confirm. Processing is in routes/processing.py.
 
 Upload flow:
     1. POST /v1/lectures                         -> lecture row + presigned PUT URL
@@ -12,9 +12,8 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from lecture_api.deps import SessionDep, SettingsDep, StorageDep
+from lecture_api.deps import SessionDep, SettingsDep, StorageDep, lecture_or_404
 from lecture_api.schemas import LectureCreate, LectureCreated, LectureOut, UploadTarget
 from lecture_core.models import Lecture, LectureStatus
 from lecture_core.storage import source_key
@@ -62,7 +61,7 @@ async def list_lectures(
 
 @router.get("/{lecture_id}")
 async def get_lecture(lecture_id: uuid.UUID, session: SessionDep) -> LectureOut:
-    return LectureOut.model_validate(await _get_or_404(session, lecture_id))
+    return LectureOut.model_validate(await lecture_or_404(session, lecture_id))
 
 
 @router.post("/{lecture_id}/complete-upload")
@@ -70,7 +69,7 @@ async def complete_upload(
     lecture_id: uuid.UUID, session: SessionDep, storage: StorageDep, settings: SettingsDep
 ) -> LectureOut:
     """Idempotent: confirming an upload that's already confirmed returns the lecture unchanged."""
-    lecture = await _get_or_404(session, lecture_id)
+    lecture = await lecture_or_404(session, lecture_id)
     if lecture.status == LectureStatus.UPLOADED:
         return LectureOut.model_validate(lecture)
     if lecture.status != LectureStatus.AWAITING_UPLOAD:
@@ -91,10 +90,3 @@ async def complete_upload(
     await session.commit()
     await session.refresh(lecture)
     return LectureOut.model_validate(lecture)
-
-
-async def _get_or_404(session: AsyncSession, lecture_id: uuid.UUID) -> Lecture:
-    lecture = await session.get(Lecture, lecture_id)
-    if lecture is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Lecture not found.")
-    return lecture
