@@ -318,3 +318,58 @@ def test_agentic_tool_calls_are_skipped_quietly(
 
     assert len(result.notes.chapters) == 2
     assert "non-text parts" not in caplog.text
+
+
+def test_real_sdk_stream_with_tool_calls_is_quiet(
+    fake: SimpleNamespace,
+    options: Options,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agentic streams carry tool calls. With a JSON schema set, the SDK parses each chunk
+    itself and logs a warning about them, which the baseline filters out while streaming."""
+    monkeypatch.setattr(types, "_response_text_non_text_warning_logged", False)
+    text = json.dumps(MODEL_OUTPUT)
+    half = len(text) // 2
+    events = [
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {"toolCall": {"id": "seek-1", "args": {"start": "05:00"}}},
+                            {"text": text[:half]},
+                        ],
+                    }
+                }
+            ]
+        },
+        {
+            "candidates": [
+                {
+                    "content": {"role": "model", "parts": [{"text": text[half:]}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 9_000, "toolUsePromptTokenCount": 30_000},
+        },
+    ]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = "".join(f"data: {json.dumps(event)}\r\n\r\n" for event in events).encode()
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body)
+
+    sdk = genai.Client(
+        api_key="test-key",
+        http_options=types.HttpOptions(
+            httpx_client=httpx.Client(transport=httpx.MockTransport(handle))
+        ),
+    )
+    client = SimpleNamespace(files=fake.files, models=sdk.models)
+
+    _, result = run_baseline(cast(genai.Client, client), replace(options, processing="agentic"))
+
+    assert len(result.notes.chapters) == 2
+    assert result.run.usage.tool_use_prompt == 30_000
+    assert "non-text parts" not in caplog.text

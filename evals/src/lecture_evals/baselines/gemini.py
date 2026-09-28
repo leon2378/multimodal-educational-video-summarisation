@@ -14,6 +14,7 @@ lectures such as MIT OpenCourseWare.
 import argparse
 import hashlib
 import json
+import logging
 import shutil
 import subprocess
 import sys
@@ -358,15 +359,21 @@ def _generate(client: genai.Client, file: types.File, prompt: str, options: Opti
     first_token_s: float | None = None
     parts: list[str] = []
     last: types.GenerateContentResponse | None = None
-    # Streaming keeps the connection busy during long generations over long videos.
-    for chunk in client.models.generate_content_stream(
-        model=options.model, contents=[video, prompt], config=config
-    ):
-        if text := _text(chunk):
-            if first_token_s is None:
-                first_token_s = time.monotonic() - started
-            parts.append(text)
-        last = chunk
+    sdk_log = logging.getLogger("google_genai.types")
+    quiet = _SkipNonTextWarning()
+    sdk_log.addFilter(quiet)
+    try:
+        # Streaming keeps the connection busy during long generations over long videos.
+        for chunk in client.models.generate_content_stream(
+            model=options.model, contents=[video, prompt], config=config
+        ):
+            if text := _text(chunk):
+                if first_token_s is None:
+                    first_token_s = time.monotonic() - started
+                parts.append(text)
+            last = chunk
+    finally:
+        sdk_log.removeFilter(quiet)
     total_s = time.monotonic() - started
 
     if last is None:
@@ -382,9 +389,17 @@ def _generate(client: genai.Client, file: types.File, prompt: str, options: Opti
     )
 
 
+class _SkipNonTextWarning(logging.Filter):
+    """In agentic mode the stream also carries the model's tool calls (moving around the
+    video). With a JSON schema set, the SDK tries to parse each chunk itself and logs a
+    warning about those non-text parts. _text() reads the text parts directly, so it's noise."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "non-text parts in the response" not in record.getMessage()
+
+
 def _text(chunk: types.GenerateContentResponse) -> str:
-    """The answer's text parts only. In agentic mode the stream also carries the model's own
-    tool calls (moving around the video), which `chunk.text` would warn about on every chunk."""
+    """The answer's text, skipping thoughts and agentic mode's tool calls."""
     if not chunk.candidates or chunk.candidates[0].content is None:
         return ""
     parts = chunk.candidates[0].content.parts or []
