@@ -19,6 +19,13 @@ class LectureCreate(BaseModel):
     content_type: str = Field(pattern=r"^video/[\w.+-]+$", examples=["video/mp4"])
     licence: str | None = Field(default=None, max_length=100, examples=["CC BY-NC-SA 4.0"])
     attribution: str | None = Field(default=None, max_length=2000)
+    course_id: uuid.UUID | None = None
+
+
+class LectureUpdate(BaseModel):
+    """Only the fields sent are changed. `course_id: null` takes a lecture out of its course."""
+
+    course_id: uuid.UUID | None = None
 
 
 class LectureOut(BaseModel):
@@ -26,6 +33,7 @@ class LectureOut(BaseModel):
 
     id: uuid.UUID
     title: str
+    course_id: uuid.UUID | None
     status: LectureStatus
     source_filename: str
     content_type: str
@@ -37,6 +45,26 @@ class LectureOut(BaseModel):
     attribution: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class CourseCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300, pattern=r"\S")
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class CourseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str
+    description: str | None
+    lecture_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class CourseDetail(CourseOut):
+    lectures: list[LectureOut]
 
 
 class UploadTarget(BaseModel):
@@ -160,6 +188,9 @@ class SourceOut(BaseModel):
     """A retrieved segment the answer drew on."""
 
     lecture_id: uuid.UUID
+    lecture_title: str | None = None
+    # In an answer across a course, how its citations name this lecture, e.g. "L2".
+    lecture_label: str | None = None
     segment_id: str
     start_s: float
     end_s: float
@@ -169,9 +200,10 @@ class SourceOut(BaseModel):
 
 
 class CitationOut(BaseModel):
-    # As written in the answer, e.g. "[12:34]".
+    # As written in the answer, e.g. "[12:34]", or "[L2 12:34]" in an answer across a course.
     label: str
     at_s: float
+    lecture_id: uuid.UUID | None = None
     segment_id: str | None
     # False when it points outside every retrieved segment.
     valid: bool
@@ -211,10 +243,13 @@ class MessageOut(BaseModel):
 
 
 class ThreadOut(BaseModel):
+    """A conversation about a lecture or, with `course_id` set instead, a whole course."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    lecture_id: uuid.UUID
+    lecture_id: uuid.UUID | None
+    course_id: uuid.UUID | None
     title: str
     created_at: datetime
     updated_at: datetime

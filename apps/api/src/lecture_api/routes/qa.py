@@ -1,7 +1,9 @@
-"""Q&A over a lecture (docs/blueprint.md, section 5).
+"""Q&A over a lecture or a whole course (docs/blueprint.md, section 5).
 
 POST /v1/lectures/{id}/ask      a streamed answer that cites the lecture as [mm:ss]
-GET  /v1/lectures/{id}/threads  the lecture's conversations, most recent first
+POST /v1/courses/{id}/ask       the same across a course's processed lectures, citing [L2 mm:ss]
+GET  /v1/lectures/{id}/threads  a lecture's conversations, most recent first
+GET  /v1/courses/{id}/threads   a course's conversations, most recent first
 GET  /v1/threads/{id}           one conversation with its questions and answers
 POST /v1/feedback               thumbs up or down on an answer, with an optional reason
 
@@ -13,7 +15,9 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, status
@@ -21,12 +25,19 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pydantic_ai.exceptions import ModelHTTPError
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.concurrency import run_in_threadpool
 
-from lecture_api.deps import AnswererDep, SearcherDep, SessionDep, SettingsDep, lecture_or_404
+from lecture_api.deps import (
+    AnswererDep,
+    SearcherDep,
+    SessionDep,
+    SettingsDep,
+    course_or_404,
+    lecture_or_404,
+)
 from lecture_api.schemas import (
     AskDelta,
     AskDone,
@@ -44,6 +55,7 @@ from lecture_api.schemas import (
 )
 from lecture_core.models import (
     Feedback,
+    Lecture,
     LectureStatus,
     MessageRole,
     QAMessage,
@@ -51,7 +63,7 @@ from lecture_core.models import (
     SlideRow,
     TranscriptSegmentRow,
 )
-from lecture_core.qa import ChatTurn, Passage, Sentence, find_citations
+from lecture_core.qa import ChatTurn, Passage, Sentence, find_citations, label_lectures
 from lecture_core.settings import Settings
 from lecture_core.timeline import SlideReading
 from lecture_llm.agents import Usage
@@ -62,22 +74,38 @@ from lecture_rag.search import Searcher, SearchMode
 router = APIRouter(tags=["qa"])
 logger = logging.getLogger(__name__)
 
-NOTHING_FOUND = "I couldn't find anything about that in this lecture."
 _SEARCH_ERRORS = (httpx.HTTPError, ResponseHandlingException, UnexpectedResponse)
 # A sentence's first word can start a little before its segment's recorded start.
 _SENTENCE_SLACK_S = 0.5
+_ASK_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {
+        "model": AskEvent,
+        "description": "Server-sent events. Each `data:` line is an AskEvent as JSON: "
+        "start, sources, the answer in deltas, then done (or error).",
+    }
+}
+
+
+@dataclass(frozen=True)
+class _Scope:
+    """What an answer draws on: one lecture, or the processed lectures of a course."""
+
+    lecture_ids: list[uuid.UUID]
+    titles: dict[uuid.UUID, str]
+    course_id: uuid.UUID | None = None
+
+    @property
+    def lecture_id(self) -> uuid.UUID | None:
+        return None if self.course_id else self.lecture_ids[0]
+
+    @property
+    def nothing_found(self) -> str:
+        where = "course" if self.course_id else "lecture"
+        return f"I couldn't find anything about that in this {where}."
 
 
 @router.post(
-    "/lectures/{lecture_id}/ask",
-    response_class=StreamingResponse,
-    responses={
-        200: {
-            "model": AskEvent,
-            "description": "Server-sent events. Each `data:` line is an AskEvent as JSON: "
-            "start, sources, the answer in deltas, then done (or error).",
-        }
-    },
+    "/lectures/{lecture_id}/ask", response_class=StreamingResponse, responses=_ASK_RESPONSES
 )
 async def ask(
     lecture_id: uuid.UUID,
@@ -88,54 +116,58 @@ async def ask(
     searcher: SearcherDep,
     answerer: AnswererDep,
 ) -> StreamingResponse:
-    """Answer a question from the lecture. The question and answer are saved in a thread; send
-    its `thread_id` to ask a follow-up. An answer the client disconnects from isn't saved."""
+    """Answer a question from the lecture, citing it as [mm:ss]. The question and answer are
+    saved in a thread; send its `thread_id` to ask a follow-up. An answer the client
+    disconnects from isn't saved."""
     lecture = await lecture_or_404(session, lecture_id)
     if lecture.status != LectureStatus.READY:
         raise HTTPException(status.HTTP_409_CONFLICT, "The lecture hasn't been processed yet.")
-    history: list[ChatTurn] = []
-    if body.thread_id is None:
-        thread = QAThread(lecture_id=lecture_id, title=_title(body.question))
-        session.add(thread)
-        await session.flush()
-    else:
-        found = await session.get(QAThread, body.thread_id)
-        if found is None or found.lecture_id != lecture_id:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Thread not found.")
-        thread = found
-        thread.updated_at = datetime.now(UTC)
-        history = await _history(session, thread.id, settings.qa_history_turns)
-    question = QAMessage(thread_id=thread.id, role=MessageRole.USER, content=body.question)
-    session.add(question)
-    await session.commit()
-    await session.refresh(question)
+    scope = _Scope(lecture_ids=[lecture_id], titles={lecture_id: lecture.title})
+    return await _ask(body, scope, request, session, settings, searcher, answerer)
 
-    events = _answer(
-        question=question,
-        history=history,
-        lecture_id=lecture_id,
-        sessionmaker=request.app.state.sessionmaker,
-        searcher=searcher,
-        answerer=answerer,
-        settings=settings,
+
+@router.post("/courses/{course_id}/ask", response_class=StreamingResponse, responses=_ASK_RESPONSES)
+async def ask_course(
+    course_id: uuid.UUID,
+    body: AskRequest,
+    request: Request,
+    session: SessionDep,
+    settings: SettingsDep,
+    searcher: SearcherDep,
+    answerer: AnswererDep,
+) -> StreamingResponse:
+    """Answer a question from every processed lecture in the course. Citations name the
+    lecture, like [L2 12:34]; each source's `lecture_label` says which lecture is L2."""
+    await course_or_404(session, course_id)
+    lectures = (
+        await session.scalars(
+            select(Lecture).where(
+                Lecture.course_id == course_id, Lecture.status == LectureStatus.READY
+            )
+        )
+    ).all()
+    if not lectures:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "None of the course's lectures has been processed yet."
+        )
+    scope = _Scope(
+        lecture_ids=[lecture.id for lecture in lectures],
+        titles={lecture.id: lecture.title for lecture in lectures},
+        course_id=course_id,
     )
-    return StreamingResponse(
-        events,
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return await _ask(body, scope, request, session, settings, searcher, answerer)
 
 
 @router.get("/lectures/{lecture_id}/threads")
 async def list_threads(lecture_id: uuid.UUID, session: SessionDep) -> list[ThreadOut]:
     await lecture_or_404(session, lecture_id)
-    threads = await session.scalars(
-        select(QAThread)
-        .where(QAThread.lecture_id == lecture_id)
-        .order_by(QAThread.updated_at.desc())
-        .limit(50)
-    )
-    return [ThreadOut.model_validate(thread) for thread in threads]
+    return await _threads(session, QAThread.lecture_id == lecture_id)
+
+
+@router.get("/courses/{course_id}/threads")
+async def list_course_threads(course_id: uuid.UUID, session: SessionDep) -> list[ThreadOut]:
+    await course_or_404(session, course_id)
+    return await _threads(session, QAThread.course_id == course_id)
 
 
 @router.get("/threads/{thread_id}")
@@ -185,11 +217,67 @@ async def feedback(body: FeedbackIn, session: SessionDep) -> FeedbackOut:
     return FeedbackOut.model_validate(saved)
 
 
+async def _ask(
+    body: AskRequest,
+    scope: _Scope,
+    request: Request,
+    session: AsyncSession,
+    settings: Settings,
+    searcher: Searcher,
+    answerer: AnswerLLM,
+) -> StreamingResponse:
+    """Save the question in its thread (a new one unless `thread_id` names one), then stream
+    the answer."""
+    history: list[ChatTurn] = []
+    if body.thread_id is None:
+        thread = QAThread(
+            lecture_id=scope.lecture_id, course_id=scope.course_id, title=_title(body.question)
+        )
+        session.add(thread)
+        await session.flush()
+    else:
+        found = await session.get(QAThread, body.thread_id)
+        if found is None or (found.lecture_id, found.course_id) != (
+            scope.lecture_id,
+            scope.course_id,
+        ):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Thread not found.")
+        thread = found
+        thread.updated_at = datetime.now(UTC)
+        history = await _history(session, thread.id, settings.qa_history_turns)
+    question = QAMessage(thread_id=thread.id, role=MessageRole.USER, content=body.question)
+    session.add(question)
+    await session.commit()
+    await session.refresh(question)
+
+    events = _answer(
+        question=question,
+        history=history,
+        scope=scope,
+        sessionmaker=request.app.state.sessionmaker,
+        searcher=searcher,
+        answerer=answerer,
+        settings=settings,
+    )
+    return StreamingResponse(
+        events,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _threads(session: AsyncSession, where: ColumnElement[bool]) -> list[ThreadOut]:
+    threads = await session.scalars(
+        select(QAThread).where(where).order_by(QAThread.updated_at.desc()).limit(50)
+    )
+    return [ThreadOut.model_validate(thread) for thread in threads]
+
+
 async def _answer(
     *,
     question: QAMessage,
     history: Sequence[ChatTurn],
-    lecture_id: uuid.UUID,
+    scope: _Scope,
     sessionmaker: async_sessionmaker[AsyncSession],
     searcher: Searcher,
     answerer: AnswerLLM,
@@ -216,19 +304,25 @@ async def _answer(
         hits = await run_in_threadpool(
             searcher.search,
             query,
-            lecture_ids=[lecture_id],
+            lecture_ids=scope.lecture_ids,
             limit=settings.qa_passages,
             mode=SearchMode(settings.search_mode),
         )
         async with sessionmaker() as session:
             passages = await _passages(session, hits)
-        sources = [_source(hit) for hit in hits]
+        if scope.course_id is not None:
+            passages = label_lectures(passages, scope.titles)
+        labels = {passage.lecture_id: passage.label for passage in passages}
+        sources = [
+            _source(hit, scope.titles.get(hit.lecture_id), labels.get(hit.lecture_id))
+            for hit in hits
+        ]
         answer.sources = [source.model_dump(mode="json") for source in sources]
         yield _sse(AskSources(search_query=query, sources=sources))
         deltas = (
             answerer.stream_answer(question.content, passages, history, usage)
             if passages
-            else _just(NOTHING_FOUND)
+            else _just(scope.nothing_found)
         )
         async for delta in deltas:
             if answer.first_token_ms is None:
@@ -243,7 +337,7 @@ async def _answer(
         failure = _model_failure(error)
     answer.error = failure
     answer.content = "".join(parts)
-    answer.citations = [c.model_dump() for c in find_citations(answer.content, passages)]
+    answer.citations = [c.model_dump(mode="json") for c in find_citations(answer.content, passages)]
     answer.usage = usage.model_dump()
     answer.total_ms = _ms_since(started)
     async with sessionmaker() as session, session.begin():
@@ -258,7 +352,7 @@ async def _answer(
 
 
 async def _passages(session: AsyncSession, hits: Sequence[Hit]) -> list[Passage]:
-    """The retrieved segments with their sentences and slides, from the lecture's results."""
+    """The retrieved segments with their sentences and slides, from the lectures' results."""
     if not hits:
         return []
     sentences = (
@@ -341,9 +435,11 @@ async def _history(session: AsyncSession, thread_id: uuid.UUID, turns: int) -> l
     return history[-turns:] if turns > 0 else []
 
 
-def _source(hit: Hit) -> SourceOut:
+def _source(hit: Hit, lecture_title: str | None, lecture_label: str | None) -> SourceOut:
     return SourceOut(
         lecture_id=hit.lecture_id,
+        lecture_title=lecture_title,
+        lecture_label=lecture_label,
         segment_id=hit.segment_id,
         start_s=hit.start_s,
         end_s=hit.end_s,

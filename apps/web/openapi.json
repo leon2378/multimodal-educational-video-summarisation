@@ -215,6 +215,18 @@
             "title": "Label",
             "type": "string"
           },
+          "lecture_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lecture Id"
+          },
           "segment_id": {
             "anyOf": [
               {
@@ -261,6 +273,138 @@
           "at_s"
         ],
         "title": "Concept",
+        "type": "object"
+      },
+      "CourseCreate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "CourseCreate",
+        "type": "object"
+      },
+      "CourseDetail": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lecture_count": {
+            "default": 0,
+            "title": "Lecture Count",
+            "type": "integer"
+          },
+          "lectures": {
+            "items": {
+              "$ref": "#/components/schemas/LectureOut"
+            },
+            "title": "Lectures",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "created_at",
+          "updated_at",
+          "lectures"
+        ],
+        "title": "CourseDetail",
+        "type": "object"
+      },
+      "CourseOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lecture_count": {
+            "default": 0,
+            "title": "Lecture Count",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CourseOut",
         "type": "object"
       },
       "FeedbackIn": {
@@ -387,6 +531,18 @@
             "title": "Content Type",
             "type": "string"
           },
+          "course_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Id"
+          },
           "filename": {
             "examples": [
               "6.006-lecture-01.mp4"
@@ -470,6 +626,18 @@
             "title": "Content Type",
             "type": "string"
           },
+          "course_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Id"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -533,6 +701,7 @@
         "required": [
           "id",
           "title",
+          "course_id",
           "status",
           "source_filename",
           "content_type",
@@ -557,6 +726,25 @@
         ],
         "title": "LectureStatus",
         "type": "string"
+      },
+      "LectureUpdate": {
+        "description": "Only the fields sent are changed. `course_id: null` takes a lecture out of its course.",
+        "properties": {
+          "course_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Id"
+          }
+        },
+        "title": "LectureUpdate",
+        "type": "object"
       },
       "MediaOut": {
         "description": "Where the browser plays the lecture from: a presigned URL straight to storage.",
@@ -1141,6 +1329,28 @@
             "title": "Lecture Id",
             "type": "string"
           },
+          "lecture_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lecture Label"
+          },
+          "lecture_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lecture Title"
+          },
           "score": {
             "title": "Score",
             "type": "number"
@@ -1247,6 +1457,18 @@
       },
       "ThreadDetail": {
         "properties": {
+          "course_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Id"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1258,9 +1480,16 @@
             "type": "string"
           },
           "lecture_id": {
-            "format": "uuid",
-            "title": "Lecture Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lecture Id"
           },
           "messages": {
             "items": {
@@ -1282,6 +1511,7 @@
         "required": [
           "id",
           "lecture_id",
+          "course_id",
           "title",
           "created_at",
           "updated_at",
@@ -1291,7 +1521,20 @@
         "type": "object"
       },
       "ThreadOut": {
+        "description": "A conversation about a lecture or, with `course_id` set instead, a whole course.",
         "properties": {
+          "course_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Id"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1303,9 +1546,16 @@
             "type": "string"
           },
           "lecture_id": {
-            "format": "uuid",
-            "title": "Lecture Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lecture Id"
           },
           "title": {
             "title": "Title",
@@ -1320,6 +1570,7 @@
         "required": [
           "id",
           "lecture_id",
+          "course_id",
           "title",
           "created_at",
           "updated_at"
@@ -1546,6 +1797,248 @@
         ]
       }
     },
+    "/v1/courses": {
+      "get": {
+        "operationId": "list_courses_v1_courses_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CourseOut"
+                  },
+                  "title": "Response List Courses V1 Courses Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Courses",
+        "tags": [
+          "courses"
+        ]
+      },
+      "post": {
+        "operationId": "create_course_v1_courses_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CourseCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Course",
+        "tags": [
+          "courses"
+        ]
+      }
+    },
+    "/v1/courses/{course_id}": {
+      "delete": {
+        "operationId": "delete_course_v1_courses__course_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Course",
+        "tags": [
+          "courses"
+        ]
+      },
+      "get": {
+        "operationId": "get_course_v1_courses__course_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Course",
+        "tags": [
+          "courses"
+        ]
+      }
+    },
+    "/v1/courses/{course_id}/ask": {
+      "post": {
+        "description": "Answer a question from every processed lecture in the course. Citations name the\nlecture, like [L2 12:34]; each source's `lecture_label` says which lecture is L2.",
+        "operationId": "ask_course_v1_courses__course_id__ask_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskEvent"
+                }
+              }
+            },
+            "description": "Server-sent events. Each `data:` line is an AskEvent as JSON: start, sources, the answer in deltas, then done (or error)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask Course",
+        "tags": [
+          "qa"
+        ]
+      }
+    },
+    "/v1/courses/{course_id}/threads": {
+      "get": {
+        "operationId": "list_course_threads_v1_courses__course_id__threads_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ThreadOut"
+                  },
+                  "title": "Response List Course Threads V1 Courses  Course Id  Threads Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Course Threads",
+        "tags": [
+          "qa"
+        ]
+      }
+    },
     "/v1/feedback": {
       "post": {
         "description": "Rate an answer. Rating it again replaces the earlier rating.",
@@ -1717,11 +2210,63 @@
         "tags": [
           "lectures"
         ]
+      },
+      "patch": {
+        "description": "Change only the fields sent. So far that's the course.",
+        "operationId": "update_lecture_v1_lectures__lecture_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LectureUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LectureOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Lecture",
+        "tags": [
+          "lectures"
+        ]
       }
     },
     "/v1/lectures/{lecture_id}/ask": {
       "post": {
-        "description": "Answer a question from the lecture. The question and answer are saved in a thread; send\nits `thread_id` to ask a follow-up. An answer the client disconnects from isn't saved.",
+        "description": "Answer a question from the lecture, citing it as [mm:ss]. The question and answer are\nsaved in a thread; send its `thread_id` to ask a follow-up. An answer the client\ndisconnects from isn't saved.",
         "operationId": "ask_v1_lectures__lecture_id__ask_post",
         "parameters": [
           {
@@ -2265,6 +2810,25 @@
               ],
               "description": "Search only these lectures (repeatable).",
               "title": "Lecture Id"
+            }
+          },
+          {
+            "description": "Search only the lectures in this course.",
+            "in": "query",
+            "name": "course_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search only the lectures in this course.",
+              "title": "Course Id"
             }
           },
           {

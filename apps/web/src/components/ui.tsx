@@ -1,7 +1,7 @@
 "use client";
 
 import katex from "katex";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import type { LectureStatus } from "@/lib/api";
 import { formatTime } from "@/lib/timeline";
@@ -23,17 +23,69 @@ export function StatusBadge({ status }: { status: LectureStatus }) {
   );
 }
 
-/** A citation like [12:30]: jumps the video there. */
-export function TimeButton({ seconds, onSeek }: { seconds: number; onSeek: (t: number) => void }) {
+/** A citation like [12:30]: jumps the video there. `label` replaces the text shown, e.g.
+ *  "[L2 12:30]", and `lecture` names the lecture it plays. */
+export function TimeButton({
+  seconds,
+  onSeek,
+  label,
+  lecture,
+}: {
+  seconds: number;
+  onSeek: (t: number) => void;
+  label?: string;
+  lecture?: string | null;
+}) {
+  const where = lecture ? `${lecture} from ${formatTime(seconds)}` : `from ${formatTime(seconds)}`;
   return (
     <button
       type="button"
       onClick={() => onSeek(seconds)}
       className="rounded px-1 font-mono text-sm text-indigo-700 hover:bg-indigo-50 hover:underline dark:text-indigo-300 dark:hover:bg-indigo-950"
-      aria-label={`Play from ${formatTime(seconds)}`}
+      aria-label={`Play ${where}`}
+      title={lecture ?? undefined}
     >
-      [{formatTime(seconds)}]
+      {label ?? `[${formatTime(seconds)}]`}
     </button>
+  );
+}
+
+/** A panel of tabs; `render` draws the selected one. */
+export function Tabs<T extends string>({
+  tabs,
+  render,
+  className = "",
+}: {
+  tabs: [T, string][];
+  render: (tab: T) => React.ReactNode;
+  className?: string;
+}) {
+  const [first] = tabs;
+  const [tab, setTab] = useState<T | undefined>(first?.[0]);
+  return (
+    <section
+      className={`flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 ${className}`}
+    >
+      <div role="tablist" className="flex border-b border-slate-200 dark:border-slate-800">
+        {tabs.map(([value, label]) => (
+          <button
+            key={value}
+            role="tab"
+            type="button"
+            aria-selected={tab === value}
+            onClick={() => setTab(value)}
+            className={`flex-1 px-3 py-2 text-sm font-medium ${
+              tab === value ? "border-b-2 border-indigo-600 text-indigo-700 dark:text-indigo-300" : "text-slate-500"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" className="overflow-y-auto p-4">
+        {tab !== undefined && render(tab)}
+      </div>
+    </section>
   );
 }
 

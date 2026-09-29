@@ -1,18 +1,42 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { type ProgressEvent, type Slide, type StudyNotes, type TranscriptLine, api, unwrap } from "@/lib/api";
-import { useLecture, useMedia, useNotes, useProgress, useSearch, useSlides, useTranscript } from "@/lib/queries";
-import { formatTime, indexAt, slideAt } from "@/lib/timeline";
+import {
+  type Lecture,
+  type ProgressEvent,
+  type Slide,
+  type StudyNotes,
+  type TranscriptLine,
+  api,
+  unwrap,
+} from "@/lib/api";
+import {
+  courseKey,
+  lectureKey,
+  useCourses,
+  useLecture,
+  useMedia,
+  useNotes,
+  useProgress,
+  useSlides,
+  useTranscript,
+} from "@/lib/queries";
+import { type Open, lectureHref } from "@/lib/scope";
+import { indexAt, slideAt } from "@/lib/timeline";
 
 import { ChatPanel } from "./chat";
-import { Card, Latex, StatusBadge, TimeButton } from "./ui";
+import { SearchPanel } from "./search";
+import { Card, Latex, StatusBadge, Tabs, TimeButton } from "./ui";
 
 type Seek = (seconds: number) => void;
 
-export function LectureView({ id }: { id: string }) {
+/** A lecture's page. `start` (from ?t=) plays it from that second. */
+export function LectureView({ id, start }: { id: string; start?: number }) {
+  const router = useRouter();
   const lecture = useLecture(id);
   const status = lecture.data?.status;
   const ready = status === "ready";
@@ -29,8 +53,15 @@ export function LectureView({ id }: { id: string }) {
     const player = video.current;
     if (!player) return;
     player.currentTime = seconds;
-    void player.play();
+    // Browsers may block playing without a click on this page; the seek still happens.
+    player.play().catch(() => undefined);
   }, []);
+  // Citations from a course's answers can point into another lecture: open it there.
+  const open = useCallback<Open>(
+    (lectureId, seconds) => (lectureId === id ? seek(seconds) : router.push(lectureHref(lectureId, seconds))),
+    [id, seek, router],
+  );
+  const started = useRef(false);
 
   if (lecture.isPending) return <p className="text-sm text-slate-500">Loading…</p>;
   if (lecture.isError) {
@@ -48,6 +79,7 @@ export function LectureView({ id }: { id: string }) {
         <h1 className="text-2xl font-semibold tracking-tight">{info.title}</h1>
         <StatusBadge status={info.status} />
         {(info.status === "uploaded" || info.status === "failed") && <ProcessButton id={id} />}
+        <CoursePicker lecture={info} />
       </div>
       {(info.licence || info.attribution) && (
         <p className="text-sm text-slate-500">{[info.attribution, info.licence].filter(Boolean).join(" · ")}</p>
@@ -65,6 +97,12 @@ export function LectureView({ id }: { id: string }) {
                 preload="metadata"
                 className="aspect-video w-full"
                 onTimeUpdate={(event) => setTime(event.currentTarget.currentTime)}
+                onLoadedMetadata={() => {
+                  if (start !== undefined && !started.current) {
+                    started.current = true;
+                    seek(start);
+                  }
+                }}
               />
             ) : (
               <div className="flex aspect-video items-center justify-center text-sm text-slate-400">
@@ -85,6 +123,7 @@ export function LectureView({ id }: { id: string }) {
               notes={notes.data?.notes}
               time={time}
               onSeek={seek}
+              onOpen={open}
             />
           ) : (
             <Card>
@@ -96,6 +135,59 @@ export function LectureView({ id }: { id: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Which course the lecture is in, and a way to move it. */
+function CoursePicker({ lecture }: { lecture: Lecture }) {
+  const queryClient = useQueryClient();
+  const courses = useCourses();
+  const [error, setError] = useState<string | null>(null);
+  const current = courses.data?.find((course) => course.id === lecture.course_id);
+
+  async function move(courseId: string | null) {
+    setError(null);
+    try {
+      unwrap(
+        await api.PATCH("/v1/lectures/{lecture_id}", {
+          params: { path: { lecture_id: lecture.id } },
+          body: { course_id: courseId },
+        }),
+      );
+      const changed = [lecture.course_id, courseId].filter((c): c is string => c !== null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: lectureKey(lecture.id) }),
+        queryClient.invalidateQueries({ queryKey: ["courses"] }),
+        ...changed.map((c) => queryClient.invalidateQueries({ queryKey: courseKey(c) })),
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  if (!courses.data || (courses.data.length === 0 && !lecture.course_id)) return null;
+  return (
+    <span className="ml-auto flex items-center gap-2 text-sm">
+      {current && (
+        <Link href={`/courses/${current.id}`} className="text-indigo-700 hover:underline dark:text-indigo-300">
+          {current.title}
+        </Link>
+      )}
+      <select
+        value={lecture.course_id ?? ""}
+        onChange={(event) => void move(event.target.value || null)}
+        aria-label="Course"
+        className="rounded-lg border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
+      >
+        <option value="">No course</option>
+        {courses.data.map((course) => (
+          <option key={course.id} value={course.id}>
+            {course.title}
+          </option>
+        ))}
+      </select>
+      {error && <span className="text-rose-600">{error}</span>}
+    </span>
   );
 }
 
@@ -240,55 +332,42 @@ function Chapters({ notes, time, onSeek }: { notes: StudyNotes; time: number; on
   );
 }
 
-type Tab = "transcript" | "notes" | "quiz" | "search" | "ask";
-
 function SidePanel({
   id,
   transcript,
   notes,
   time,
   onSeek,
+  onOpen,
 }: {
   id: string;
   transcript: TranscriptLine[];
   notes: StudyNotes | undefined;
   time: number;
   onSeek: Seek;
+  onOpen: Open;
 }) {
-  const [tab, setTab] = useState<Tab>("transcript");
-  const tabs: [Tab, string][] = [
-    ["transcript", "Transcript"],
-    ["notes", "Notes"],
-    ["quiz", "Quiz"],
-    ["search", "Search"],
-    ["ask", "Ask"],
-  ];
+  const scope = { kind: "lecture", id } as const;
   return (
-    <section className="flex max-h-[calc(100vh-7rem)] flex-col rounded-xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-4 dark:border-slate-800 dark:bg-slate-900">
-      <div role="tablist" className="flex border-b border-slate-200 dark:border-slate-800">
-        {tabs.map(([value, label]) => (
-          <button
-            key={value}
-            role="tab"
-            type="button"
-            aria-selected={tab === value}
-            onClick={() => setTab(value)}
-            className={`flex-1 px-3 py-2 text-sm font-medium ${
-              tab === value ? "border-b-2 border-indigo-600 text-indigo-700 dark:text-indigo-300" : "text-slate-500"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel" className="overflow-y-auto p-4">
-        {tab === "transcript" && <Transcript lines={transcript} time={time} onSeek={onSeek} />}
-        {tab === "notes" && notes && <NotesPanel notes={notes} onSeek={onSeek} />}
-        {tab === "quiz" && notes && <Quiz notes={notes} onSeek={onSeek} />}
-        {tab === "search" && <SearchPanel id={id} onSeek={onSeek} />}
-        {tab === "ask" && <ChatPanel lectureId={id} onSeek={onSeek} />}
-      </div>
-    </section>
+    <Tabs
+      className="max-h-[calc(100vh-7rem)] lg:sticky lg:top-4"
+      tabs={[
+        ["transcript", "Transcript"],
+        ["notes", "Notes"],
+        ["quiz", "Quiz"],
+        ["search", "Search"],
+        ["ask", "Ask"],
+      ]}
+      render={(tab) => (
+        <>
+          {tab === "transcript" && <Transcript lines={transcript} time={time} onSeek={onSeek} />}
+          {tab === "notes" && notes && <NotesPanel notes={notes} onSeek={onSeek} />}
+          {tab === "quiz" && notes && <Quiz notes={notes} onSeek={onSeek} />}
+          {tab === "search" && <SearchPanel scope={scope} onOpen={onOpen} />}
+          {tab === "ask" && <ChatPanel scope={scope} onOpen={onOpen} />}
+        </>
+      )}
+    />
   );
 }
 
@@ -381,69 +460,5 @@ function Quiz({ notes, onSeek }: { notes: StudyNotes; onSeek: Seek }) {
         </li>
       ))}
     </ol>
-  );
-}
-
-function SearchPanel({ id, onSeek }: { id: string; onSeek: Seek }) {
-  const [draft, setDraft] = useState("");
-  const [query, setQuery] = useState("");
-  const results = useSearch(id, query);
-
-  return (
-    <div className="flex flex-col gap-3 text-sm">
-      <form
-        role="search"
-        className="flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setQuery(draft.trim());
-        }}
-      >
-        <input
-          type="search"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Ask about this lecture"
-          aria-label="Search this lecture"
-          maxLength={500}
-          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-950"
-        />
-        <button
-          type="submit"
-          disabled={!draft.trim()}
-          className="rounded-lg bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          Search
-        </button>
-      </form>
-      {results.isFetching && <p className="text-slate-500">Searching…</p>}
-      {results.isError && (
-        <p className="text-rose-600" role="alert">
-          {results.error.message}
-        </p>
-      )}
-      {results.data?.hits.length === 0 && <p className="text-slate-500">Nothing in this lecture matches.</p>}
-      {results.data && results.data.hits.length > 0 && (
-        <ol className="flex flex-col gap-1" aria-label="Search results">
-          {results.data.hits.map((hit) => (
-            <li key={hit.segment_id}>
-              <button
-                type="button"
-                onClick={() => onSeek(hit.start_s)}
-                aria-label={`Play from ${formatTime(hit.start_s)}`}
-                className="w-full rounded-lg p-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                <span className="flex items-baseline gap-2 text-xs text-slate-500">
-                  <span className="font-mono text-indigo-700 dark:text-indigo-300">[{formatTime(hit.start_s)}]</span>
-                  {hit.chapter && <span className="truncate">{hit.chapter}</span>}
-                </span>
-                {hit.slide_title && <span className="block font-medium">{hit.slide_title}</span>}
-                <span className="line-clamp-3 leading-relaxed text-slate-700 dark:text-slate-300">{hit.transcript}</span>
-              </button>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
   );
 }

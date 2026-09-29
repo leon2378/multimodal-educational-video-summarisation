@@ -44,6 +44,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/courses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Courses */
+        get: operations["list_courses_v1_courses_get"];
+        put?: never;
+        /** Create Course */
+        post: operations["create_course_v1_courses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/courses/{course_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Course */
+        get: operations["get_course_v1_courses__course_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Course */
+        delete: operations["delete_course_v1_courses__course_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/courses/{course_id}/ask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Course
+         * @description Answer a question from every processed lecture in the course. Citations name the
+         *     lecture, like [L2 12:34]; each source's `lecture_label` says which lecture is L2.
+         */
+        post: operations["ask_course_v1_courses__course_id__ask_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/courses/{course_id}/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Course Threads */
+        get: operations["list_course_threads_v1_courses__course_id__threads_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/feedback": {
         parameters: {
             query?: never;
@@ -96,7 +170,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Lecture
+         * @description Change only the fields sent. So far that's the course.
+         */
+        patch: operations["update_lecture_v1_lectures__lecture_id__patch"];
         trace?: never;
     };
     "/v1/lectures/{lecture_id}/ask": {
@@ -110,8 +188,9 @@ export interface paths {
         put?: never;
         /**
          * Ask
-         * @description Answer a question from the lecture. The question and answer are saved in a thread; send
-         *     its `thread_id` to ask a follow-up. An answer the client disconnects from isn't saved.
+         * @description Answer a question from the lecture, citing it as [mm:ss]. The question and answer are
+         *     saved in a thread; send its `thread_id` to ask a follow-up. An answer the client
+         *     disconnects from isn't saved.
          */
         post: operations["ask_v1_lectures__lecture_id__ask_post"];
         delete?: never;
@@ -429,6 +508,8 @@ export interface components {
             at_s: number;
             /** Label */
             label: string;
+            /** Lecture Id */
+            lecture_id?: string | null;
             /** Segment Id */
             segment_id: string | null;
             /** Valid */
@@ -442,6 +523,69 @@ export interface components {
             definition: string;
             /** Term */
             term: string;
+        };
+        /** CourseCreate */
+        CourseCreate: {
+            /** Description */
+            description?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** CourseDetail */
+        CourseDetail: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Lecture Count
+             * @default 0
+             */
+            lecture_count: number;
+            /** Lectures */
+            lectures: components["schemas"]["LectureOut"][];
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** CourseOut */
+        CourseOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Lecture Count
+             * @default 0
+             */
+            lecture_count: number;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** FeedbackIn */
         FeedbackIn: {
@@ -493,6 +637,8 @@ export interface components {
              * @example video/mp4
              */
             content_type: string;
+            /** Course Id */
+            course_id?: string | null;
             /**
              * Filename
              * @example 6.006-lecture-01.mp4
@@ -519,6 +665,8 @@ export interface components {
             content_hash: string | null;
             /** Content Type */
             content_type: string;
+            /** Course Id */
+            course_id: string | null;
             /**
              * Created At
              * Format: date-time
@@ -551,6 +699,14 @@ export interface components {
          * @enum {string}
          */
         LectureStatus: "awaiting_upload" | "uploaded" | "processing" | "ready" | "failed";
+        /**
+         * LectureUpdate
+         * @description Only the fields sent are changed. `course_id: null` takes a lecture out of its course.
+         */
+        LectureUpdate: {
+            /** Course Id */
+            course_id?: string | null;
+        };
         /**
          * MediaOut
          * @description Where the browser plays the lecture from: a presigned URL straight to storage.
@@ -765,6 +921,10 @@ export interface components {
              * Format: uuid
              */
             lecture_id: string;
+            /** Lecture Label */
+            lecture_label?: string | null;
+            /** Lecture Title */
+            lecture_title?: string | null;
             /** Score */
             score: number;
             /** Segment Id */
@@ -798,6 +958,8 @@ export interface components {
         };
         /** ThreadDetail */
         ThreadDetail: {
+            /** Course Id */
+            course_id: string | null;
             /**
              * Created At
              * Format: date-time
@@ -808,11 +970,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /**
-             * Lecture Id
-             * Format: uuid
-             */
-            lecture_id: string;
+            /** Lecture Id */
+            lecture_id: string | null;
             /** Messages */
             messages: components["schemas"]["MessageOut"][];
             /** Title */
@@ -823,8 +982,13 @@ export interface components {
              */
             updated_at: string;
         };
-        /** ThreadOut */
+        /**
+         * ThreadOut
+         * @description A conversation about a lecture or, with `course_id` set instead, a whole course.
+         */
         ThreadOut: {
+            /** Course Id */
+            course_id: string | null;
             /**
              * Created At
              * Format: date-time
@@ -835,11 +999,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /**
-             * Lecture Id
-             * Format: uuid
-             */
-            lecture_id: string;
+            /** Lecture Id */
+            lecture_id: string | null;
             /** Title */
             title: string;
             /**
@@ -965,6 +1126,185 @@ export interface operations {
             };
         };
     };
+    list_courses_v1_courses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseOut"][];
+                };
+            };
+        };
+    };
+    create_course_v1_courses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CourseCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_course_v1_courses__course_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CourseDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_course_v1_courses__course_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_course_v1_courses__course_id__ask_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskRequest"];
+            };
+        };
+        responses: {
+            /** @description Server-sent events. Each `data:` line is an AskEvent as JSON: start, sources, the answer in deltas, then done (or error). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_course_threads_v1_courses__course_id__threads_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     feedback_v1_feedback_post: {
         parameters: {
             query?: never;
@@ -1072,6 +1412,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LectureOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_lecture_v1_lectures__lecture_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lecture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LectureUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1444,6 +1819,8 @@ export interface operations {
                 q: string;
                 /** @description Search only these lectures (repeatable). */
                 lecture_id?: string[] | null;
+                /** @description Search only the lectures in this course. */
+                course_id?: string | null;
                 limit?: number;
                 /** @description Default: the server's `SEARCH_MODE`. `rerank` ranks best. */
                 mode?: components["schemas"]["SearchMode"] | null;

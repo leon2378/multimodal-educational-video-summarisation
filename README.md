@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 and 2 of 6 done, and most of Phase 3: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask it questions with answers that cite the lecture. Course-wide search and Q&A come next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 3 of 6 done: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Evals and observability come next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -28,6 +28,8 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   cites the moments it comes from as `[mm:ss]`, each citation checked against what was
   retrieved. Follow-ups are rewritten to stand alone before searching. Threads, answers (with
   sources, tokens and time to first token) and thumbs up/down feedback are stored.
+- Courses ([below](#courses)): group lectures, then search and ask across all of them, with
+  citations that open the right lecture at the cited moment.
 - A single-call Gemini baseline that summarises a lecture video and records tokens, cost and
   timings ([below](#gemini-baseline)).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
@@ -91,13 +93,17 @@ migrations in a one-off container, and starts the API on port 8000.
 `make app` builds and runs the API, the CPU worker and the web app in Docker; add
 `make gpu-worker` for speech recognition and the reranker. Then open http://localhost:3000:
 
-- **Library**: upload a lecture (straight to storage, with a progress bar). Processing starts on
-  its own, and the page switches to the lecture.
+- **Library**: upload a lecture (straight to storage, with a progress bar), optionally into a
+  course. Processing starts on its own, and the page switches to the lecture. Courses are
+  created and listed here too.
+- **Course page**: its lectures, and tabs to ask or search across all of them. A citation or
+  result opens the lecture it points into, playing from there.
 - **Lecture page**: live processing progress, then the video with a slide strip that follows
   the slide on screen, chapters, and tabs for a transcript that highlights and scrolls with
   playback, the notes (formulas rendered with KaTeX), a quiz, search, and an Ask tab: a chat
   whose answers stream in, with citations that play the video from where they point. Every
-  timestamp and search result plays the video from there.
+  timestamp and search result plays the video from there. The header shows the lecture's
+  course and moves it to another.
 
 For hot reload while working on it, run `make web` (Node 24) alongside `make up`, `make api` and
 the workers. The web app calls the API from the browser: its address is baked in at build time
@@ -156,6 +162,8 @@ curl -s "localhost:8000/v1/search?q=why+are+constants+ignored&lecture_id=$ID"   
 curl -s "localhost:8000/v1/search?q=why+are+constants+ignored&lecture_id=$ID&mode=hybrid"  # no reranker
 ```
 
+Use `course_id=...` instead of `lecture_id` to search a course's lectures.
+
 `mode` is `dense`, `bm25`, `hybrid` or `rerank`. Without it, the API uses `SEARCH_MODE`: `rerank`
 in Docker, where the reranker runs on the GPU (`make gpu-worker` starts it), and `hybrid` for
 an API run on the host. Each hit has the segment's times, slide title, chapter and transcript.
@@ -191,6 +199,23 @@ An answer uses only the lecture: asked about merge sort, Lecture 10's answer is 
 doesn't seem to cover it. How answers are built and checked is in
 [docs/architecture.md](docs/architecture.md#qa-phase-3b). On the free tier, the same caveat
 applies as for processing: public lectures only.
+
+## Courses
+
+```bash
+COURSE=$(curl -s -X POST localhost:8000/v1/courses -H 'Content-Type: application/json' \
+  -d '{"title": "MIT 6.0001 Fall 2016"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+curl -s -X PATCH "localhost:8000/v1/lectures/$ID" -H 'Content-Type: application/json' \
+  -d "{\"course_id\": \"$COURSE\"}"                                   # or pass course_id when creating it
+curl -sN -X POST "localhost:8000/v1/courses/$COURSE/ask" -H 'Content-Type: application/json' \
+  -d '{"question": "Why was nothing shown on the console in the print exercise?"}'
+```
+
+A course answer names each lecture with a label and cites it as `[L2 12:34]`; each source in the
+`sources` event says which lecture L2 is. `GET /v1/courses` lists courses, `GET /v1/courses/{id}`
+shows one with its lectures, and `GET /v1/courses/{id}/threads` its conversations. Deleting a
+course keeps its lectures. Lectures processed before search existed need processing once more
+to be indexed; everything but the embedding and indexing is cached.
 
 ## Gemini baseline
 
@@ -324,6 +349,9 @@ One integration test runs `alembic check`: it fails if a model changed without a
 Architecture decisions are recorded in [docs/adr](docs/adr/README.md). The build so far differs
 from the blueprint in these places:
 
+- **The search index doesn't store course ids.** A course search filters by the ids of the
+  course's lectures, so a lecture can move between courses without re-indexing
+  ([architecture](docs/architecture.md#courses-phase-3)).
 - **Temporal and Qdrant came into Compose when first used**, not in Phase 1: Temporal in Phase 2
   ([ADR 0002](docs/adr/0002-temporal-for-orchestration.md)), Qdrant in Phase 3
   ([ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md)).
@@ -362,11 +390,11 @@ from the blueprint in these places:
   - [x] 2b: Temporal workers, process/progress/results API, new tables
   - [x] 2c: web app (upload, live progress, lecture page with player, synced transcript, slides,
         chapters, notes, quiz)
-- [ ] **Phase 3, RAG Q&A**
+- [x] **Phase 3, RAG Q&A**
   - [x] 3a: chunks, embeddings, Qdrant index, hybrid search and reranking, search API and tab,
         golden Q&A set and retrieval eval
   - [x] 3b: streamed answers with checked `[mm:ss]` citations, chat panel, threads and feedback
-  - [ ] Courses: search and answers across a course's lectures
+  - [x] Courses: search and answers across a course's lectures
 - [ ] **Phase 4, evals and observability**: eval suites, Langfuse, OpenTelemetry, CI eval gate
 - [ ] **Phase 5, CV and optimisation**: YOLO26 fine-tune, OCR-vs-VLM routing, ONNX/TensorRT/int8
 - [ ] **Phase 6, ship**: auth, quotas, Terraform and Modal deploy, results write-up

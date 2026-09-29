@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -47,11 +48,29 @@ def _enum_values(enum_cls: type[StrEnum]) -> list[str]:
     return [member.value for member in enum_cls]
 
 
+class Course(Base):
+    """A group of lectures that search and Q&A can span."""
+
+    __tablename__ = "courses"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(300))
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Lecture(Base):
     __tablename__ = "lectures"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(String(300))
+    # A lecture belongs to at most one course. Deleting the course keeps the lecture.
+    course_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("courses.id", ondelete="SET NULL"), index=True
+    )
     # Stored as VARCHAR rather than a native enum, so adding a status needs no ALTER TYPE.
     status: Mapped[LectureStatus] = mapped_column(
         Enum(LectureStatus, native_enum=False, length=32, values_callable=_enum_values),
@@ -175,15 +194,21 @@ class SummaryRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-# Q&A. Threads belong to a lecture for now; course-wide threads come with courses.
+# Q&A
 
 
 class QAThread(Base):
+    """A conversation about one lecture, or about all of a course's lectures."""
+
     __tablename__ = "qa_threads"
+    __table_args__ = (CheckConstraint("num_nonnulls(lecture_id, course_id) = 1", name="one_scope"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    lecture_id: Mapped[uuid.UUID] = mapped_column(
+    lecture_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("lectures.id", ondelete="CASCADE"), index=True
+    )
+    course_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("courses.id", ondelete="CASCADE"), index=True
     )
     # The first question, shortened.
     title: Mapped[str] = mapped_column(String(200))

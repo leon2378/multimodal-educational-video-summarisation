@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 
-from lecture_core.qa import ChatTurn, Passage, Sentence, find_citations
+from lecture_core.qa import ChatTurn, Passage, Sentence, find_citations, label_lectures
 from lecture_core.timeline import SlideReading
 from lecture_llm.agents import Usage
 from lecture_llm.qa import AnswerLLM, QAPrompts, render_conversation, render_passages
@@ -15,6 +15,7 @@ from tests.unit.fakes import FakeQA
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LECTURE = uuid.UUID("00000000-0000-4000-8000-000000000001")
+OTHER = uuid.UUID("00000000-0000-4000-8000-000000000002")
 
 PASSAGES = [
     Passage(
@@ -142,3 +143,60 @@ def test_a_follow_up_is_rewritten_with_the_conversation() -> None:
     assert usage.requests == 1
     assert "<question>What is memoisation?</question>" in fake.prompts[-1]
     assert fake.prompts[-1].endswith("<question>Why &lt;does&gt; it help?</question>")
+
+
+# Across a course
+
+
+def _two_lectures() -> list[Passage]:
+    return [PASSAGES[0], PASSAGES[1].model_copy(update={"lecture_id": OTHER})]
+
+
+def test_lectures_are_labelled_in_the_order_passages_mention_them() -> None:
+    passages = [*_two_lectures(), PASSAGES[0].model_copy(update={"segment_id": "s004"})]
+
+    labelled = label_lectures(passages, {LECTURE: "Efficiency", OTHER: "Recursion"})
+
+    assert [(p.label, p.lecture_title) for p in labelled] == [
+        ("L1", "Efficiency"),
+        ("L2", "Recursion"),
+        ("L1", "Efficiency"),
+    ]
+
+
+def test_labelled_citations_point_into_their_lecture() -> None:
+    passages = label_lectures(_two_lectures(), {})
+    answer = "See [L1 01:30], [L2 1:00:00, 1:00:05], then [L2 01:30] and [01:37]."
+
+    citations = find_citations(answer, passages)
+
+    assert [(c.label, c.lecture_id, c.valid) for c in citations] == [
+        ("[L1 01:30]", LECTURE, True),
+        ("[L2 1:00:00]", OTHER, True),
+        # A time without a label takes the one before it in the bracket.
+        ("[L2 1:00:05]", OTHER, True),
+        # 01:30 is in L1, not L2.
+        ("[L2 01:30]", None, False),
+        # Without any label, any passage will do.
+        ("[01:37]", LECTURE, True),
+    ]
+
+
+def test_labelled_passages_name_their_lecture() -> None:
+    rendered = render_passages(label_lectures(PASSAGES[:1], {LECTURE: 'Efficiency "1"'}))
+
+    assert '<passage lecture="L1: Efficiency &quot;1&quot;" time="01:30-02:30"' in rendered
+    assert "[L1 01:30] Memoisation stores results." in rendered
+
+
+def test_labelled_passages_get_the_course_prompt() -> None:
+    fake = FakeQA()
+    answerer = _answerer(fake)
+
+    async def answer(passages: list[Passage]) -> str:
+        return "".join([d async for d in answerer.stream_answer("Q?", passages, [], Usage())])
+
+    assert "[L1 01:30]" in asyncio.run(answer(label_lectures(PASSAGES, {LECTURE: "Efficiency"})))
+    assert fake.instructions[-1].startswith("You answer a student's question about a course")
+    asyncio.run(answer(PASSAGES))
+    assert fake.instructions[-1].startswith("You answer a student's question about a lecture")

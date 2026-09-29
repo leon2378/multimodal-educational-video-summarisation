@@ -173,10 +173,11 @@ class FakeReranker:
 class FakeQA:
     """The Q&A model. It rewrites a follow-up by marking it, and answers by citing the first
     sentence it was shown plus a time outside every passage. `fail` makes answers fail the way
-    an overloaded Gemini does."""
+    an overloaded Gemini does. `instructions` records the system prompt of each answer."""
 
     def __init__(self) -> None:
         self.prompts: list[str] = []
+        self.instructions: list[str] = []
         self.fail = False
         self.model = FunctionModel(
             self._rewrite, stream_function=self._answer, model_name="fake-qa"
@@ -188,9 +189,10 @@ class FakeQA:
         return ModelResponse(parts=[TextPart(f"{html.unescape(question)} (standalone)")])
 
     async def _answer(self, messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        self.instructions.append(info.instructions or "")
         if self.fail:
             raise ModelHTTPError(503, "fake-qa", {"error": "high demand"})
-        cited = re.search(r"\[\d+:\d{2}\]", self._prompt(messages))
+        cited = re.search(r"\[(?:L\d+ )?\d+:\d{2}\]", self._prompt(messages))
         yield "Memoisation stores results "
         yield cited.group(0) if cited else ""
         yield ", and more [59:59]."

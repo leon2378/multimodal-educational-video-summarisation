@@ -5,7 +5,6 @@ The lecture is processed by the in-process workers, then answered by the fake Q&
 passage.
 """
 
-import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.integration.test_processing import upload_lecture, wait_for
+from tests.integration.helpers import ask as ask_at
+from tests.integration.helpers import upload_lecture
 from tests.unit.fakes import FakeQA
 
 pytestmark = pytest.mark.integration
@@ -22,26 +22,11 @@ pytestmark = pytest.mark.integration
 def ask(
     client: TestClient, lecture_id: str, question: str, thread_id: str | None = None
 ) -> list[dict[str, Any]]:
-    body = {"question": question} | ({"thread_id": thread_id} if thread_id else {})
-    events = []
-    with client.stream("POST", f"/v1/lectures/{lecture_id}/ask", json=body) as response:
-        assert response.status_code == 200, response.read()
-        assert response.headers["content-type"].startswith("text/event-stream")
-        for line in response.iter_lines():
-            if line.startswith("data: "):
-                events.append(json.loads(line.removeprefix("data: ")))
-    return events
+    return ask_at(client, f"/v1/lectures/{lecture_id}/ask", question, thread_id)
 
 
-@pytest.fixture
-def lecture_id(processing_client: TestClient, synthetic_video: Path) -> str:
-    lecture_id = upload_lecture(processing_client, synthetic_video.read_bytes(), "Q&A lecture")
-    processing_client.post(f"/v1/lectures/{lecture_id}/process")
-    assert wait_for(processing_client, lecture_id)["status"] == "ready"
-    return lecture_id
-
-
-def test_ask_follow_up_and_rate(processing_client: TestClient, lecture_id: str) -> None:
+def test_ask_follow_up_and_rate(processing_client: TestClient, processed_lecture: str) -> None:
+    lecture_id = processed_lecture
     client = processing_client
 
     events = ask(client, lecture_id, "What does memoisation store?")
@@ -57,9 +42,15 @@ def test_ask_follow_up_and_rate(processing_client: TestClient, lecture_id: str) 
     assert answer["content"] == "".join(e["text"] for e in events if e["type"] == "delta")
     # The first citation copies a sentence time from the passages; [59:59] is past the end.
     grounded, made_up = answer["citations"]
-    assert grounded["valid"]
+    assert (grounded["valid"], grounded["lecture_id"]) == (True, lecture_id)
     assert grounded["segment_id"] in {source["segment_id"] for source in sources}
-    assert made_up == {"label": "[59:59]", "at_s": 3599.0, "segment_id": None, "valid": False}
+    assert made_up == {
+        "label": "[59:59]",
+        "at_s": 3599.0,
+        "lecture_id": None,
+        "segment_id": None,
+        "valid": False,
+    }
     assert answer["search_query"] == "What does memoisation store?"
     assert 0 < answer["first_token_ms"] <= answer["total_ms"]
     assert answer["model"] == "function:fake-qa"
@@ -93,8 +84,9 @@ def test_ask_follow_up_and_rate(processing_client: TestClient, lecture_id: str) 
 
 
 def test_a_failed_answer_is_saved_and_reported(
-    processing_client: TestClient, lecture_id: str, fake_qa: FakeQA
+    processing_client: TestClient, processed_lecture: str, fake_qa: FakeQA
 ) -> None:
+    lecture_id = processed_lecture
     fake_qa.fail = True
 
     events = ask(processing_client, lecture_id, "What is memoisation?")
@@ -112,8 +104,9 @@ def test_a_failed_answer_is_saved_and_reported(
 
 
 def test_asking_needs_a_processed_lecture_and_its_own_thread(
-    processing_client: TestClient, lecture_id: str, synthetic_video: Path
+    processing_client: TestClient, processed_lecture: str, synthetic_video: Path
 ) -> None:
+    lecture_id = processed_lecture
     client = processing_client
     unprocessed = upload_lecture(client, synthetic_video.read_bytes(), "Not processed yet")
     body = {"question": "Why?"}

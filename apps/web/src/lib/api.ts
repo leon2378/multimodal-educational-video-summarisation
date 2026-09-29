@@ -22,6 +22,8 @@ export type ChatMessage = Schemas["MessageOut"];
 export type Source = Schemas["SourceOut"];
 export type Citation = Schemas["CitationOut"];
 export type Rating = Schemas["Rating"];
+export type Course = Schemas["CourseOut"];
+export type CourseDetail = Schemas["CourseDetail"];
 
 /** The response body, or an Error carrying the API's message, so TanStack Query shows it. */
 export function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {

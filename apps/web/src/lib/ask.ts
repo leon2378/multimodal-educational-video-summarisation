@@ -1,4 +1,5 @@
 import { API_URL, type AskEvent } from "./api";
+import type { Scope } from "./scope";
 
 /** Complete server-sent events at the front of `buffer`, and what's left after them. */
 export function takeEvents(buffer: string): [AskEvent[], string] {
@@ -17,13 +18,14 @@ export function takeEvents(buffer: string): [AskEvent[], string] {
  *  deltas, then done or error. The endpoint is a POST, so this reads the stream with fetch
  *  rather than EventSource. Throws with the API's message if the question is refused. */
 export async function askQuestion(
-  lectureId: string,
+  scope: Scope,
   question: string,
   threadId: string | null,
   onEvent: (event: AskEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(`${API_URL}/v1/lectures/${lectureId}/ask`, {
+  const owner = scope.kind === "lecture" ? "lectures" : "courses";
+  const response = await fetch(`${API_URL}/v1/${owner}/${scope.id}/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(threadId ? { question, thread_id: threadId } : { question }),

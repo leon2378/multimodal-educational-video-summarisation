@@ -4,10 +4,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { API_URL, type ProgressEvent, api, unwrap } from "./api";
+import type { Scope } from "./scope";
 
 /** Every query for a lecture starts with ["lecture", id], so one invalidation refreshes it all. */
 export const lectureKey = (id: string, ...rest: string[]) => ["lecture", id, ...rest];
 const key = lectureKey;
+/** Likewise ["course", id] for everything about a course. */
+export const courseKey = (id: string, ...rest: string[]) => ["course", id, ...rest];
+export const scopeKey = (scope: Scope, ...rest: string[]) =>
+  scope.kind === "lecture" ? lectureKey(scope.id, ...rest) : courseKey(scope.id, ...rest);
 const path = (id: string) => ({ params: { path: { lecture_id: id } } });
 
 export function useLectures() {
@@ -59,22 +64,43 @@ export function useNotes(id: string, enabled: boolean) {
   });
 }
 
-/** Search within one lecture. Cached per query until the lecture is processed again. */
-export function useSearch(id: string, query: string) {
+export function useCourses() {
   return useQuery({
-    queryKey: key(id, "search", query),
-    queryFn: async () =>
-      unwrap(await api.GET("/v1/search", { params: { query: { q: query, lecture_id: [id], limit: 6 } } })),
+    queryKey: ["courses"],
+    queryFn: async () => unwrap(await api.GET("/v1/courses")),
+  });
+}
+
+export function useCourse(id: string) {
+  return useQuery({
+    queryKey: courseKey(id),
+    queryFn: async () => unwrap(await api.GET("/v1/courses/{course_id}", { params: { path: { course_id: id } } })),
+  });
+}
+
+/** Search a lecture or a course. Cached per query until the lecture is processed again or the
+ *  course changes (their keys are invalidated then). */
+export function useSearch(scope: Scope, query: string) {
+  const params =
+    scope.kind === "lecture"
+      ? { q: query, lecture_id: [scope.id], limit: 6 }
+      : { q: query, course_id: scope.id, limit: 8 };
+  return useQuery({
+    queryKey: scopeKey(scope, "search", query),
+    queryFn: async () => unwrap(await api.GET("/v1/search", { params: { query: params } })),
     enabled: query.length > 0,
     staleTime: Infinity,
   });
 }
 
-/** The lecture's Q&A threads, most recent first. */
-export function useThreads(id: string) {
+/** A lecture's or course's Q&A threads, most recent first. */
+export function useThreads(scope: Scope) {
   return useQuery({
-    queryKey: key(id, "threads"),
-    queryFn: async () => unwrap(await api.GET("/v1/lectures/{lecture_id}/threads", path(id))),
+    queryKey: scopeKey(scope, "threads"),
+    queryFn: async () =>
+      scope.kind === "lecture"
+        ? unwrap(await api.GET("/v1/lectures/{lecture_id}/threads", path(scope.id)))
+        : unwrap(await api.GET("/v1/courses/{course_id}/threads", { params: { path: { course_id: scope.id } } })),
   });
 }
 

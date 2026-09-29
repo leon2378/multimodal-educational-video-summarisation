@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
 
-from lecture_core.models import Lecture
+from lecture_core.models import Course, Lecture
 from lecture_core.settings import Settings
 from lecture_core.storage import ObjectStorage
 from lecture_llm.qa import AnswerLLM
@@ -73,6 +73,13 @@ async def lecture_or_404(session: AsyncSession, lecture_id: uuid.UUID) -> Lectur
     if lecture is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Lecture not found.")
     return lecture
+
+
+async def course_or_404(session: AsyncSession, course_id: uuid.UUID) -> Course:
+    course = await session.get(Course, course_id)
+    if course is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Course not found.")
+    return course
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]

@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from lecture_api.routes import health, lectures, processing, qa, results, search
+from lecture_api.routes import courses, health, lectures, processing, qa, results, search
 from lecture_core.db import create_engine, create_sessionmaker
 from lecture_core.settings import Settings
 from lecture_core.storage import ObjectStorage
@@ -54,10 +54,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Content-Type"],
     )
     app.include_router(health.router)
+    app.include_router(courses.router, prefix="/v1")
     app.include_router(lectures.router, prefix="/v1")
     app.include_router(processing.router, prefix="/v1")
     app.include_router(results.router, prefix="/v1")

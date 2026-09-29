@@ -3,13 +3,14 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 3 under way (search and Q&A done, courses next)
+## Current state: Phase 3 complete (search, Q&A and courses)
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
 pipeline stages; the results land in Postgres and the search index; the web app shows them in
-step with the video, searches them and answers questions about them. The same stages also run
-on a local file without any of that (`lecture-process`, which stops before search).
+step with the video, searches them and answers questions about them, for one lecture or across
+a course. The same stages also run on a local file without any of that (`lecture-process`,
+which stops before search).
 
 ```
  client ── upload (presigned PUT) ──────────────────────────────► SeaweedFS
@@ -26,6 +27,7 @@ on a local file without any of that (`lecture-process`, which stops before searc
  client ── GET /v1/search ─► FastAPI ─► TEI (query embedding) + BM25 ─► Qdrant ─► TEI reranker (GPU)
  client ── POST .../ask ───► FastAPI ─► rewrite (LLM) ─► search ─► Postgres (sentences, slides)
                                  ◄── SSE ── answer (LLM, streamed) ─► citations checked ─► Postgres
+          (/v1/lectures/{id}/... or /v1/courses/{id}/..., which search the course's lectures)
 ```
 
 ### Upload path (Phase 1)
@@ -140,6 +142,30 @@ first words arrived 2.4 to 4.7 seconds after asking in three tries (search, a re
 follow-up, then the model's first chunk), and the rest within half a second: the model sends
 short answers in a few large chunks.
 
+### Courses (Phase 3)
+
+A course groups lectures (`courses`, and `lectures.course_id`): a lecture joins one when it's
+uploaded or later from its page (`PATCH /v1/lectures/{id}`), and deleting a course keeps its
+lectures.
+
+- `GET /v1/search?course_id=...` searches the course's lectures, and `POST /v1/courses/{id}/ask`
+  answers from its processed ones, in threads of their own (a database check keeps each thread
+  to one lecture or one course).
+- The index isn't told about courses: a course search filters by the ids of the lectures in the
+  course when it runs. So moving a lecture between courses needs no re-indexing. The blueprint
+  put `course_id` in each point's payload instead, which would have to be rewritten on every
+  move.
+- A time alone is ambiguous across lectures, so a course answer labels each lecture L1, L2, ...
+  in the order its passages first come up, shows each sentence as `[L2 12:34]`, and cites the
+  same way (`prompts/qa/course-answer.v1.md`). The check maps the label back to the lecture's
+  passages, and each source carries its lecture's label and title, so the web app can open the
+  right lecture at the cited moment (`/lectures/{id}?t=seconds`).
+
+On a course holding Lecture 10 and a short Lecture 1 exercise, "why was nothing shown on the
+console in the print exercise?" was answered from the exercise with a valid `[L1 01:04]`, which
+opens that lecture at 1:04. A big-O question was answered from Lecture 10 with citations like
+`[L1 29:30]`: there Lecture 10 was L1, because its passages came up first.
+
 ### Pipeline stages (Phase 2a)
 
 The stages the workers run. `lecture-process <video>` also runs them in order on a local file
@@ -192,11 +218,20 @@ so a second run only redoes stages whose inputs, version, model, params or promp
   suites. Until auth arrives in Phase 6, anyone who can reach the API can ask questions and
   spend the LLM quota; Compose binds the API to 127.0.0.1. An answer the client disconnects
   from isn't saved.
+- A question is searched once, and the answer uses the top 6 segments. A two-part question
+  across a course can get all six from one lecture: asked both how to check what code prints
+  (the Lecture 1 exercise) and how to compare algorithms (Lecture 10), the answer covered the
+  second and said the course doesn't seem to cover the first. Splitting such questions, or
+  keeping a segment from each lecture that matches well, would help.
+- Lectures processed before search existed (Phase 3a) aren't indexed. Processing one again
+  indexes it, and only the embedding and indexing steps run: the rest is cached.
 - Embedding runs on the CPU, at about 95 tokens a second on a Ryzen 7 5800H: 5 minutes for a
   51-minute lecture, the slowest stage. A lecture is ready only once it's indexed, so a fresh
   run takes about 6 minutes rather than 2. The GPU could do it in seconds, next to speech
   recognition if VRAM allows.
 
-## Next: the rest of Phase 3
+## Next: Phase 4 (evals and observability)
 
-Courses: a lecture belongs to a course, and search and answers can span all of its lectures.
+Eval suites that run in CI (retrieval, answer faithfulness, citation accuracy, WER and slide
+boundaries), Langfuse and OpenTelemetry traces, cost tracking, and feedback turned into eval
+cases.

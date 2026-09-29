@@ -4,14 +4,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { type ChatMessage, type Citation, type Rating, type Source, api, unwrap } from "@/lib/api";
-import { type Inline, parseAnswer } from "@/lib/answer";
+import { type Inline, parseAnswer, resolveCitation } from "@/lib/answer";
 import { askQuestion } from "@/lib/ask";
-import { lectureKey, threadKey, useThread, useThreads } from "@/lib/queries";
+import { scopeKey, threadKey, useThread, useThreads } from "@/lib/queries";
+import type { Open, Scope } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
 
 import { Latex, TimeButton } from "./ui";
-
-type Seek = (seconds: number) => void;
 
 /** The answer being streamed, until it's saved and the thread reloads. */
 interface Pending {
@@ -21,9 +20,12 @@ interface Pending {
   sources: Source[] | null;
 }
 
-export function ChatPanel({ lectureId, onSeek }: { lectureId: string; onSeek: Seek }) {
+/** Q&A about a lecture, or across a course's lectures. Citations play the lecture they point
+ *  into from where they point. */
+export function ChatPanel({ scope, onOpen }: { scope: Scope; onOpen: Open }) {
   const queryClient = useQueryClient();
-  const threads = useThreads(lectureId);
+  const threads = useThreads(scope);
+  const where = scope.kind === "lecture" ? "this lecture" : "this course";
   // undefined until chosen: then the most recent thread, if any.
   const [chosen, setChosen] = useState<string | null | undefined>(undefined);
   const threadId = chosen === undefined ? (threads.data?.[0]?.id ?? null) : chosen;
@@ -46,7 +48,7 @@ export function ChatPanel({ lectureId, onSeek }: { lectureId: string; onSeek: Se
     setPending({ question, questionId: null, text: "", sources: null });
     let asked = threadId;
     try {
-      await askQuestion(lectureId, question, threadId, (event) => {
+      await askQuestion(scope, question, threadId, (event) => {
         if (event.type === "start") {
           asked = event.thread_id;
           setChosen(event.thread_id);
@@ -63,7 +65,7 @@ export function ChatPanel({ lectureId, onSeek }: { lectureId: string; onSeek: Se
     }
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: threadKey(asked) }),
-      queryClient.invalidateQueries({ queryKey: lectureKey(lectureId, "threads") }),
+      queryClient.invalidateQueries({ queryKey: scopeKey(scope, "threads") }),
     ]);
     setPending(null);
   }
@@ -102,8 +104,8 @@ export function ChatPanel({ lectureId, onSeek }: { lectureId: string; onSeek: Se
 
       {messages.length === 0 && !pending && (
         <p className="text-slate-500">
-          Ask anything about this lecture. Answers come only from the lecture, and each point links to the moment it
-          comes from.
+          Ask anything about {where}. Answers come only from {where}, and each point links to the moment it comes
+          from.
         </p>
       )}
       <ol className="flex flex-col gap-4" aria-label="Messages">
@@ -116,14 +118,15 @@ export function ChatPanel({ lectureId, onSeek }: { lectureId: string; onSeek: Se
                 text={message.content}
                 citations={message.citations ?? null}
                 sources={message.sources ?? null}
-                onSeek={onSeek}
+                scope={scope}
+                onOpen={onOpen}
               />
               {message.error && (
                 <p className="text-rose-600" role="alert">
                   {message.error}
                 </p>
               )}
-              <Sources sources={message.sources ?? []} onSeek={onSeek} />
+              <Sources sources={message.sources ?? []} onOpen={onOpen} />
               {threadId && !message.error && <Rate message={message} threadId={threadId} />}
             </li>
           ),
@@ -133,7 +136,7 @@ export function ChatPanel({ lectureId, onSeek }: { lectureId: string; onSeek: Se
             <Question text={pending.question} />
             <li className="flex flex-col gap-2" aria-live="polite">
               {pending.text ? (
-                <AnswerText text={pending.text} citations={null} sources={pending.sources} onSeek={onSeek} />
+                <AnswerText text={pending.text} citations={null} sources={pending.sources} scope={scope} onOpen={onOpen} />
               ) : (
                 <p className="animate-pulse text-slate-500">{pending.sources ? "Writing…" : "Searching the lecture…"}</p>
               )}
@@ -166,7 +169,7 @@ export function ChatPanel({ lectureId, onSeek }: { lectureId: string; onSeek: Se
           }}
           rows={2}
           maxLength={1000}
-          placeholder={threadId ? "Ask a follow-up" : "Ask about this lecture"}
+          placeholder={threadId ? "Ask a follow-up" : `Ask about ${where}`}
           aria-label="Your question"
           className="min-w-0 flex-1 resize-none rounded-lg border border-slate-300 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-950"
         />
@@ -188,26 +191,21 @@ function Question({ text }: { text: string }) {
   );
 }
 
-/** An answer with its citations checked: by the server once saved, and against the retrieved
- *  segments while streaming (or for a time the server didn't list). A citation outside them is
- *  struck through and not clickable. */
+/** An answer with clickable citations. One pointing outside what was retrieved is struck
+ *  through and not clickable. */
 function AnswerText({
   text,
   citations,
   sources,
-  onSeek,
+  scope,
+  onOpen,
 }: {
   text: string;
   citations: Citation[] | null;
   sources: Source[] | null;
-  onSeek: Seek;
+  scope: Scope;
+  onOpen: Open;
 }) {
-  const isGrounded = (label: string, seconds: number): boolean | null => {
-    const checked = citations?.find((c) => c.label === label);
-    if (checked) return checked.valid;
-    if (sources) return sources.some((s) => s.start_s - 1 <= seconds && seconds <= s.end_s + 1);
-    return null;
-  };
   const renderInlines = (inlines: Inline[]) =>
     inlines.map((inline, i) => {
       switch (inline.kind) {
@@ -224,13 +222,23 @@ function AnswerText({
         case "math":
           return <Latex key={i} source={inline.tex} inline />;
         case "cite": {
-          const grounded = isGrounded(inline.label, inline.seconds);
-          if (grounded) return <TimeButton key={i} seconds={inline.seconds} onSeek={onSeek} />;
+          const { lectureId, valid, title } = resolveCitation(inline, citations, sources, scope);
+          if (valid && lectureId) {
+            return (
+              <TimeButton
+                key={i}
+                seconds={inline.seconds}
+                label={inline.label}
+                lecture={scope.kind === "course" ? title : null}
+                onSeek={(seconds) => onOpen(lectureId, seconds)}
+              />
+            );
+          }
           return (
             <span
               key={i}
-              className={`font-mono text-sm ${grounded === false ? "text-rose-600 line-through" : "text-slate-500"}`}
-              title={grounded === false ? "This time isn't in the passages the answer was given" : undefined}
+              className={`font-mono text-sm ${valid === false ? "text-rose-600 line-through" : "text-slate-500"}`}
+              title={valid === false ? "This time isn't in the passages the answer was given" : undefined}
             >
               {inline.label}
             </span>
@@ -262,17 +270,22 @@ function AnswerText({
   );
 }
 
-function Sources({ sources, onSeek }: { sources: Source[]; onSeek: Seek }) {
+function Sources({ sources, onOpen }: { sources: Source[]; onOpen: Open }) {
   if (sources.length === 0) return null;
   return (
     <details className="text-xs text-slate-500">
       <summary className="cursor-pointer">Searched {sources.length} passages</summary>
       <ul className="mt-1 flex flex-col gap-1">
         {[...sources]
-          .sort((a, b) => a.start_s - b.start_s)
+          .sort((a, b) => (a.lecture_label ?? "").localeCompare(b.lecture_label ?? "") || a.start_s - b.start_s)
           .map((source) => (
             <li key={`${source.lecture_id}-${source.segment_id}`}>
-              <TimeButton seconds={source.start_s} onSeek={onSeek} />
+              <TimeButton
+                seconds={source.start_s}
+                lecture={source.lecture_label ? source.lecture_title : null}
+                onSeek={(seconds) => onOpen(source.lecture_id, seconds)}
+              />
+              {source.lecture_label && `${source.lecture_label} ${source.lecture_title ?? ""} · `}
               {source.slide_title ?? source.chapter ?? `until ${formatTime(source.end_s)}`}
             </li>
           ))}

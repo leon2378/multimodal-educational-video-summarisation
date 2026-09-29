@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { api, unwrap } from "@/lib/api";
-import { useLectures } from "@/lib/queries";
+import { useCourses, useLectures } from "@/lib/queries";
 import { formatTime } from "@/lib/timeline";
 
 import { Card, StatusBadge } from "./ui";
@@ -27,7 +27,9 @@ interface UploadTarget {
 export function UploadForm() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const courses = useCourses();
   const [title, setTitle] = useState("");
+  const [courseId, setCourseId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [state, setState] = useState<UploadState>({ phase: "idle" });
   const busy = state.phase === "uploading" || state.phase === "starting";
@@ -43,6 +45,7 @@ export function UploadForm() {
             title: title.trim() || file.name,
             filename: file.name,
             content_type: file.type || "video/mp4",
+            course_id: courseId || null,
           },
         }),
       );
@@ -53,7 +56,10 @@ export function UploadForm() {
       unwrap(await api.POST("/v1/lectures/{lecture_id}/complete-upload", params));
       setState({ phase: "starting" });
       unwrap(await api.POST("/v1/lectures/{lecture_id}/process", params));
-      await queryClient.invalidateQueries({ queryKey: ["lectures"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["lectures"] }),
+        queryClient.invalidateQueries({ queryKey: ["courses"] }),
+      ]);
       router.push(`/lectures/${created.lecture.id}`);
     } catch (error) {
       setState({ phase: "error", message: error instanceof Error ? error.message : String(error) });
@@ -72,6 +78,23 @@ export function UploadForm() {
             className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
           />
         </label>
+        {courses.data && courses.data.length > 0 && (
+          <label className="flex flex-col gap-1 text-sm">
+            Course
+            <select
+              value={courseId}
+              onChange={(e) => setCourseId(e.target.value)}
+              className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+            >
+              <option value="">None</option>
+              {courses.data.map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="flex flex-1 flex-col gap-1 text-sm">
           Video
           <input
@@ -127,8 +150,71 @@ function putWithProgress(target: UploadTarget, file: File, onProgress: (percent:
   });
 }
 
+/** Courses group lectures, so search and Q&A can span them. */
+export function CourseList() {
+  const queryClient = useQueryClient();
+  const courses = useCourses();
+  const [title, setTitle] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      unwrap(await api.POST("/v1/courses", { body: { title: title.trim() } }));
+      setTitle("");
+      await queryClient.invalidateQueries({ queryKey: ["courses"] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return (
+    <Card title="Courses">
+      {courses.data && courses.data.length > 0 && (
+        <ul className="mb-3 divide-y divide-slate-100 dark:divide-slate-800">
+          {courses.data.map((course) => (
+            <li key={course.id} className="flex items-center gap-3 py-2">
+              <Link href={`/courses/${course.id}`} className="flex-1 font-medium hover:underline">
+                {course.title}
+              </Link>
+              <span className="text-sm text-slate-500">
+                {course.lecture_count} {course.lecture_count === 1 ? "lecture" : "lectures"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={create} className="flex gap-2 text-sm">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="New course, e.g. MIT 6.0001 Fall 2016"
+          aria-label="New course title"
+          maxLength={300}
+          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+        />
+        <button
+          type="submit"
+          disabled={!title.trim()}
+          className="rounded-lg border border-slate-300 px-3 py-2 font-medium hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+        >
+          Create
+        </button>
+      </form>
+      {error && (
+        <p className="mt-2 text-sm text-rose-600" role="alert">
+          {error}
+        </p>
+      )}
+    </Card>
+  );
+}
+
 export function LectureList() {
   const lectures = useLectures();
+  const courses = useCourses();
+  const courseTitle = (id: string | null) => courses.data?.find((course) => course.id === id)?.title;
 
   if (lectures.isPending) return <p className="text-sm text-slate-500">Loading lectures…</p>;
   if (lectures.isError) {
@@ -149,6 +235,9 @@ export function LectureList() {
             <Link href={`/lectures/${lecture.id}`} className="flex-1 font-medium hover:underline">
               {lecture.title}
             </Link>
+            {courseTitle(lecture.course_id) && (
+              <span className="truncate text-sm text-slate-500">{courseTitle(lecture.course_id)}</span>
+            )}
             {lecture.duration_s != null && (
               <span className="font-mono text-sm text-slate-500">{formatTime(lecture.duration_s)}</span>
             )}

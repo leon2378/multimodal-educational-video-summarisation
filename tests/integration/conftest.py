@@ -31,6 +31,7 @@ from lecture_pipeline.temporal.activities import PipelineActivities, Resources, 
 from lecture_pipeline.temporal.worker import build_workers, connect
 from lecture_rag.index import SearchIndex
 from lecture_rag.search import Searcher
+from tests.integration.helpers import upload_lecture, wait_for
 from tests.unit.fakes import (
     FakeDense,
     FakeLLM,
@@ -143,6 +144,15 @@ def processing_client(
     with TestClient(app) as client:
         yield client
     index.close()
+
+
+@pytest.fixture
+def processed_lecture(processing_client: TestClient, synthetic_video: Path) -> str:
+    """The synthetic lecture, uploaded and processed; its id."""
+    lecture_id = upload_lecture(processing_client, synthetic_video.read_bytes(), "Processed")
+    processing_client.post(f"/v1/lectures/{lecture_id}/process")
+    assert wait_for(processing_client, lecture_id)["status"] == "ready"
+    return lecture_id
 
 
 def _search_index(settings: Settings) -> SearchIndex:
