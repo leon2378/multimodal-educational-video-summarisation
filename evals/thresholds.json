@@ -1,0 +1,26 @@
+{
+  "_about": "The eval gate: `lecture-eval --gate` fails when a metric falls outside its bounds. Bounds sit a little below what the pipeline scores on MIT 6.0001 Lecture 10, so a regression trips them but run-to-run noise doesn't. Latency isn't gated: it depends on the machine and on Gemini's free tier.",
+  "retrieval": {
+    "rerank.recall_at_5": {"min": 0.95},
+    "rerank.mrr_at_10": {"min": 0.8},
+    "hybrid.recall_at_5": {"min": 0.9}
+  },
+  "answers": {
+    "correctness": {"min": 0.85},
+    "faithfulness": {"min": 0.9},
+    "citations_valid": {"min": 0.95},
+    "citations_on_target": {"min": 0.85},
+    "false_declines": {"max": 0.1},
+    "declines_when_uncovered": {"min": 0.66},
+    "errors": {"max": 1}
+  },
+  "asr": {
+    "wer": {"max": 0.05},
+    "term_recall": {"min": 0.95}
+  },
+  "notes": {
+    "concepts_near": {"min": 0.75},
+    "timestamps_out_of_range": {"max": 0},
+    "chapter_issues": {"max": 0}
+  }
+}

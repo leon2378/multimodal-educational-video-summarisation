@@ -6,15 +6,19 @@ requires-python = ">=3.12"
 dependencies = [
     "google-genai>=2.25",
     "httpx>=0.28",
+    "jiwer>=4",
     "lecture-core",
+    "lecture-llm",
+    "pydantic-ai-slim[google]>=2.51",
 ]
 
 [project.scripts]
 gemini-baseline = "lecture_evals.baselines.gemini:main"
-retrieval-eval = "lecture_evals.suites.retrieval:main"
+lecture-eval = "lecture_evals.cli:main"
 
 [tool.uv.sources]
 lecture-core = { workspace = true }
+lecture-llm = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13"]

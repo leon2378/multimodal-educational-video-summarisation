@@ -3,7 +3,7 @@ COMPOSE := docker compose -f infra/compose.yaml
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app gpu-worker worker web openapi down reset migrate revision api process eval-retrieval test test-unit lint fmt typecheck audit check
+.PHONY: help install up app gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval test test-unit lint fmt typecheck audit check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-15s %s\n", $$1, $$2}'
@@ -53,8 +53,11 @@ process: ## Run the pipeline on a local video without Temporal (GPU): make proce
 	@test -n "$(video)" || (echo 'usage: make process video=data/lectures/lecture.mp4 title="Title"' && exit 1)
 	HOST_UID=$$(id -u) HOST_GID=$$(id -g) $(COMPOSE) --profile gpu run --rm --build pipeline "$(video)" --title "$(title)"
 
-eval-retrieval: ## Score search on the golden Q&A set (the app running, Lecture 10 processed)
-	uv run retrieval-eval
+eval: ## Run every eval suite against the running stack, record it, and check the thresholds
+	uv run lecture-eval --gate
+
+eval-retrieval: ## Score search only, on the golden Q&A set
+	uv run lecture-eval --suites retrieval
 
 test: ## Run all tests (integration tests need Docker)
 	uv run pytest

@@ -54,6 +54,7 @@ def test_ask_follow_up_and_rate(processing_client: TestClient, processed_lecture
     assert answer["search_query"] == "What does memoisation store?"
     assert 0 < answer["first_token_ms"] <= answer["total_ms"]
     assert answer["model"] == "function:fake-qa"
+    assert answer["usage"]["requests"] == 1
 
     follow_up = ask(client, lecture_id, "Why does that help?", thread_id)
 
@@ -81,6 +82,11 @@ def test_ask_follow_up_and_rate(processing_client: TestClient, processed_lecture
     question_id = thread["messages"][0]["id"]
     not_an_answer = {"message_id": question_id, "rating": "up"}
     assert client.post("/v1/feedback", json=not_an_answer).status_code == 404
+
+    assert client.delete(f"/v1/threads/{thread_id}").status_code == 204
+    assert client.get(f"/v1/threads/{thread_id}").status_code == 404
+    assert client.get(f"/v1/lectures/{lecture_id}/threads").json() == []
+    assert client.delete(f"/v1/threads/{thread_id}").status_code == 404
 
 
 def test_a_failed_answer_is_saved_and_reported(

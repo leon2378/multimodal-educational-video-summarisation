@@ -5,6 +5,7 @@ POST /v1/courses/{id}/ask       the same across a course's processed lectures, c
 GET  /v1/lectures/{id}/threads  a lecture's conversations, most recent first
 GET  /v1/courses/{id}/threads   a course's conversations, most recent first
 GET  /v1/threads/{id}           one conversation with its questions and answers
+DELETE /v1/threads/{id}         delete a conversation, with its answers and ratings
 POST /v1/feedback               thumbs up or down on an answer, with an optional reason
 
 A follow-up question is first rewritten to stand on its own, then searched; the answer is
@@ -195,6 +196,15 @@ async def get_thread(thread_id: uuid.UUID, session: SessionDep) -> ThreadDetail:
             for message in messages
         ],
     )
+
+
+@router.delete("/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_thread(thread_id: uuid.UUID, session: SessionDep) -> None:
+    thread = await session.get(QAThread, thread_id)
+    if thread is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Thread not found.")
+    await session.delete(thread)
+    await session.commit()
 
 
 @router.post("/feedback")

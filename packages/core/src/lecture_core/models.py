@@ -273,3 +273,27 @@ class Feedback(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class EvalRun(Base):
+    """One run of an eval suite (evals/): what was measured, on which data, at which commit."""
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    suite: Mapped[str] = mapped_column(String(32), index=True)
+    # The dataset file, and a hash of its contents as its version.
+    dataset: Mapped[str] = mapped_column(String(200))
+    dataset_sha256: Mapped[str] = mapped_column(String(64))
+    lecture_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("lectures.id", ondelete="SET NULL")
+    )
+    # The commit the evals ran at; "-dirty" when the working tree had changes.
+    git_sha: Mapped[str | None] = mapped_column(String(48))
+    # Models, modes and settings the run used.
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    # {metric: value}
+    metrics: Mapped[dict[str, float]] = mapped_column(JSONB)
+    # Against evals/thresholds.json; None when the suite has no thresholds.
+    passed: Mapped[bool | None]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

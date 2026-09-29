@@ -3,14 +3,14 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 3 complete (search, Q&A and courses)
+## Current state: Phase 4 under way (eval suites done, observability next)
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
 pipeline stages; the results land in Postgres and the search index; the web app shows them in
 step with the video, searches them and answers questions about them, for one lecture or across
 a course. The same stages also run on a local file without any of that (`lecture-process`,
-which stops before search).
+which stops before search). Eval suites score each part through the API.
 
 ```
  client ── upload (presigned PUT) ──────────────────────────────► SeaweedFS
@@ -166,6 +166,29 @@ console in the print exercise?" was answered from the exercise with a valid `[L1
 opens that lecture at 1:04. A big-O question was answered from Lecture 10 with citations like
 `[L1 29:30]`: there Lecture 10 was L1, because its passages came up first.
 
+### Evals (Phase 4a)
+
+`lecture-eval` (package `evals`) runs suites against the API, so it scores what users get:
+
+| Suite | Measures | Ground truth |
+|---|---|---|
+| retrieval | Recall@5, MRR@10, nDCG@10 per search mode | golden questions with answer spans |
+| answers | correctness and faithfulness (LLM judge, `prompts/evals/judge-answer.v1.md`), citations inside the passages and near the answer span, declining uncovered questions, latency, tokens | the same golden set |
+| asr | WER against the captions (`jiwer`), technical-term recall, real-time factor | the lecture's captions |
+| notes | concept citations against where the captions say the term; structural checks | the lecture's captions |
+
+- Both sides of a comparison with captions are normalised the same way
+  (`lecture_evals.captions`): lower case, speaker labels and bracketed notes removed, hyphens
+  split. Each caption word gets a time spread evenly over its cue.
+- The answer suite asks each question in a new thread and deletes it afterwards
+  (`DELETE /v1/threads/{id}`). The judge sees the question, the reference answer, the passages
+  the answer was given (rebuilt from its sources and the transcript) and the answer, and
+  returns whether it declined, a verdict, whether every claim is supported, and why.
+- Every run is an `eval_runs` row: suite, dataset path and SHA-256, git commit (`-dirty` with
+  local changes), config (models, prompt fingerprints, modes) and flat metrics.
+  `evals/thresholds.json` bounds the metrics that matter; `--gate` exits 1 past them.
+- A real CI gate needs the processed lecture and a Gemini key in CI; that's Phase 4c.
+
 ### Pipeline stages (Phase 2a)
 
 The stages the workers run. `lecture-process <video>` also runs them in order on a local file
@@ -230,8 +253,9 @@ so a second run only redoes stages whose inputs, version, model, params or promp
   run takes about 6 minutes rather than 2. The GPU could do it in seconds, next to speech
   recognition if VRAM allows.
 
-## Next: Phase 4 (evals and observability)
+## Next: the rest of Phase 4
 
-Eval suites that run in CI (retrieval, answer faithfulness, citation accuracy, WER and slide
-boundaries), Langfuse and OpenTelemetry traces, cost tracking, and feedback turned into eval
-cases.
+Observability: OpenTelemetry traces and metrics from the API and workers into Grafana (stage
+durations, Q&A time to first token, tokens and cost, cache hits, feedback), LLM traces, and
+cost per lecture and per answer. Then the eval gate in CI. Slide-boundary precision and recall
+need hand-labelled slide changes, which come with the Phase 5 detector.

@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 to 3 of 6 done: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Evals and observability come next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 3 of 6 done, Phase 4 under way: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions; observability comes next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -23,13 +23,17 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   ([below](#processing-a-lecture)).
 - Search ([below](#search)): each processed lecture is indexed in Qdrant with dense vectors
   (Qwen3-Embedding-0.6B) and BM25, and `GET /v1/search` runs dense, BM25, hybrid or reranked
-  search. A golden Q&A set for Lecture 10 and a retrieval eval score each mode.
+  search.
 - Q&A ([below](#questions-and-answers)): ask about a lecture and get a streamed answer that
   cites the moments it comes from as `[mm:ss]`, each citation checked against what was
   retrieved. Follow-ups are rewritten to stand alone before searching. Threads, answers (with
   sources, tokens and time to first token) and thumbs up/down feedback are stored.
 - Courses ([below](#courses)): group lectures, then search and ask across all of them, with
   citations that open the right lecture at the cited moment.
+- Evals ([below](#evals)): suites for speech recognition (word error rate against the
+  captions), notes (concept citations), search (Recall@5, MRR, nDCG) and answers (an LLM judge
+  for correctness and faithfulness, plus citation accuracy), recorded in Postgres and gated by
+  thresholds.
 - A single-call Gemini baseline that summarises a lecture video and records tokens, cost and
   timings ([below](#gemini-baseline)).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
@@ -168,12 +172,7 @@ Use `course_id=...` instead of `lecture_id` to search a course's lectures.
 in Docker, where the reranker runs on the GPU (`make gpu-worker` starts it), and `hybrid` for
 an API run on the host. Each hit has the segment's times, slide title, chapter and transcript.
 
-To score search, process MIT 6.0001 Lecture 10 (the eval finds it by the video's hash), then run
-`make eval-retrieval`. It asks the golden questions in
-[evals/datasets/golden-qa](evals/datasets/golden-qa/mit-6.0001-lecture-10.json) in each mode,
-prints Recall@5, MRR@10, nDCG@10 and latency, and saves every question's hits to
-`data/evals/retrieval/`. The questions were drafted from the official captions and still need
-checking by hand against the video.
+`make eval-retrieval` scores search on the golden questions ([Evals](#evals)).
 
 ## Questions and answers
 
@@ -216,6 +215,35 @@ A course answer names each lecture with a label and cites it as `[L2 12:34]`; ea
 shows one with its lectures, and `GET /v1/courses/{id}/threads` its conversations. Deleting a
 course keeps its lectures. Lectures processed before search existed need processing once more
 to be indexed; everything but the embedding and indexing is cached.
+
+## Evals
+
+The eval suites score the running stack the way a user would reach it, through the API, on
+MIT 6.0001 Lecture 10 (process it first; the suites find it by the video's hash):
+
+| Suite | What it measures | Dataset |
+|---|---|---|
+| `retrieval` | Recall@5, MRR@10 and nDCG@10 for each search mode | 33 golden questions with answer spans |
+| `answers` | correctness and faithfulness (an LLM judge), citations inside the retrieved passages and near the answer, declining what the lecture doesn't cover, time to first token, tokens | the same questions, plus 3 the lecture doesn't answer |
+| `asr` | word error rate against the human captions, recall of 34 technical terms, real-time factor | the captions |
+| `notes` | concepts cited within 10 s of where the captions say the term, timestamp and chapter checks | the captions |
+
+```bash
+make eval                                   # every suite; exits 1 if a metric is past its threshold
+uv run lecture-eval --suites asr,notes      # some of them
+uv run lecture-eval --suites notes --notes-file data/baselines/<video>/<run>/result.json   # score the Gemini baseline's notes
+```
+
+Each suite prints a summary, writes the details (every question, answer and verdict) to
+`data/evals/<suite>/`, and records an `eval_runs` row: the suite, the dataset's hash, the git
+commit, the models and settings, and the metrics. `evals/thresholds.json` holds the bounds the
+gate checks, set a little below today's scores.
+
+The captions aren't in git: they're the lecture's own text (CC BY-NC-SA). The dataset file
+names the captions file to put in `data/lectures/` and its SHA-256. The answer judge uses
+`LLM_MODEL` (or `--judge-model`), the same Gemini model that answers, and it isn't calibrated
+against hand grades yet, so treat its scores as a trend. The golden questions were drafted from
+the captions and still need checking by hand against the video.
 
 ## Gemini baseline
 
@@ -266,15 +294,29 @@ Scored the same way for both producers.
 
 | | Gemini, one call | Pipeline |
 |---|---|---|
-| Notes | 8 chapters, 8 concepts, 3 formulas, 9 quiz | 5 chapters, 13 concepts, 12 formulas, 9 quiz |
-| Concept citations within 10 s of where the captions say the term | 6 of 8, median 1.7 s | 11 of 13, median 0.5 s |
+| Notes | 8 chapters, 8 concepts, 3 formulas, 9 quiz | 5 chapters, 14 concepts, 7 formulas, 9 quiz |
+| Concept citations within 10 s of where the captions say the term | 3 of 4, median 2.2 s | 9 of 10, median 0.5 s |
+| Concepts whose term is never said as written (slide titles), so can't be checked | 4 | 4 |
 | API cost | $0.21 (`gemini-3.8-flash`) | about $0.04 (`gemini-3.5-flash-lite`, paid-tier prices) |
 | Time | 135 s | 119 s through the API and workers (speech and slides in parallel), 15 s when only the notes change |
-| Speech recognition | | 65 s on an RTX 3060 Laptop (6 GB): 47× real time, 2.3 GB VRAM peak |
+| Speech recognition | | WER 3.0% against the human captions, 99.1% of the technical terms; 65 to 74 s on an RTX 3060 Laptop (6 GB), about 45× real time, 2.3 GB VRAM peak |
 
-Caveats: one lecture, two different Gemini models, and a rough citation measure (caption text
-matching). Whether the notes are faithful to the lecture isn't scored yet; that's the Phase 4
-LLM judge.
+Scored by `lecture-eval --suites notes,asr`. Caveats: one lecture, two different Gemini models,
+and a citation measure that can only check terms said as written.
+
+### Answers
+
+The 36 golden questions asked through the API (`make eval`), answered by
+`gemini-3.5-flash-lite` and graded by the same model. The judge isn't calibrated yet; checking
+9 of the answers by hand agreed with it.
+
+| Correct | Faithful to the passages | Citations inside the passages | Citing near the answer | Declined when not covered | First token, p50 / p95 |
+|---|---|---|---|---|---|
+| 0.98 | 1.00 | 0.99 | 0.97 | 3 of 3 | 2.1 s / 8.1 s |
+
+The one answer marked partly right: asked how many operations the summing loop takes, it gave
+the 3 per iteration but not the total, 3x + 2. First-token times vary with Gemini's free tier:
+the p95 was 19 s on an earlier run.
 
 ### Search
 
@@ -307,7 +349,8 @@ takes 5 minutes on the CPU, so a fresh run now takes about 6 minutes, up from 2.
 | `make api` | Run the API on the host with auto-reload |
 | `make web` | Run the web app on the host with hot reload (Node 24) |
 | `make openapi` | Regenerate the web app's typed API client after an API change |
-| `make eval-retrieval` | Score search on the golden Q&A set (needs the stack running and Lecture 10 processed) |
+| `make eval` | Run every eval suite against the running stack, record it, and check the thresholds |
+| `make eval-retrieval` | Score search only |
 | `make migrate` | Apply migrations |
 | `make revision m="add chapters"` | Generate a migration after changing `packages/core/src/lecture_core/models.py` |
 | `make test` / `make test-unit` | All tests / unit tests only |
@@ -325,7 +368,7 @@ packages/perception/       PyAV media reading, slide detection, speech recogniti
 packages/llm/              Pydantic AI agents: read slides, chapters, notes
 packages/pipeline/         stages, stage cache, timeline, local runner, Temporal workflow and workers
 packages/rag/              chunks, encoders (TEI, BM25), Qdrant index, hybrid search
-evals/                     Gemini baseline, retrieval eval, golden Q&A sets (evals/datasets/)
+evals/                     eval suites (lecture-eval), datasets, thresholds, Gemini baseline
 prompts/                   versioned prompts (pipeline, Q&A and baseline)
 data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
@@ -395,7 +438,11 @@ from the blueprint in these places:
         golden Q&A set and retrieval eval
   - [x] 3b: streamed answers with checked `[mm:ss]` citations, chat panel, threads and feedback
   - [x] Courses: search and answers across a course's lectures
-- [ ] **Phase 4, evals and observability**: eval suites, Langfuse, OpenTelemetry, CI eval gate
+- [ ] **Phase 4, evals and observability**
+  - [x] 4a: eval suites (search, answers with an LLM judge, speech recognition, notes),
+        `eval_runs`, thresholds and a local gate (`make eval`)
+  - [ ] 4b: OpenTelemetry traces and metrics, Grafana dashboards, LLM tracing, cost tracking
+  - [ ] 4c: the eval gate in CI
 - [ ] **Phase 5, CV and optimisation**: YOLO26 fine-tune, OCR-vs-VLM routing, ONNX/TensorRT/int8
 - [ ] **Phase 6, ship**: auth, quotas, Terraform and Modal deploy, results write-up
 

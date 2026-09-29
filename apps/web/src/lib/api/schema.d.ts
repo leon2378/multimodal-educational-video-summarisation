@@ -416,7 +416,8 @@ export interface paths {
         get: operations["get_thread_v1_threads__thread_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete Thread */
+        delete: operations["delete_thread_v1_threads__thread_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -749,6 +750,7 @@ export interface components {
             sources?: components["schemas"]["SourceOut"][] | null;
             /** Total Ms */
             total_ms?: number | null;
+            usage?: components["schemas"]["UsageOut"] | null;
         };
         /**
          * MessageRole
@@ -1059,6 +1061,24 @@ export interface components {
             method: "PUT";
             /** Url */
             url: string;
+        };
+        /** UsageOut */
+        UsageOut: {
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -1870,6 +1890,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ThreadDetail"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_thread_v1_threads__thread_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

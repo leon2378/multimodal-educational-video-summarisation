@@ -1,0 +1,52 @@
+{
+  "lecture": {
+    "title": "MIT 6.0001 (Fall 2016) Lecture 10: Understanding Program Efficiency, Part 1",
+    "video": "MIT6_0001F16_Lecture_10_300k.mp4",
+    "video_sha256": "55b4834e0eb6c48158e1ef14bbb4ff07a994e3fcad8d38aa9e6f124143721919",
+    "duration": "51:25",
+    "source": "https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/",
+    "licence": "CC BY-NC-SA 4.0",
+    "attribution": "Eric Grimson, John Guttag and Ana Bell. 6.0001 Introduction to Computer Science and Programming in Python, Fall 2016. MIT OpenCourseWare."
+  },
+  "captions": {
+    "file": "MIT6_0001F16_Lecture_10_300k.srt",
+    "sha256": "0c8ef7c2fb76f2dba266bfbbd9c8242ff56b1e85ec12fdf02b3807c9ed340375",
+    "source": "The lecture's captions (SRT) from MIT OpenCourseWare, downloaded with the video. Not in git: they are the lecture's own text, CC BY-NC-SA 4.0. Put the file in data/lectures/."
+  },
+  "terms": [
+    "algorithm",
+    "efficiency",
+    "complexity",
+    "order of growth",
+    "big O",
+    "worst case",
+    "best case",
+    "average case",
+    "asymptotic",
+    "linear",
+    "quadratic",
+    "logarithmic",
+    "exponential",
+    "polynomial",
+    "log linear",
+    "factorial",
+    "iterative",
+    "recursive",
+    "bisection",
+    "Fibonacci",
+    "omicron",
+    "femtosecond",
+    "dictionary",
+    "nested loop",
+    "law of addition",
+    "law of multiplication",
+    "multiplicative constant",
+    "additive constant",
+    "indirection",
+    "intersection",
+    "divide and conquer",
+    "primitive operation",
+    "integer",
+    "constant time"
+  ]
+}

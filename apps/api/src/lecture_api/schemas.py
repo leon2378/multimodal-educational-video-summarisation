@@ -224,6 +224,12 @@ class FeedbackOut(BaseModel):
     updated_at: datetime
 
 
+class UsageOut(BaseModel):
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -236,6 +242,8 @@ class MessageOut(BaseModel):
     sources: list[SourceOut] | None = None
     citations: list[CitationOut] | None = None
     model: str | None = None
+    # Tokens the answer took, the rewrite of a follow-up included.
+    usage: UsageOut | None = None
     first_token_ms: int | None = None
     total_ms: int | None = None
     error: str | None = None
