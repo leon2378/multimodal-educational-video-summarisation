@@ -298,14 +298,6 @@ Every slide is OCR'd, and only the slides OCR can't handle go to the vision LLM
   (16 s) started after both. Now detection, OCR (12 s idle) and routed reading (11 s) run
   beside speech recognition, about 65 s against its 75.
 
-### Known limitations
-
-- Slide detection assumes light slides on a dark hall, as in MIT OCW recordings. Two slides with the
-  same template and layout can merge: in 6.0001 Lecture 10, "Law of Addition" and "Law of
-  Multiplication" become one. Phase 5's detector (crop the slide, mask the presenter) is meant to
-  fix both. OCR's slide area and ink measure make the same light-slide assumption.
-- OCR reads lines top to bottom, so text written across a slide interleaves with the slide's
-  own lines. Routing sends such slides to the vision LLM; with `SLIDE_READER=ocr` one answer
 ### Frame detector (Phase 5b)
 
 RF-DETR Nano ([ADR 0007](adr/0007-rf-detr-for-the-frame-detector.md)) finding four things in a
@@ -339,6 +331,14 @@ video frame: the slide, people, figures and annotations. It lives in `ml/detecto
 - **Scoring**: RF-DETR's test pass gives AP per class; `lecture-detector evaluate` asks the
   routing question (figure or annotation, or not) of the detector and of the 5a rule.
 
+### Known limitations
+
+- Slide detection assumes light slides on a dark hall, as in MIT OCW recordings. Two slides with the
+  same template and layout can merge: in 6.0001 Lecture 10, "Law of Addition" and "Law of
+  Multiplication" become one. Phase 5's detector (crop the slide, mask the presenter) is meant to
+  fix both. OCR's slide area and ink measure make the same light-slide assumption.
+- OCR reads lines top to bottom, so text written across a slide interleaves with the slide's
+  own lines. Routing sends such slides to the vision LLM; with `SLIDE_READER=ocr` one answer
   in Lecture 10's eval missed a bullet that way. Routing thresholds were set on one lecture.
 - No verification pass yet (flagging claims the cited segments don't support). It comes with the
   eval suites in Phase 4.

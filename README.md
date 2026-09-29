@@ -35,10 +35,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   captions), notes (concept citations), search (Recall@5, MRR, nDCG) and answers (an LLM judge
   for correctness and faithfulness, plus citation accuracy), recorded in Postgres and gated by
   thresholds.
-- Observability ([below](#observability)): OpenTelemetry traces, metrics and logs from the API
 - A frame detector ([below](#frame-detector)): RF-DETR fine-tuned to find slides, people,
   figures and annotations in video frames, on frames labelled automatically from the lectures'
   slide PDFs. Trained and scored; not in the pipeline yet.
+- Observability ([below](#observability)): OpenTelemetry traces, metrics and logs from the API
   and workers into Grafana. One trace follows a request through the workflow's activities to
   each LLM call. A dashboard tracks the blueprint's targets, and every answer and pipeline run
   records its cost. The LLM calls can also go to Langfuse.
@@ -419,24 +419,6 @@ slide. Routing sends slides with figures, angled text or doubtful OCR to the vis
 keeps those, and halves the cost of reading slides. The differences in search and answers are
 within what one lecture and one judge can separate.
 
-## Commands
-
-| Command | What it does |
-|---|---|
-| `make up` / `make down` | Start or stop Postgres, SeaweedFS, Temporal, Qdrant and the embedding server (`make reset` also deletes their data) |
-| `make app` | Build and run the API, the web app and the CPU worker in Docker |
-| `make gpu-worker` | Build and run the GPU services in Docker: speech recognition and the reranker |
-| `make observability` | Start Grafana with traces, metrics and logs on http://localhost:3001 (set `OTEL_ENDPOINT` to send to it) |
-| `make worker` | Run a CPU worker on the host instead |
-| `make api` | Run the API on the host with auto-reload |
-| `make web` | Run the web app on the host with hot reload (Node 24) |
-| `make openapi` | Regenerate the web app's typed API client after an API change |
-| `make eval` | Run every eval suite against the running stack, record it, and check the thresholds |
-| `make eval-retrieval` | Score search only |
-| `make migrate` | Apply migrations |
-| `make revision m="add chapters"` | Generate a migration after changing `packages/core/src/lecture_core/models.py` |
-| `make test` / `make test-unit` | All tests / unit tests only |
-| `make lint` / `make fmt` / `make typecheck` | Ruff check / Ruff fix and format / mypy (strict) |
 ### Frame detector
 
 RF-DETR Nano ([ADR 0007](docs/adr/0007-rf-detr-for-the-frame-detector.md)), fine-tuned on
@@ -477,6 +459,26 @@ counts as a figure). Training at 512 px instead of 384 didn't help (figure AP 0.
 So the 5a rule keeps routing slides, and the detector stays out of the pipeline until more
 lectures are labelled. Every score here is against labels a model made, not checked by hand.
 
+## Commands
+
+| Command | What it does |
+|---|---|
+| `make up` / `make down` | Start or stop Postgres, SeaweedFS, Temporal, Qdrant and the embedding server (`make reset` also deletes their data) |
+| `make app` | Build and run the API, the web app and the CPU worker in Docker |
+| `make gpu-worker` | Build and run the GPU services in Docker: speech recognition and the reranker |
+| `make observability` | Start Grafana with traces, metrics and logs on http://localhost:3001 (set `OTEL_ENDPOINT` to send to it) |
+| `make worker` | Run a CPU worker on the host instead |
+| `make api` | Run the API on the host with auto-reload |
+| `make web` | Run the web app on the host with hot reload (Node 24) |
+| `make openapi` | Regenerate the web app's typed API client after an API change |
+| `make eval` | Run every eval suite against the running stack, record it, and check the thresholds |
+| `make eval-retrieval` | Score search only |
+| `make detector-data` | Label frames for the frame detector from the lectures' videos and slide PDFs (installs PyTorch, 2 GB, the first time) |
+| `make detector-train` | Fine-tune the frame detector on the GPU and score the held-out lecture |
+| `make migrate` | Apply migrations |
+| `make revision m="add chapters"` | Generate a migration after changing `packages/core/src/lecture_core/models.py` |
+| `make test` / `make test-unit` | All tests / unit tests only |
+| `make lint` / `make fmt` / `make typecheck` | Ruff check / Ruff fix and format / mypy (strict) |
 | `make audit` | pip-audit on the locked dependencies |
 | `make check` | Lint, type-check and test, like CI |
 
@@ -491,8 +493,7 @@ packages/llm/              Pydantic AI agents: read slides, chapters, notes
 packages/pipeline/         stages, stage cache, timeline, local runner, Temporal workflow and workers
 packages/rag/              chunks, encoders (TEI, BM25), Qdrant index, hybrid search
 evals/                     eval suites (lecture-eval), datasets, thresholds, Gemini baseline
-| `make detector-data` | Label frames for the frame detector from the lectures' videos and slide PDFs (installs PyTorch, 2 GB, the first time) |
-| `make detector-train` | Fine-tune the frame detector on the GPU and score the held-out lecture |
+ml/detector/               frame detector: labels from slide PDFs, dataset, RF-DETR training
 prompts/                   versioned prompts (pipeline, Q&A and baseline)
 data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
@@ -511,7 +512,6 @@ containers, so they need Docker but not `make up`. If Docker isn't running they'
 locally. In CI they must run and fail instead.
 
 One integration test runs `alembic check`: it fails if a model changed without a migration.
-ml/detector/               frame detector: labels from slide PDFs, dataset, RF-DETR training
 
 ## Decisions
 
