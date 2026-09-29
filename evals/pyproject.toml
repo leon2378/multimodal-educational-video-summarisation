@@ -10,6 +10,7 @@ dependencies = [
     "lecture-core",
     "lecture-llm",
     "pydantic-ai-slim[google]>=2.51",
+    "pypdf>=6.19",
 ]
 
 [project.scripts]

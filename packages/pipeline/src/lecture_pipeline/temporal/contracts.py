@@ -34,6 +34,11 @@ class SlidesInput(BaseModel):
     probe: StageRef
 
 
+class ReadSlidesInput(BaseModel):
+    slides: StageRef
+    ocr: StageRef
+
+
 class TimelineInput(BaseModel):
     transcript: StageRef
     slides: StageRef

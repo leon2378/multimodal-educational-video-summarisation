@@ -22,5 +22,9 @@
     "concepts_near": {"min": 0.75},
     "timestamps_out_of_range": {"max": 0},
     "chapter_issues": {"max": 0}
+  },
+  "slides": {
+    "word_f1": {"min": 0.8},
+    "titled": {"min": 0.9}
   }
 }

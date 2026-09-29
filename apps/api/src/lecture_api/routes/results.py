@@ -52,6 +52,7 @@ async def slides(
             figure_description=row.figure_description,
             latex=row.latex,
             code=row.code,
+            reader=row.reader,
             spans=[TimeSpan.model_validate(span) for span in row.spans],
         )
         for row in rows

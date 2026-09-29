@@ -4,6 +4,8 @@ Summaries, search and the UI all read from this one time-aligned model (docs/blu
 section 3). Times are seconds from the start of the video.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -58,6 +60,8 @@ class SlideReading(BaseModel):
     figure_description: str
     latex: list[str]
     code: str
+    # Who read it: the vision LLM, or OCR alone (slides with only text; see lecture_perception.ocr).
+    reader: Literal["vlm", "ocr"] = "vlm"
 
 
 class TimelineSegment(BaseModel):

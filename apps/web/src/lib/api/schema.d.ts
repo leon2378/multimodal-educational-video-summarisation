@@ -905,6 +905,11 @@ export interface components {
             image_url: string;
             /** Latex */
             latex: string[];
+            /**
+             * Reader
+             * @enum {string}
+             */
+            reader: "vlm" | "ocr";
             /** Slide Id */
             slide_id: number;
             /** Spans */

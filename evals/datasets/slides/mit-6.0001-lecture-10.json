@@ -1,0 +1,17 @@
+{
+  "lecture": {
+    "title": "MIT 6.0001 (Fall 2016) Lecture 10: Understanding Program Efficiency, Part 1",
+    "video": "MIT6_0001F16_Lecture_10_300k.mp4",
+    "video_sha256": "55b4834e0eb6c48158e1ef14bbb4ff07a994e3fcad8d38aa9e6f124143721919",
+    "duration": "51:25",
+    "source": "https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/",
+    "licence": "CC BY-NC-SA 4.0",
+    "attribution": "Eric Grimson, John Guttag and Ana Bell. 6.0001 Introduction to Computer Science and Programming in Python, Fall 2016. MIT OpenCourseWare."
+  },
+  "pdf": {
+    "file": "MIT6_0001F16_Lec10.pdf",
+    "sha256": "af7deaa0170f150638040abe9da9d5588d327eac02451ac79a40777c78afb5ce",
+    "source": "Lecture 10's slides (PDF, 705 kB) from MIT OpenCourseWare: https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/resources/mit6_0001f16_lec10/. Not in git: they are the lecture's own material, CC BY-NC-SA 4.0. Put the file in data/lectures/.",
+    "footer": "6[.]0001[ \t]+LECTURE[ \t]+[0-9]+[ \t\r\n]*[0-9]*"
+  }
+}

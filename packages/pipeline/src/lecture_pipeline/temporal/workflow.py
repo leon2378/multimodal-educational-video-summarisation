@@ -1,8 +1,9 @@
 """ProcessLecture: one workflow per lecture, orchestrating the stage activities.
 
 Workflow code must be deterministic, so it only sequences activities and tracks progress; all
-I/O happens in activities. Speech recognition (GPU queue) and slide detection (CPU queue) run
-in parallel, and so do embedding for search and writing the notes.
+I/O happens in activities. Speech recognition (GPU queue) runs in parallel with the slides
+(detection and OCR on the CPU queue, then reading on the LLM queue), and embedding for search
+in parallel with writing the notes.
 """
 
 import asyncio
@@ -31,6 +32,7 @@ with workflow.unsafe.imports_passed_through():
         IndexInput,
         IngestOutcome,
         PersistInput,
+        ReadSlidesInput,
         SlidesInput,
         StageOutcome,
         StageRef,
@@ -79,23 +81,12 @@ class ProcessLecture:
         )
         self._progress.done += ingest.info
 
-        transcript, slides = await asyncio.gather(
+        transcript, (slides, readings) = await asyncio.gather(
             self._stage(
                 "asr", "transcribe", ingest.audio, QUEUE_GPU, minutes=120, heartbeat_minutes=5
             ),
-            self._stage(
-                "slides",
-                "detect_slides",
-                SlidesInput(
-                    source_key=request.source_key,
-                    video_sha256=ingest.video_sha256,
-                    probe=ingest.probe,
-                ),
-                QUEUE_CPU,
-                minutes=30,
-            ),
+            self._slides(request, ingest),
         )
-        readings = await self._stage("read_slides", "read_slides", slides, QUEUE_LLM, minutes=30)
         timeline = await self._stage(
             "timeline",
             "build_timeline",
@@ -139,6 +130,32 @@ class ProcessLecture:
             QUEUE_CPU,
             minutes=5,
         )
+
+    async def _slides(
+        self, request: ProcessInput, ingest: IngestOutcome
+    ) -> tuple[StageRef, StageRef]:
+        """Find the slides, OCR them, then read them. Reading needs only the slides, so it
+        doesn't wait for speech recognition."""
+        slides = await self._stage(
+            "slides",
+            "detect_slides",
+            SlidesInput(
+                source_key=request.source_key,
+                video_sha256=ingest.video_sha256,
+                probe=ingest.probe,
+            ),
+            QUEUE_CPU,
+            minutes=30,
+        )
+        ocr = await self._stage("ocr", "ocr_slides", slides, QUEUE_CPU, minutes=30)
+        readings = await self._stage(
+            "read_slides",
+            "read_slides",
+            ReadSlidesInput(slides=slides, ocr=ocr),
+            QUEUE_LLM,
+            minutes=30,
+        )
+        return slides, readings
 
     async def _notes(self, timeline: StageRef) -> tuple[StageRef, StageRef, StageRef]:
         chapters = await self._stage("chapters", "plan_chapters", timeline, QUEUE_LLM, minutes=15)

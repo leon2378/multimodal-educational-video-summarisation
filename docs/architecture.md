@@ -3,7 +3,7 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 4 under way (eval suites and observability done, CI gate next)
+## Current state: Phase 5 under way (OCR and routing done, the detector next)
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
@@ -72,11 +72,11 @@ the video and slide images straight from storage through presigned URLs.
 1. `POST /v1/lectures/{id}/process` records a `pipeline_runs` row and starts the
    `ProcessLecture` workflow, with workflow id `process-{lecture_id}`. While a run is in progress,
    asking again returns that run; a partial unique index keeps it to one running run per lecture.
-2. The workflow runs each stage as an activity on its queue: `cpu` (probe, audio, slides,
+2. The workflow runs each stage as an activity on its queue: `cpu` (probe, audio, slides, OCR,
    timeline, notes assembly, embedding and indexing for search, saving), `gpu` (speech
    recognition, one activity at a time for a 6 GB card, with heartbeats) and `llm` (slide
-   reading, chapters, notes drafts). Speech recognition and slide detection run in parallel, and
-   so do embedding and the notes.
+   reading, chapters, notes drafts). Speech recognition runs in parallel with the slides
+   (detection, OCR, then reading), and embedding in parallel with the notes.
 3. Activities hand each other stage-cache refs, never payloads: a 51-minute transcript with word
    timings can pass Temporal's 2 MB limit. Results and files live in the stage cache in object
    storage, so a retried activity, or a re-run with one prompt changed, reuses everything else.
@@ -237,9 +237,9 @@ so a second run only redoes stages whose inputs, version, model, params or promp
 ```
  video ─┬─► probe ──────────────────────────────┐
         ├─► audio (16 kHz FLAC) ─► asr ─────────┤ transcript with word timestamps
-        └─► slides (frames at 1 fps) ─► read_slides (vision LLM) ─┐
-                                                 ▼                 ▼
-                                             timeline ◄───────────┘
+        └─► slides (frames at 1 fps) ─► ocr ─► read_slides (OCR, or the vision LLM when routed) ─┐
+                                                 ▼                                               ▼
+                                             timeline ◄─────────────────────────────────────────┘
                                                  ▼
                                    chapters (LLM) ─► notes (LLM: map per chapter, then reduce)
                                                  ▼
@@ -251,7 +251,8 @@ so a second run only redoes stages whose inputs, version, model, params or promp
 | probe, audio | perception (`media`) | PyAV, which bundles FFmpeg: metadata, 16 kHz mono FLAC |
 | asr | perception (`asr`) | faster-whisper large-v3-turbo, int8, VAD and word timestamps. On the GPU in Docker |
 | slides | perception (`slides`) | Frames at 1 fps, split into slide vs camera by brightness, a 256-bit difference hash to find changes, keeps the most complete frame of each slide, recognises revisits |
-| read_slides | llm | Vision LLM, 8 slides per request: title, text, figure, LaTeX, code |
+| ocr | perception (`ocr`) | RapidOCR (PP-OCRv6 small, ONNX Runtime) on every slide: text lines with boxes and confidence, and how much ink isn't text |
+| read_slides | perception (`ocr`) + llm | Title and text from OCR; slides with figures, annotations or doubtful OCR go to the vision LLM, 8 per request, for title, text, figure, LaTeX, code (`SLIDE_READER`, [below](#ocr-and-routing-phase-5a)) |
 | timeline | pipeline (`fuse`) | One segment per slide span, split at 90 s. Speech before the first slide gets no slide |
 | chapters, notes | llm + pipeline (`assemble`) | Chapter plan, notes per chapter, then TL;DR and quiz. Output cites segment ids, converted to times. Concepts get the time the term is first said, from word timestamps |
 
@@ -263,12 +264,49 @@ so a second run only redoes stages whose inputs, version, model, params or promp
   cache hits, LLM usage, notes). The notes use the same `StudyNotes` format as the Gemini baseline,
   so the two can be compared directly.
 
+### OCR and routing (Phase 5a)
+
+Every slide is OCR'd, and only the slides OCR can't handle go to the vision LLM
+(`lecture_perception.ocr`, `stages.ocr_slides` and `stages.read_slides`).
+
+- **OCR**: RapidOCR with the PP-OCRv6 small models it ships with, on ONNX Runtime, 4 threads on
+  the CPU worker: 12 s for Lecture 10's 24 slides on an idle worker (32 s in the first run, on
+  a machine busy after a rebuild). Per slide it keeps each text line with its corners and
+  confidence, where the slide sits in the frame, and how much of the slide is ink outside the
+  text lines.
+- **Routing**: a slide goes to the vision LLM when it has
+  - ink outside text beyond the deck's usual (its 25th percentile, which absorbs the template's
+    bands and rules) by more than 0.3% of the slide: a plot, diagram, table or marks;
+  - 2 or more lines at over 8°: annotations written across the slide;
+  - a mean OCR confidence under 0.93, or fewer than 5 words.
+
+  On Lecture 10 that's 11 of 24 slides; the reasons are kept with the readings. Every slide
+  the vision LLM described a figure on is among them, except one with only faint arrows.
+- **OCR readings**: the title is the tall text starting in the top 30% of the slide, over as
+  many lines as it runs; the rest is text, bullets as "- ". Lines in the bottom 8% (the
+  footer) are dropped. A reading records who made it (`slides.reader`: `ocr` or `vlm`).
+- **Modes**: `SLIDE_READER` is `routed` (the default), `vlm` (every slide, as before 5a) or
+  `ocr`. `vlm` keeps the cache key slide reading always had, so lectures read before 5a aren't
+  read again.
+- **Evaluated** by the `slides` suite against the lecture's slide PDF, and by the other suites
+  on the notes and answers made from each reading (the comparison is in the README's
+  results). Routed reading matched or beat the vision LLM on slide text, search and answers,
+  at 55% of its cost; the notes, written again from the new reading, cited 9 of 11 checkable
+  concepts near where they're said, against 9 of 10.
+- **The slides no longer wait for speech recognition**: reading needs only the slides. In a
+  fresh run of Lecture 10 speech recognition took 75 s and slide detection 42 s, and reading
+  (16 s) started after both. Now detection, OCR (12 s idle) and routed reading (11 s) run
+  beside speech recognition, about 65 s against its 75.
+
 ### Known limitations
 
 - Slide detection assumes light slides on a dark hall, as in MIT OCW recordings. Two slides with the
   same template and layout can merge: in 6.0001 Lecture 10, "Law of Addition" and "Law of
   Multiplication" become one. Phase 5's detector (crop the slide, mask the presenter) is meant to
-  fix both.
+  fix both. OCR's slide area and ink measure make the same light-slide assumption.
+- OCR reads lines top to bottom, so text written across a slide interleaves with the slide's
+  own lines. Routing sends such slides to the vision LLM; with `SLIDE_READER=ocr` one answer
+  in Lecture 10's eval missed a bullet that way. Routing thresholds were set on one lecture.
 - No verification pass yet (flagging claims the cited segments don't support). It comes with the
   eval suites in Phase 4.
 - Chunks follow slides, and lecturers often start the next topic before changing slide. In
@@ -291,8 +329,12 @@ so a second run only redoes stages whose inputs, version, model, params or promp
   run takes about 6 minutes rather than 2. The GPU could do it in seconds, next to speech
   recognition if VRAM allows.
 
-## Next: the rest of Phase 4
+## Next: the detector (Phase 5b)
 
-The eval gate in CI (4c): it needs a processed lecture and a Gemini key there, or a smaller
-suite that runs against fixtures. Slide-boundary precision and recall need hand-labelled slide
-changes, which come with the Phase 5 detector.
+A detector for the slide region, the presenter, and figures, tables and equations: it crops the
+slide before change detection (fixing the merged slides), masks the presenter, and replaces the
+ink measure in routing. It needs frames from more lectures, labelled by hand (500 to 1,000,
+split by lecture), and a choice between YOLO26 (AGPL-3.0) and RF-DETR (Apache-2.0), which gets
+its ADR. Slide-boundary precision and recall need hand-labelled slide changes too. Then the
+speed benchmarks (5c). The eval gate in CI (4c) waits for more lectures and somewhere to keep
+them.

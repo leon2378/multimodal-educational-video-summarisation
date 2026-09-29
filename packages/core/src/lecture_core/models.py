@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import (
     BigInteger,
@@ -159,6 +159,8 @@ class SlideRow(Base):
     figure_description: Mapped[str] = mapped_column(Text)
     latex: Mapped[list[str]] = mapped_column(JSONB)
     code: Mapped[str] = mapped_column(Text)
+    # Who read the slide: the vision LLM ("vlm") or OCR alone ("ocr").
+    reader: Mapped[Literal["vlm", "ocr"]] = mapped_column(String(8), server_default="vlm")
     # [{start_s, end_s}]: every stretch of the video during which this is the current slide.
     spans: Mapped[list[dict[str, float]]] = mapped_column(JSONB)
 

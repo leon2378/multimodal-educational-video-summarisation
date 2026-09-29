@@ -134,6 +134,8 @@ class SlideOut(BaseModel):
     figure_description: str
     latex: list[str]
     code: str
+    # Who read the slide: the vision LLM, or OCR alone for slides with nothing but text.
+    reader: Literal["vlm", "ocr"]
     # Every stretch of the video during which this is the current slide.
     spans: list[TimeSpan]
 

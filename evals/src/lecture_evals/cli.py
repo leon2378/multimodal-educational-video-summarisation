@@ -5,8 +5,9 @@
     uv run lecture-eval --gate                   # exit 1 if a metric is past its threshold
 
 Suites: retrieval (search), answers (Q&A, with an LLM judge), asr (word error rate against the
-captions) and notes (concept citations against the captions). Each prints a summary, writes a
-detailed report to data/evals/<suite>/, and is saved as an `eval_runs` row unless --no-save.
+captions), notes (concept citations against the captions) and slides (slide text against the
+slide PDF). Each prints a summary, writes a detailed report to data/evals/<suite>/, and is saved
+as an `eval_runs` row unless --no-save.
 """
 
 import argparse
@@ -18,11 +19,11 @@ import httpx
 
 from lecture_core.settings import Settings
 from lecture_evals.runs import SuiteResult, failures, load_thresholds, save
-from lecture_evals.suites import answers, asr, notes, retrieval
+from lecture_evals.suites import answers, asr, notes, retrieval, slides
 from lecture_llm.models import LLMConfigError, make_model
 from lecture_llm.settings import LLMSettings
 
-SUITES = ("retrieval", "answers", "asr", "notes")
+SUITES = ("retrieval", "answers", "asr", "notes", "slides")
 THRESHOLDS = Path("evals/thresholds.json")
 DEFAULT_OUT = Path("data/evals")
 
@@ -36,6 +37,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--golden", type=Path, default=answers.DEFAULT_DATASET)
     parser.add_argument("--captions", type=Path, default=asr.DEFAULT_DATASET)
     parser.add_argument("--captions-dir", type=Path, default=asr.DEFAULT_CAPTIONS_DIR)
+    parser.add_argument("--slides", type=Path, default=slides.DEFAULT_DATASET)
+    parser.add_argument("--pdf-dir", type=Path, default=slides.DEFAULT_PDF_DIR)
     parser.add_argument(
         "--notes-file",
         type=Path,
@@ -61,6 +64,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "notes": lambda client: _with_text(
             notes.run(client, args.captions, args.captions_dir, args.out, args.notes_file),
             notes.to_markdown,
+        ),
+        "slides": lambda client: _with_text(
+            slides.run(client, args.slides, args.pdf_dir, args.out), slides.to_markdown
         ),
         "answers": lambda client: _with_text(
             answers.run(client, args.golden, _judge(args.judge_model), args.out, args.pause),

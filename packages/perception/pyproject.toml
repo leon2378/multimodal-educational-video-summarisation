@@ -1,13 +1,16 @@
 [project]
 name = "lecture-perception"
 version = "0.1.0"
-description = "Media decoding, slide-change detection, and speech recognition adapters."
+description = "Media decoding, slide-change detection, OCR, and speech recognition adapters."
 requires-python = ">=3.12"
 dependencies = [
     "av>=18.1",
     "lecture-core",
     "numpy>=2.5",
+    # OpenCV without its GUI: rapidocr asks for opencv-python, dropped in the root pyproject.
+    "opencv-python-headless>=5.0",
     "pillow>=12.3",
+    "rapidocr>=3.9.2",
 ]
 
 [project.optional-dependencies]

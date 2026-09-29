@@ -138,7 +138,10 @@ async def _running_run(session: AsyncSession, lecture_id: uuid.UUID) -> Pipeline
 
 
 async def _progress_event(
-    sessionmaker: async_sessionmaker[AsyncSession], temporal: Client, lecture_id: uuid.UUID
+    sessionmaker: async_sessionmaker[AsyncSession],
+    temporal: Client,
+    lecture_id: uuid.UUID,
+    ask_workflow: bool = True,
 ) -> ProgressEvent:
     async with sessionmaker() as session:
         lecture = await lecture_or_404(session, lecture_id)
@@ -155,10 +158,16 @@ async def _progress_event(
         done=[StageInfo.model_validate(info) for info in run.stages],
         error=run.error,
     )
-    if run.status == RunStatus.RUNNING:
+    if run.status == RunStatus.RUNNING and ask_workflow:
         # If no worker has picked the workflow up yet, report what the database knows.
         with contextlib.suppress(RPCError):
             progress = await temporal.get_workflow_handle(run.workflow_id).query(
                 PROGRESS_QUERY, result_type=Progress, rpc_timeout=timedelta(seconds=2)
             )
+        if progress.status != "running":
+            # The run ended after the database was read. Its outcome is saved before the
+            # workflow completes, so read it again rather than pair it with a stale status.
+            fresh = await _progress_event(sessionmaker, temporal, lecture_id, ask_workflow=False)
+            if fresh.progress is not None and fresh.progress.status != "running":
+                return fresh
     return ProgressEvent(lecture_status=lecture.status, run_id=run.id, progress=progress)

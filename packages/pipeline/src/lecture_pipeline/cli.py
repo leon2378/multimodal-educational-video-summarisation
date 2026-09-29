@@ -22,6 +22,7 @@ from lecture_llm.models import LLMConfigError, make_model
 from lecture_llm.settings import LLMSettings
 from lecture_perception.asr import FasterWhisperTranscriber, Transcriber, WhisperConfig
 from lecture_perception.media import MediaError
+from lecture_perception.ocr import SlideOCR
 from lecture_perception.slides import DetectorConfig
 from lecture_pipeline import stages
 from lecture_pipeline.cache import StageCache, StageResult
@@ -82,7 +83,11 @@ def run(
     transcript = timed("asr", lambda: stages.transcribe(ctx, audio, transcriber))
     transcriber.close()  # frees VRAM before anything else needs it
     deck = timed("slides", lambda: stages.slides(ctx, video, sha, info.output, DetectorConfig()))
-    readings = timed("read_slides", lambda: stages.read_slides(ctx, deck, llm))
+    texts = timed("ocr", lambda: stages.ocr_slides(ctx, deck, SlideOCR()))
+    readings = timed(
+        "read_slides",
+        lambda: stages.read_slides(ctx, deck, llm, texts, settings.slide_reader),
+    )
     timeline = timed("timeline", lambda: stages.timeline(ctx, transcript, deck, readings))
     plan = timed("chapters", lambda: stages.chapters(ctx, timeline, llm))
     draft = timed("draft_notes", lambda: stages.draft_notes(ctx, timeline, plan, llm))

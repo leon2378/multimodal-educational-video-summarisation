@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 to 3 of 6 done, Phase 4 under way: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 3 of 6 done, Phase 4 done but for the CI gate, Phase 5 under way: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -18,8 +18,9 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   quiz, search and a Q&A chat, every timestamp clickable.
 - Processing through the API: a Temporal workflow per lecture, CPU and GPU workers, progress
   over server-sent events, and results in Postgres ([below](#processing-a-lecture)).
-- The processing pipeline: speech recognition, slide detection, a vision LLM reading each slide, a
-  time-aligned timeline, then chapters and study notes with timestamps
+- The processing pipeline: speech recognition, slide detection, OCR on every slide with a vision
+  LLM for the slides OCR can't handle (figures, annotations), a time-aligned timeline, then
+  chapters and study notes with timestamps
   ([below](#processing-a-lecture)).
 - Search ([below](#search)): each processed lecture is indexed in Qdrant with dense vectors
   (Qwen3-Embedding-0.6B) and BM25, and `GET /v1/search` runs dense, BM25, hybrid or reranked
@@ -231,6 +232,7 @@ MIT 6.0001 Lecture 10 (process it first; the suites find it by the video's hash)
 | `answers` | correctness and faithfulness (an LLM judge), citations inside the retrieved passages and near the answer, declining what the lecture doesn't cover, time to first token, tokens | the same questions, plus 3 the lecture doesn't answer |
 | `asr` | word error rate against the human captions, recall of 34 technical terms, real-time factor | the captions |
 | `notes` | concepts cited within 10 s of where the captions say the term, timestamp and chapter checks | the captions |
+| `slides` | how much of each slide's text the readings recover (word precision, recall, F1), by reader, and slides without a title | the lecture's slide PDF |
 
 ```bash
 make eval                                   # every suite; exits 1 if a metric is past its threshold
@@ -243,8 +245,8 @@ Each suite prints a summary, writes the details (every question, answer and verd
 commit, the models and settings, and the metrics. `evals/thresholds.json` holds the bounds the
 gate checks, set a little below today's scores.
 
-The captions aren't in git: they're the lecture's own text (CC BY-NC-SA). The dataset file
-names the captions file to put in `data/lectures/` and its SHA-256. The answer judge uses
+The captions and slide PDF aren't in git: they're the lecture's own material (CC BY-NC-SA).
+Each dataset file names the file to put in `data/lectures/`, where to get it, and its SHA-256. The answer judge uses
 `LLM_MODEL` (or `--judge-model`), the same Gemini model that answers, and it isn't calibrated
 against hand grades yet, so treat its scores as a trend. The golden questions were drafted from
 the captions and still need checking by hand against the video.
@@ -382,6 +384,36 @@ Recall@5); more lectures, and course-wide search, should separate them. Embeddin
 takes 5 minutes on the CPU, so a fresh run now takes about 6 minutes, up from 2. More in
 [ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md).
 
+### Slide reading
+
+The tables above were measured with the vision LLM reading every slide. Since Phase 5a, OCR
+reads every slide and only the slides OCR can't handle go to the vision LLM (`SLIDE_READER`).
+Lecture 10 read all three ways, everything else the same; slide text is scored against the
+lecture's slide PDF by word overlap (`lecture-eval --suites slides`), and the notes and answers
+are regenerated from each reading:
+
+| | Vision LLM, every slide | Routed (default) | OCR only |
+|---|---|---|---|
+| Slides the vision LLM reads | 24 | 11 | 0 |
+| Slide text against the PDF, word F1 | 0.80 | 0.84 | 0.82 |
+| Slides without a title | 9 | 0 | 0 |
+| Formulas in the notes | 7 | 8 | 3 |
+| Search with reranking, Recall@5 / MRR@10 | 1.00 / 0.89 | 1.00 / 0.92 | 1.00 / 0.94 |
+| Answers correct / faithful / citing near the answer | 0.98 / 1.00 / 0.97 | 1.00 / 1.00 / 1.00 | 0.95 / 0.97 / 0.97 |
+| Reading slides: LLM tokens in / out | 26,729 / 3,551 | 12,471 / 2,236 | none |
+| Reading slides: cost at paid-tier prices | $0.017 | $0.009 | $0 |
+| All of the lecture's LLM calls | $0.041 | $0.035 | $0.024 |
+
+OCR (RapidOCR's PP-OCRv6 models on the CPU, 12 s for the 24 slides) reads plain text as well
+as the vision LLM, tables better, and never skips a title: the vision LLM left 9 empty, a whole
+batch of 8 among them. What OCR can't do is describe a plot or a diagram, write LaTeX, or keep
+the lecturer's annotations apart from the slide text. With OCR alone the notes kept 3 of the
+formulas, and one answer went wrong: asked for the three ways of measuring efficiency, it missed
+"order of growth", which OCR had read but between the lines of an annotation written across the
+slide. Routing sends slides with figures, angled text or doubtful OCR to the vision LLM, which
+keeps those, and halves the cost of reading slides. The differences in search and answers are
+within what one lecture and one judge can separate.
+
 ## Commands
 
 | Command | What it does |
@@ -457,6 +489,12 @@ from the blueprint in these places:
   components to share.
 - **CI builds the images (API, CPU worker, web) but doesn't scan or push them.** That comes with
   deployment in Phase 6.
+- **Slides are routed to the vision LLM by simple image measures until the detector exists.**
+  The blueprint routes by the detector's figure, table and equation boxes; until Phase 5b, ink
+  outside the OCR'd lines, lines at an angle and OCR confidence stand in
+  ([architecture](docs/architecture.md#ocr-and-routing-phase-5a)). OCR uses the PP-OCRv6 models
+  that come with RapidOCR rather than the PP-OCRv5 the blueprint names: newer, and nothing more
+  to download.
 - **Eval runs are recorded in Postgres (`eval_runs`) and charted in Grafana**, not MLflow.
   MLflow comes in with detector training in Phase 5.
 - **Langfuse only receives LLM calls, and only when its keys are set.** Prompts are versioned in
@@ -496,7 +534,12 @@ from the blueprint in these places:
   - [x] 4b: OpenTelemetry traces, metrics and logs, a Grafana dashboard, LLM tracing (Langfuse
         optional), cost per answer and per run
   - [ ] 4c: the eval gate in CI
-- [ ] **Phase 5, CV and optimisation**: YOLO26 fine-tune, OCR-vs-VLM routing, ONNX/TensorRT/int8
+- [ ] **Phase 5, CV and optimisation**
+  - [x] 5a: OCR on every slide (RapidOCR), the vision LLM only for slides with figures,
+        annotations or doubtful OCR, and a slides eval against the slide PDF
+  - [ ] 5b: a detector (YOLO26 or RF-DETR) to crop slides, mask the presenter and route by
+        figure, table and equation boxes, fine-tuned on labelled frames
+  - [ ] 5c: ONNX/TensorRT/int8 benchmarks, before and after
 - [ ] **Phase 6, ship**: auth, quotas, Terraform and Modal deploy, results write-up
 
 ## Data and licensing

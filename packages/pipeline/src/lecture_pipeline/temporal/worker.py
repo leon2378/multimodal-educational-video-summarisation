@@ -64,6 +64,7 @@ def build_resources(queues: Sequence[str], traced: bool = False) -> Resources:
         search = SearchServices.from_settings(settings)
         resources.search = SearchResources(search.index, search.dense, search.sparse)
     if QUEUE_LLM in queues:
+        resources.slide_reader = PipelineSettings().slide_reader
         llm_settings = LLMSettings()
         resources.llm = LectureLLM(
             make_model(llm_settings),
@@ -98,6 +99,7 @@ def build_workers(
                 activities=[
                     activities.ingest,
                     activities.detect_slides,
+                    activities.ocr_slides,
                     activities.build_timeline,
                     activities.assemble_notes,
                     activities.embed_segments,

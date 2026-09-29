@@ -9,8 +9,10 @@ import io
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel
+from PIL import Image
+from pydantic import BaseModel, JsonValue
 
 from lecture_core.notes import StudyNotes
 from lecture_core.timeline import SlideDeck, SlideImage, SlideReading, Timeline, Transcript
@@ -18,6 +20,7 @@ from lecture_llm.agents import ChapterNotes, LectureLLM, Overview, Usage
 from lecture_llm.telemetry import record_usage
 from lecture_perception import media
 from lecture_perception.asr import Transcriber
+from lecture_perception.ocr import DeckOcr, RoutingConfig, SlideOCR, reading_from_ocr, route
 from lecture_perception.slides import DetectorConfig, detect_slides
 from lecture_pipeline.assemble import ChapterRange, assemble, chapter_ranges
 from lecture_pipeline.cache import ArtifactStore, StageCache, StageResult, StageSpec, files_prefix
@@ -38,9 +41,16 @@ class AudioArtifact(BaseModel):
     size_bytes: int
 
 
+# Who reads the slides: the vision LLM (every slide), OCR (every slide), or OCR with the slides
+# it can't handle routed to the vision LLM (lecture_perception.ocr).
+SlideReaderMode = Literal["vlm", "routed", "ocr"]
+
+
 class SlideReadings(BaseModel):
     readings: list[SlideReading]
     usage: Usage
+    # Slides sent to the vision LLM when routing, with the reasons.
+    routed: dict[int, list[str]] = {}
 
 
 class ChapterPlan(BaseModel):
@@ -140,25 +150,71 @@ def slides(
     return ctx.cache.run(spec, {"video": video_sha256}, SlideDeck, compute)
 
 
-def read_slides(
-    ctx: Context, deck: StageResult[SlideDeck], llm: LectureLLM
-) -> StageResult[SlideReadings]:
-    def compute(_key: str) -> SlideReadings:
-        images = [(s.id, _require(ctx.store, s.image_key)) for s in deck.output.slides]
-        readings, usage = llm.read_slides(images)
-        record_usage(usage, llm.model_name, "read_slides")
-        return SlideReadings(readings=readings, usage=usage)
+def ocr_slides(ctx: Context, deck: StageResult[SlideDeck], ocr: SlideOCR) -> StageResult[DeckOcr]:
+    def compute(_key: str) -> DeckOcr:
+        texts = []
+        for slide in deck.output.slides:
+            image = Image.open(io.BytesIO(_require(ctx.store, slide.image_key)))
+            texts.append(ocr.read(slide.id, image))
+        return DeckOcr(slides=texts, model=ocr.model_id)
 
+    spec = StageSpec("ocr", "1", model=ocr.model_id)
+    return ctx.cache.run(spec, {"slides": deck.key}, DeckOcr, compute)
+
+
+def read_slides(
+    ctx: Context,
+    deck: StageResult[SlideDeck],
+    llm: LectureLLM,
+    texts: StageResult[DeckOcr] | None = None,
+    mode: SlideReaderMode = "vlm",
+    routing: RoutingConfig | None = None,
+) -> StageResult[SlideReadings]:
+    """Slide titles, text, figures, LaTeX and code. `vlm` keeps the cache key it always had, so
+    lectures read that way before OCR existed aren't read again."""
+    routing = routing or RoutingConfig()
+    vlm_params: dict[str, JsonValue] = {
+        "prompt": llm.prompts.read_slides.fingerprint,
+        "per_request": llm.slides_per_request,
+    }
+
+    def with_vlm(slide_ids: set[int]) -> tuple[dict[int, SlideReading], Usage]:
+        images = [(s.id, _require(ctx.store, s.image_key)) for s in deck.output.slides]
+        readings, usage = llm.read_slides([image for image in images if image[0] in slide_ids])
+        record_usage(usage, llm.model_name, "read_slides")
+        return {reading.slide_id: reading for reading in readings}, usage
+
+    if mode == "vlm":
+        spec = StageSpec("read_slides", "1", model=llm.model_name, params=vlm_params)
+
+        def compute_vlm(_key: str) -> SlideReadings:
+            readings, usage = with_vlm({s.id for s in deck.output.slides})
+            return SlideReadings(readings=[readings[s.id] for s in deck.output.slides], usage=usage)
+
+        return ctx.cache.run(spec, {"slides": deck.key}, SlideReadings, compute_vlm)
+
+    if texts is None:
+        raise ValueError(f"slide reader {mode!r} needs the OCR stage's output")
+    ocr_texts = texts.output
+
+    def compute(_key: str) -> SlideReadings:
+        routed = route(ocr_texts, routing) if mode == "routed" else {}
+        readings = {s.slide_id: reading_from_ocr(s) for s in ocr_texts.slides}
+        usage = Usage()
+        if routed:
+            from_vlm, usage = with_vlm(set(routed))
+            readings |= from_vlm
+        return SlideReadings(
+            readings=[readings[s.id] for s in deck.output.slides], usage=usage, routed=routed
+        )
+
+    params: dict[str, JsonValue] = {"mode": mode}
+    if mode == "routed":
+        params |= {**vlm_params, **asdict(routing)}
     spec = StageSpec(
-        "read_slides",
-        "1",
-        model=llm.model_name,
-        params={
-            "prompt": llm.prompts.read_slides.fingerprint,
-            "per_request": llm.slides_per_request,
-        },
+        "read_slides", "2", model=llm.model_name if mode == "routed" else None, params=params
     )
-    return ctx.cache.run(spec, {"slides": deck.key}, SlideReadings, compute)
+    return ctx.cache.run(spec, {"slides": deck.key, "ocr": texts.key}, SlideReadings, compute)
 
 
 def timeline(

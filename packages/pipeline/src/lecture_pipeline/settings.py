@@ -1,6 +1,7 @@
-"""Where the pipeline keeps its cache, and which speech model it runs."""
+"""Where the pipeline keeps its cache, which speech model it runs, and who reads slides."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -18,3 +19,7 @@ class PipelineSettings(BaseSettings):
     whisper_device: str = "auto"
     whisper_compute_type: str = "auto"
     whisper_language: str | None = None
+
+    # Who reads the slides (lecture_pipeline.stages.read_slides): "routed" sends only slides with
+    # figures, annotations or doubtful OCR to the vision LLM; "vlm" sends every slide; "ocr" none.
+    slide_reader: Literal["vlm", "routed", "ocr"] = "routed"

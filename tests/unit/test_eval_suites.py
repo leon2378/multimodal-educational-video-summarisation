@@ -14,7 +14,7 @@ import pytest
 from lecture_evals.captions import count, normalise, occurrences, parse_srt, timed_words
 from lecture_evals.golden import GoldenLecture, GoldenQuestion
 from lecture_evals.runs import Bound, SuiteResult, failures, load_thresholds
-from lecture_evals.suites import answers, asr, notes
+from lecture_evals.suites import answers, asr, notes, slides
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LECTURE_ID = uuid.UUID("00000000-0000-4000-8000-00000000000b")
@@ -143,6 +143,59 @@ def test_concepts_are_checked_against_where_the_term_is_said(tmp_path: Path) -> 
     # The concept cited at 30 s is past the 10 s video.
     assert report.checks.out_of_range == 1
     assert "never said" in notes.to_markdown(report)
+
+
+def _slide(slide_id: int, title: str, text: str, reader: str = "vlm") -> dict[str, Any]:
+    return {
+        "slide_id": slide_id,
+        "title": title,
+        "text": text,
+        "code": "",
+        "latex": [],
+        "figure_description": "a plot",
+        "reader": reader,
+    }
+
+
+def test_slide_readings_are_scored_against_the_pages_they_show() -> None:
+    pages = [
+        "Timing a program\nuse the time module",
+        "Counting operations\nassume these steps take constant time",
+    ]
+    client = _api(
+        {
+            f"/v1/lectures/{LECTURE_ID}/slides": [
+                # Page 2 exactly, as OCR read it; the order doesn't matter.
+                _slide(0, "COUNTING OPERATIONS", "constant time\nassume these steps take", "ocr"),
+                # Page 1, missing two words and adding one the lecturer wrote on the slide.
+                _slide(1, "", "Timing a program use the module wow"),
+            ]
+        }
+    )
+    slides_set = slides.SlidesSet(
+        lecture=LECTURE, pdf=slides.SlidesPdf(file="s.pdf", sha256="", source="test")
+    )
+
+    report = slides.evaluate(client, slides_set, pages, LECTURE_ID)
+
+    first, second = report.slides
+    assert (first.page, first.reader, first.overlap.f1) == (2, "ocr", 1.0)
+    assert second.page == 1
+    # 6 of its 7 words are on the page, and it has 6 of the page's 7.
+    assert second.overlap.precision == pytest.approx(6 / 7)
+    assert second.overlap.recall == pytest.approx(6 / 7)
+    assert report.mean("f1", "ocr") == 1.0
+    assert "1 without a title" in slides.to_markdown(report)
+
+
+def test_a_missing_slide_pdf_says_where_to_get_it(tmp_path: Path) -> None:
+    missing = slides.SlidesSet(
+        lecture=LECTURE, pdf=slides.SlidesPdf(file="none.pdf", sha256="", source="get it here")
+    )
+
+    with pytest.raises(LookupError, match="get it here"):
+        missing.read_pages(tmp_path)
+    assert slides.words("Ef\ufb01cient O(n^2)") == {"efficient": 1, "o": 1, "n": 1, "2": 1}
 
 
 def _check(

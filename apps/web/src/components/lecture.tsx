@@ -229,6 +229,7 @@ const STAGES: [string, string][] = [
   ["audio", "Extracting audio"],
   ["asr", "Transcribing"],
   ["slides", "Finding slides"],
+  ["ocr", "Reading slide text"],
   ["read_slides", "Reading slides"],
   ["timeline", "Building the timeline"],
   ["chapters", "Planning chapters"],

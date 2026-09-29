@@ -9,7 +9,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -37,6 +37,7 @@ from lecture_llm.agents import LectureLLM
 from lecture_llm.pricing import text_cost_usd
 from lecture_perception.asr import Transcriber
 from lecture_perception.media import MediaError, MediaInfo
+from lecture_perception.ocr import DeckOcr, SlideOCR
 from lecture_perception.slides import DetectorConfig
 from lecture_pipeline import stages
 from lecture_pipeline.cache import StageCache, StageResult
@@ -48,6 +49,7 @@ from lecture_pipeline.temporal.contracts import (
     IndexInput,
     IngestOutcome,
     PersistInput,
+    ReadSlidesInput,
     SlidesInput,
     StageOutcome,
     StageRef,
@@ -75,6 +77,9 @@ class Resources:
     llm: LectureLLM | None = None
     transcriber: Transcriber | None = None
     search: SearchResources | None = None
+    # Cheap to create: the OCR models load on first use.
+    ocr: SlideOCR = field(default_factory=SlideOCR)
+    slide_reader: stages.SlideReaderMode = "routed"
 
 
 class PipelineActivities:
@@ -104,6 +109,12 @@ class PipelineActivities:
             "slides",
             lambda: stages.slides(self.ctx, video, sha, info.output, DetectorConfig()),
         )
+
+    @activity.defn(name="ocr_slides")
+    def ocr_slides(self, deck: StageRef) -> StageOutcome:
+        ocr = self.resources.ocr
+        deck_result = self._load(deck, SlideDeck)
+        return _outcome("ocr", lambda: stages.ocr_slides(self.ctx, deck_result, ocr))
 
     @activity.defn(name="build_timeline")
     def build_timeline(self, request: TimelineInput) -> StageOutcome:
@@ -188,10 +199,13 @@ class PipelineActivities:
     # LLM queue
 
     @activity.defn(name="read_slides")
-    def read_slides(self, deck: StageRef) -> StageOutcome:
-        deck_result = self._load(deck, SlideDeck)
+    def read_slides(self, request: ReadSlidesInput) -> StageOutcome:
+        deck = self._load(request.slides, SlideDeck)
+        texts = self._load(request.ocr, DeckOcr)
+        mode = self.resources.slide_reader
         return _outcome(
-            "read_slides", lambda: stages.read_slides(self.ctx, deck_result, self._llm())
+            "read_slides",
+            lambda: stages.read_slides(self.ctx, deck, self._llm(), texts, mode),
         )
 
     @activity.defn(name="plan_chapters")
@@ -308,6 +322,7 @@ def _result_rows(
                 figure_description=reading.figure_description if reading else "",
                 latex=reading.latex if reading else [],
                 code=reading.code if reading else "",
+                reader=reading.reader if reading else "vlm",
                 spans=[
                     {"start_s": span.start_s, "end_s": span.end_s}
                     for span in loaded.deck.spans

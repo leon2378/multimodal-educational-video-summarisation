@@ -30,6 +30,11 @@ dev = [
 # Listed explicitly: apps/web (Next.js) will live next to apps/api and has no pyproject.
 members = ["apps/api", "evals", "packages/*"]
 
+[tool.uv]
+# rapidocr requires opencv-python, which needs GUI libraries the slim images don't have.
+# opencv-python-headless (a dependency of lecture-perception) provides the same cv2 module.
+override-dependencies = ["opencv-python ; sys_platform == 'never'"]
+
 [tool.uv.sources]
 lecture-api = { workspace = true }
 lecture-core = { workspace = true }

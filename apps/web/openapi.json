@@ -1296,6 +1296,14 @@
             "title": "Latex",
             "type": "array"
           },
+          "reader": {
+            "enum": [
+              "vlm",
+              "ocr"
+            ],
+            "title": "Reader",
+            "type": "string"
+          },
           "slide_id": {
             "title": "Slide Id",
             "type": "integer"
@@ -1325,6 +1333,7 @@
           "figure_description",
           "latex",
           "code",
+          "reader",
           "spans"
         ],
         "title": "SlideOut",
