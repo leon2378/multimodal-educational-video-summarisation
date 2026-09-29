@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from temporalio.client import Client
+from temporalio.contrib.opentelemetry import TracingInterceptor
 from temporalio.contrib.pydantic import pydantic_data_converter
 
 from lecture_core.models import Course, Lecture
@@ -59,6 +60,8 @@ async def get_temporal(request: Request) -> Client:
                     settings.temporal_address,
                     namespace=settings.temporal_namespace,
                     data_converter=pydantic_data_converter,
+                    # Links a process request's trace to the workflow and its activities.
+                    interceptors=[TracingInterceptor()] if state.traced else [],
                 )
             except RuntimeError as error:
                 raise HTTPException(

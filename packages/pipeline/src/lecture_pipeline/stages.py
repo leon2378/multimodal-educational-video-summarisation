@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from lecture_core.notes import StudyNotes
 from lecture_core.timeline import SlideDeck, SlideImage, SlideReading, Timeline, Transcript
 from lecture_llm.agents import ChapterNotes, LectureLLM, Overview, Usage
+from lecture_llm.telemetry import record_usage
 from lecture_perception import media
 from lecture_perception.asr import Transcriber
 from lecture_perception.slides import DetectorConfig, detect_slides
@@ -145,6 +146,7 @@ def read_slides(
     def compute(_key: str) -> SlideReadings:
         images = [(s.id, _require(ctx.store, s.image_key)) for s in deck.output.slides]
         readings, usage = llm.read_slides(images)
+        record_usage(usage, llm.model_name, "read_slides")
         return SlideReadings(readings=readings, usage=usage)
 
     spec = StageSpec(
@@ -183,6 +185,7 @@ def chapters(
 ) -> StageResult[ChapterPlan]:
     def compute(_key: str) -> ChapterPlan:
         planned, usage = llm.plan_chapters(timeline.output)
+        record_usage(usage, llm.model_name, "chapters")
         return ChapterPlan(chapters=chapter_ranges(timeline.output, planned), usage=usage)
 
     spec = StageSpec(
@@ -208,6 +211,7 @@ def draft_notes(
             usage = usage + used
             drafts.append(ChapterDraft(chapter=chapter, notes=chapter_notes))
         overview, used = llm.overview(timeline.output, [(d.chapter.title, d.notes) for d in drafts])
+        record_usage(usage + used, llm.model_name, "draft_notes")
         return NotesDraft(
             chapters=drafts, overview=overview, model=llm.model_name, usage=usage + used
         )

@@ -10,15 +10,21 @@ import contextlib
 import logging
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from opentelemetry import metrics
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.metrics import CallbackOptions, Observation
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from temporalio.client import Client
+from temporalio.contrib.opentelemetry import TracingInterceptor
 from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.runtime import OpenTelemetryConfig, Runtime, TelemetryConfig
 from temporalio.worker import Worker
 
+from lecture_core import telemetry
 from lecture_core.db import create_engine, create_sessionmaker
 from lecture_core.processing import QUEUE_CPU, QUEUE_GPU, QUEUE_LLM
 from lecture_core.settings import Settings
@@ -26,6 +32,7 @@ from lecture_core.storage import ObjectStorage
 from lecture_llm.agents import LectureLLM, Prompts
 from lecture_llm.models import make_model
 from lecture_llm.settings import LLMSettings
+from lecture_llm.telemetry import instrument_agents
 from lecture_perception.asr import FasterWhisperTranscriber, WhisperConfig
 from lecture_pipeline.settings import PipelineSettings
 from lecture_pipeline.temporal.activities import PipelineActivities, Resources, SearchResources
@@ -44,13 +51,16 @@ class WorkerSettings(BaseSettings):
     worker_llm_concurrency: int = 4
 
 
-def build_resources(queues: Sequence[str]) -> Resources:
+def build_resources(queues: Sequence[str], traced: bool = False) -> Resources:
     """Only what these queues need: the GPU worker loads no LLM, the CPU worker no speech model."""
     settings = Settings()
     worker = WorkerSettings()
     resources = Resources(storage=ObjectStorage(settings), media_dir=worker.worker_media_dir)
     if QUEUE_CPU in queues:
-        resources.sessionmaker = create_sessionmaker(create_engine(settings))
+        engine = create_engine(settings)
+        if traced:
+            telemetry.trace_queries(engine.sync_engine)
+        resources.sessionmaker = create_sessionmaker(engine)
         search = SearchServices.from_settings(settings)
         resources.search = SearchResources(search.index, search.dense, search.sparse)
     if QUEUE_LLM in queues:
@@ -126,19 +136,64 @@ def build_workers(
     return workers
 
 
-async def connect(settings: Settings) -> Client:
+async def connect(settings: Settings, traced_as: str | None = None) -> Client:
+    """A Temporal client. Traced as a service, it carries trace context into workflows and
+    activities, and Temporal's own metrics (task queue latency, slots in use) go to the same
+    collector."""
+    runtime = None
+    if traced_as and settings.otel_endpoint:
+        otlp = OpenTelemetryConfig(
+            url=f"{settings.otel_endpoint.rstrip('/')}/v1/metrics", http=True
+        )
+        # Every worker's metrics come from "temporal-core-sdk"; the tag tells them apart.
+        telemetry_config = TelemetryConfig(metrics=otlp, global_tags={"worker": traced_as})
+        runtime = Runtime(telemetry=telemetry_config)
     return await Client.connect(
         settings.temporal_address,
         namespace=settings.temporal_namespace,
         data_converter=pydantic_data_converter,
+        interceptors=[TracingInterceptor()] if traced_as else [],
+        runtime=runtime,
     )
 
 
 async def run(queues: Sequence[str]) -> None:
-    client = await connect(Settings())
-    workers = build_workers(client, PipelineActivities(build_resources(queues)), queues)
+    settings = Settings()
+    service = "lecture-gpu-worker" if QUEUE_GPU in queues else "lecture-cpu-worker"
+    observed = telemetry.setup(service, settings)
+    if observed.enabled:
+        instrument_agents()
+        HTTPXClientInstrumentor().instrument()
+        if QUEUE_GPU in queues:
+            _watch_gpu_memory()
+    client = await connect(settings, traced_as=service if observed.enabled else None)
+    resources = build_resources(queues, traced=observed.enabled)
+    workers = build_workers(client, PipelineActivities(resources), queues)
     logging.info("serving task queues: %s", ", ".join(queues))
-    await asyncio.gather(*(worker.run() for worker in workers))
+    try:
+        await asyncio.gather(*(worker.run() for worker in workers))
+    finally:
+        observed.shutdown()
+
+
+def _watch_gpu_memory() -> None:
+    """GPU memory in use, as a gauge. NVIDIA's NVML comes with the driver; without it (no GPU,
+    or not the GPU image) there's simply no gauge."""
+    try:
+        import pynvml
+
+        pynvml.nvmlInit()
+        device = pynvml.nvmlDeviceGetHandleByIndex(0)
+    except Exception:
+        logging.warning("no NVML: GPU memory won't be reported")
+        return
+
+    def observe(_options: CallbackOptions) -> Iterable[Observation]:
+        yield Observation(pynvml.nvmlDeviceGetMemoryInfo(device).used)
+
+    metrics.get_meter("lecture-summariser").create_observable_gauge(
+        "lecture.gpu.memory.used", callbacks=[observe], unit="By", description="GPU memory in use"
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -13,7 +13,7 @@ from google import genai
 from google.genai import errors, types
 
 from lecture_evals.baselines.gemini import GeminiNotes, Options, main, run_baseline
-from lecture_evals.pricing import Price
+from lecture_llm.pricing import Price
 
 # Every JSON Schema keyword the Gemini API accepts in response_json_schema (SDK 2.25 docs).
 SUPPORTED_SCHEMA_KEYWORDS = {

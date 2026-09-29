@@ -7,14 +7,18 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from lecture_api.routes import courses, health, lectures, processing, qa, results, search
+from lecture_core import telemetry
 from lecture_core.db import create_engine, create_sessionmaker
 from lecture_core.settings import Settings
 from lecture_core.storage import ObjectStorage
 from lecture_llm.models import LLMConfigError, make_model
 from lecture_llm.qa import AnswerLLM, QAPrompts
 from lecture_llm.settings import LLMSettings
+from lecture_llm.telemetry import instrument_agents
 from lecture_rag.services import SearchServices
 
 logger = logging.getLogger(__name__)
@@ -33,10 +37,13 @@ def create_answerer() -> AnswerLLM | None:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    observed = telemetry.setup("lecture-api", settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = create_engine(settings)
+        if observed.enabled:
+            telemetry.trace_queries(engine.sync_engine)
         app.state.sessionmaker = create_sessionmaker(engine)
         app.state.storage = ObjectStorage(settings)
         app.state.temporal = None
@@ -47,9 +54,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         search_services.close()
         await engine.dispose()
+        observed.shutdown()
 
     app = FastAPI(title="Lecture Summariser API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    app.state.traced = observed.enabled
+    if observed.enabled:
+        # No spans for health checks, or for each chunk of a streamed response.
+        FastAPIInstrumentor.instrument_app(
+            app, excluded_urls="healthz,readyz", exclude_spans=["receive", "send"]
+        )
+        HTTPXClientInstrumentor().instrument()
+        instrument_agents()
     # The web app calls the API straight from the browser, including the progress stream.
     app.add_middleware(
         CORSMiddleware,

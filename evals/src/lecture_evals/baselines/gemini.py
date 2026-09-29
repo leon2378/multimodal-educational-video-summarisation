@@ -42,7 +42,7 @@ from lecture_core.notes import (
     to_markdown,
 )
 from lecture_evals.checks import NotesChecks, check_notes
-from lecture_evals.pricing import Price, TokenUsage, cost_usd, price_for
+from lecture_llm.pricing import Price, TokenUsage, cost_usd, price_for
 
 DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_PROMPT = Path("prompts/baseline-gemini/v1.md")

@@ -3,7 +3,7 @@ COMPOSE := docker compose -f infra/compose.yaml
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval test test-unit lint fmt typecheck audit check
+.PHONY: help install up app observability gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval test test-unit lint fmt typecheck audit check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-15s %s\n", $$1, $$2}'
@@ -17,6 +17,9 @@ up: ## Start Postgres, SeaweedFS, Temporal (UI on http://localhost:8233), Qdrant
 
 app: ## Build and run the API, the web app and the CPU worker in Docker (http://localhost:3000)
 	$(COMPOSE) --profile app up -d --build --wait
+
+observability: ## Start Grafana with traces, metrics and logs on http://localhost:3001
+	$(COMPOSE) --profile observability up -d --wait otel-lgtm
 
 gpu-worker: ## Build and run the GPU services in Docker: speech recognition and the reranker
 	$(COMPOSE) --profile gpu up -d --build --wait gpu-worker reranker
@@ -32,10 +35,10 @@ openapi: ## Regenerate the web app's typed API client after changing the API
 	cd apps/web && pnpm run gen:api
 
 down: ## Stop everything, keeping data
-	$(COMPOSE) --profile app --profile gpu down
+	$(COMPOSE) --profile app --profile gpu --profile observability down
 
 reset: ## Stop everything and delete the data volumes
-	$(COMPOSE) --profile app --profile gpu down --volumes
+	$(COMPOSE) --profile app --profile gpu --profile observability down --volumes
 
 migrate: ## Apply database migrations
 	$(ALEMBIC) upgrade head

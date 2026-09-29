@@ -72,8 +72,8 @@ files = ["apps/api/src", "evals/src", "packages/core/src", "packages/llm/src", "
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-# Optional extras, not installed in the dev environment or CI.
-module = ["ctranslate2.*", "docker.*", "faster_whisper.*", "testcontainers.*"]
+# Optional extras, not installed in the dev environment or CI, or without type information.
+module = ["ctranslate2.*", "docker.*", "faster_whisper.*", "pynvml", "testcontainers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

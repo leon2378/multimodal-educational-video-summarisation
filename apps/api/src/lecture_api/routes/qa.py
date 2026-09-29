@@ -54,6 +54,7 @@ from lecture_api.schemas import (
     ThreadDetail,
     ThreadOut,
 )
+from lecture_core import metrics
 from lecture_core.models import (
     Feedback,
     Lecture,
@@ -69,6 +70,7 @@ from lecture_core.settings import Settings
 from lecture_core.timeline import SlideReading
 from lecture_llm.agents import Usage
 from lecture_llm.qa import AnswerLLM
+from lecture_llm.telemetry import record_usage
 from lecture_rag.index import Hit
 from lecture_rag.search import Searcher, SearchMode
 
@@ -224,6 +226,7 @@ async def feedback(body: FeedbackIn, session: SessionDep) -> FeedbackOut:
     )
     saved = await session.scalar(upsert, execution_options={"populate_existing": True})
     await session.commit()
+    metrics.feedback.add(1, {"rating": body.rating.value})
     return FeedbackOut.model_validate(saved)
 
 
@@ -350,6 +353,15 @@ async def _answer(
     answer.citations = [c.model_dump(mode="json") for c in find_citations(answer.content, passages)]
     answer.usage = usage.model_dump()
     answer.total_ms = _ms_since(started)
+    record_usage(usage, answerer.model_name, "qa")
+    outcome = {
+        "scope": "course" if scope.course_id else "lecture",
+        "outcome": "error" if failure else "done",
+    }
+    metrics.qa_answers.add(1, outcome)
+    metrics.qa_duration.record(answer.total_ms, outcome)
+    if answer.first_token_ms is not None:
+        metrics.qa_first_token.record(answer.first_token_ms, outcome)
     async with sessionmaker() as session, session.begin():
         session.add(answer)
         thread = await session.get(QAThread, question.thread_id)

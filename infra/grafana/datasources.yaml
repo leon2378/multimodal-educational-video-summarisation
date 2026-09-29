@@ -1,0 +1,16 @@
+# Postgres, next to the Prometheus, Tempo and Loki the otel-lgtm image provides: eval runs,
+# pipeline runs and feedback are rows, not metrics. Dev-only credentials, as in compose.yaml.
+apiVersion: 1
+
+datasources:
+  - name: Postgres
+    type: grafana-postgresql-datasource
+    uid: postgres
+    url: postgres:5432
+    user: lecture
+    secureJsonData:
+      password: lecture
+    jsonData:
+      database: lecture
+      sslmode: disable
+      postgresVersion: 1700

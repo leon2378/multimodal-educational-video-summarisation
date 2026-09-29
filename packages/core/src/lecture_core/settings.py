@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     qa_passages: int = 6
     qa_history_turns: int = 3
 
+    # Observability (lecture_core.telemetry). OpenTelemetry over HTTP, e.g. http://otel-lgtm:4318
+    # in Compose; off when unset. Langfuse also gets the LLM calls when both keys are set.
+    otel_endpoint: str | None = None
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_host: str = "https://cloud.langfuse.com"
+
     upload_url_ttl_s: int = 3600
     # A single presigned PUT tops out at 5 GiB on S3. Multipart uploads arrive with the web app.
     max_upload_bytes: int = 5 * 1024**3

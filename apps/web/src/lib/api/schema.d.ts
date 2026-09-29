@@ -727,6 +727,11 @@ export interface components {
             /** Content */
             content: string;
             /**
+             * Cost Usd
+             * @description What the answer's tokens cost at paid-tier prices; None without a known price.
+             */
+            readonly cost_usd: number | null;
+            /**
              * Created At
              * Format: date-time
              */

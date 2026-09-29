@@ -790,6 +790,19 @@
             "title": "Content",
             "type": "string"
           },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the answer's tokens cost at paid-tier prices; None without a known price.",
+            "readOnly": true,
+            "title": "Cost Usd"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -897,7 +910,8 @@
           "id",
           "role",
           "content",
-          "created_at"
+          "created_at",
+          "cost_usd"
         ],
         "title": "MessageOut",
         "type": "object"

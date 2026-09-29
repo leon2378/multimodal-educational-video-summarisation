@@ -4,11 +4,12 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, computed_field
 
 from lecture_core.models import LectureStatus, MessageRole, Rating, RunStatus
 from lecture_core.notes import StudyNotes
 from lecture_core.processing import Progress, StageInfo
+from lecture_llm.pricing import text_cost_usd
 from lecture_rag.search import SearchMode
 
 
@@ -248,6 +249,14 @@ class MessageOut(BaseModel):
     total_ms: int | None = None
     error: str | None = None
     feedback: FeedbackOut | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def cost_usd(self) -> float | None:
+        """What the answer's tokens cost at paid-tier prices; None without a known price."""
+        if self.usage is None or self.model is None:
+            return None
+        return text_cost_usd(self.model, self.usage.input_tokens, self.usage.output_tokens)
 
 
 class ThreadOut(BaseModel):

@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 to 3 of 6 done, Phase 4 under way: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions; observability comes next.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 3 of 6 done, Phase 4 under way: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -34,6 +34,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   captions), notes (concept citations), search (Recall@5, MRR, nDCG) and answers (an LLM judge
   for correctness and faithfulness, plus citation accuracy), recorded in Postgres and gated by
   thresholds.
+- Observability ([below](#observability)): OpenTelemetry traces, metrics and logs from the API
+  and workers into Grafana. One trace follows a request through the workflow's activities to
+  each LLM call. A dashboard tracks the blueprint's targets, and every answer and pipeline run
+  records its cost. The LLM calls can also go to Langfuse.
 - A single-call Gemini baseline that summarises a lecture video and records tokens, cost and
   timings ([below](#gemini-baseline)).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
@@ -245,6 +249,45 @@ names the captions file to put in `data/lectures/` and its SHA-256. The answer j
 against hand grades yet, so treat its scores as a trend. The golden questions were drafted from
 the captions and still need checking by hand against the video.
 
+## Observability
+
+Off until you point the services at a collector:
+
+```bash
+make observability                                    # Grafana, Tempo, Prometheus and Loki in one container
+echo 'OTEL_ENDPOINT=http://otel-lgtm:4318' >> .env
+make app && make gpu-worker                           # recreate the services with the setting
+```
+
+Processes on the host (`make api`, `make worker`) use `OTEL_ENDPOINT=http://localhost:4318`.
+Grafana is on http://localhost:3001, and the **Lecture Summariser** dashboard has:
+
+- **Targets** from the blueprint: Q&A time to first token (p95), LLM cost per lecture-hour,
+  processing minutes per lecture-hour, and the share of answers rated helpful.
+- **Questions and answers**: time to first token and answer time (p50 and p95), answers by
+  outcome, ratings.
+- **LLM tokens and cost**, by purpose (each pipeline stage, and Q&A) and model.
+- **Pipeline**: time per stage when it isn't cached, cache hits, how long activities wait on
+  each task queue, slots in use, GPU memory, and recent runs with their cost and GPU seconds.
+- **API** request rates and latency, every **eval** run over time (from `eval_runs`), and recent
+  **traces** and **warnings**.
+
+Each request is one trace in Tempo; click one in the dashboard, or use Explore. Processing a
+lecture shows the API request, then the workflow and each activity on the CPU and GPU workers,
+with their SQL and HTTP calls. A question shows the query embedding, the Qdrant search and the
+reranking, the SQL, and the Gemini call with its prompt, reply and tokens. Log lines in Loki
+carry their trace id.
+
+Costs use paid-tier prices ([pricing.py](packages/llm/src/lecture_llm/pricing.py)) even on
+Gemini's free tier, so they show what running this would cost. Answers return `cost_usd`, and
+each pipeline run stores what the LLM calls behind its notes cost (`pipeline_runs.llm_usage`).
+
+To send the LLM calls to Langfuse as well, add `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
+(plus `LANGFUSE_HOST` for the US region or a self-hosted instance) to `.env`. Only the model calls
+go there, not SQL or HTTP spans. They include the prompts and replies, so lecture text and
+questions leave the machine: fine for openly licensed lectures, not for private ones. Why this
+setup: [ADR 0006](docs/adr/0006-opentelemetry-to-grafana-and-langfuse.md).
+
 ## Gemini baseline
 
 `gemini-baseline` sends a whole lecture video to Gemini in one call and asks for the study notes
@@ -316,7 +359,8 @@ The 36 golden questions asked through the API (`make eval`), answered by
 
 The one answer marked partly right: asked how many operations the summing loop takes, it gave
 the 3 per iteration but not the total, 3x + 2. First-token times vary with Gemini's free tier:
-the p95 was 19 s on an earlier run.
+the p95 was 19 s on an earlier run. An answer costs about $0.0015 at paid-tier prices: around
+4,500 input tokens, mostly the six passages, and 70 output tokens on average.
 
 ### Search
 
@@ -345,6 +389,7 @@ takes 5 minutes on the CPU, so a fresh run now takes about 6 minutes, up from 2.
 | `make up` / `make down` | Start or stop Postgres, SeaweedFS, Temporal, Qdrant and the embedding server (`make reset` also deletes their data) |
 | `make app` | Build and run the API, the web app and the CPU worker in Docker |
 | `make gpu-worker` | Build and run the GPU services in Docker: speech recognition and the reranker |
+| `make observability` | Start Grafana with traces, metrics and logs on http://localhost:3001 (set `OTEL_ENDPOINT` to send to it) |
 | `make worker` | Run a CPU worker on the host instead |
 | `make api` | Run the API on the host with auto-reload |
 | `make web` | Run the web app on the host with hot reload (Node 24) |
@@ -374,6 +419,7 @@ data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
 tests/integration/         real Postgres, SeaweedFS, Temporal and Qdrant via testcontainers
 infra/compose.yaml         local stack (`app` profile adds the API, web app and CPU worker)
+infra/grafana/             Grafana datasource and dashboard (JSON), loaded by `make observability`
 infra/docker/              Dockerfiles: API, worker (CPU and GPU variants)
 infra/seaweedfs/s3.json    dev-only S3 credentials
 docs/                      blueprint, architecture, ADRs
@@ -411,6 +457,12 @@ from the blueprint in these places:
   components to share.
 - **CI builds the images (API, CPU worker, web) but doesn't scan or push them.** That comes with
   deployment in Phase 6.
+- **Eval runs are recorded in Postgres (`eval_runs`) and charted in Grafana**, not MLflow.
+  MLflow comes in with detector training in Phase 5.
+- **Langfuse only receives LLM calls, and only when its keys are set.** Prompts are versioned in
+  git and eval datasets live in `evals/`, so Langfuse isn't where those are kept. No Sentry yet:
+  errors are logged to Loki with their trace ids
+  ([ADR 0006](docs/adr/0006-opentelemetry-to-grafana-and-langfuse.md)).
 - **No update bot (Dependabot or Renovate) opening PRs.** Dependencies are updated by hand with
   `uv lock --upgrade`, and CI audits the lockfile on every push. GitHub's Dependabot security
   alerts (Settings → Code security) still flag vulnerable packages without committing anything.
@@ -441,7 +493,8 @@ from the blueprint in these places:
 - [ ] **Phase 4, evals and observability**
   - [x] 4a: eval suites (search, answers with an LLM judge, speech recognition, notes),
         `eval_runs`, thresholds and a local gate (`make eval`)
-  - [ ] 4b: OpenTelemetry traces and metrics, Grafana dashboards, LLM tracing, cost tracking
+  - [x] 4b: OpenTelemetry traces, metrics and logs, a Grafana dashboard, LLM tracing (Langfuse
+        optional), cost per answer and per run
   - [ ] 4c: the eval gate in CI
 - [ ] **Phase 5, CV and optimisation**: YOLO26 fine-tune, OCR-vs-VLM routing, ONNX/TensorRT/int8
 - [ ] **Phase 6, ship**: auth, quotas, Terraform and Modal deploy, results write-up

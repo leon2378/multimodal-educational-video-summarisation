@@ -1,7 +1,9 @@
-"""Gemini API prices, so every baseline run records what it cost.
+"""Gemini API prices, so processing runs, answers and baseline runs record what they cost.
 
-Source: https://ai.google.dev/gemini-api/docs/pricing (paid tier, checked 2026-09-27).
-Prices change often. For a model missing here, pass --input-price and --output-price.
+Source: https://ai.google.dev/gemini-api/docs/pricing (paid tier, checked 2026-09-27). The free
+tier costs nothing; these are what the same calls would cost on the paid tier. Prices change
+often. For a model missing here, costs are unknown (None), and the Gemini baseline takes
+--input-price and --output-price.
 """
 
 from datetime import date
@@ -81,3 +83,17 @@ def cost_usd(usage: TokenUsage, price: Price) -> float:
         + (usage.output + usage.thinking) * output_rate
     )
     return dollars / 1_000_000
+
+
+def text_cost_usd(
+    model: str, input_tokens: int, output_tokens: int, on: date | None = None
+) -> float | None:
+    """What text and image tokens cost at the paid-tier price, or None for an unknown model.
+
+    `model` may carry its provider ("google:gemini-3.5-flash-lite"). Usage summed over many
+    requests can't tell which were long-context, so long-context prices aren't applied.
+    """
+    price = price_for(model.rpartition(":")[2], on or date.today())
+    if price is None:
+        return None
+    return (input_tokens * price.input + output_tokens * price.output) / 1_000_000

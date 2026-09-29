@@ -255,9 +255,35 @@ services:
       - ../prompts:/app/prompts:ro
     deploy: *gpu
 
+  # Observability (`make observability`): Grafana on http://localhost:3001 with Tempo (traces),
+  # Prometheus (metrics) and Loki (logs), fed over OpenTelemetry. With OTEL_ENDPOINT in .env
+  # (http://otel-lgtm:4318), the API and workers send their telemetry here.
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.33.1
+    profiles: [observability]
+    ports:
+      - "127.0.0.1:3001:3000"  # Grafana
+      - "127.0.0.1:4318:4318"  # OTLP over HTTP, for processes run on the host
+    environment:
+      # Traffic here is sparse, so the dashboard needs exact counts. A zero sample at each series'
+      # start lets increase() see its first event, and `anchored` ranges don't extrapolate.
+      PROMETHEUS_EXTRA_ARGS: >-
+        --enable-feature=created-timestamp-zero-ingestion,promql-extended-range-selectors
+    volumes:
+      - otel-lgtm-data:/data
+      - ./grafana/datasources.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/lecture.yaml:ro
+      - ./grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/lecture.yaml:ro
+      - ./grafana/dashboards:/otel-lgtm/lecture-dashboards:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
 volumes:
   postgres-data:
   seaweedfs-data:
   temporal-home:
   qdrant-data:
   tei-data:
+  otel-lgtm-data:

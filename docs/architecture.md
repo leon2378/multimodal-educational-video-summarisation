@@ -3,14 +3,15 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 4 under way (eval suites done, observability next)
+## Current state: Phase 4 under way (eval suites and observability done, CI gate next)
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
 pipeline stages; the results land in Postgres and the search index; the web app shows them in
 step with the video, searches them and answers questions about them, for one lecture or across
 a course. The same stages also run on a local file without any of that (`lecture-process`,
-which stops before search). Eval suites score each part through the API.
+which stops before search). Eval suites score each part through the API, and the API and
+workers report traces, metrics and logs over OpenTelemetry.
 
 ```
  client ── upload (presigned PUT) ──────────────────────────────► SeaweedFS
@@ -189,6 +190,44 @@ opens that lecture at 1:04. A big-O question was answered from Lecture 10 with c
   `evals/thresholds.json` bounds the metrics that matter; `--gate` exits 1 past them.
 - A real CI gate needs the processed lecture and a Gemini key in CI; that's Phase 4c.
 
+### Observability (Phase 4b)
+
+```
+ API ──────────┐  OTLP/HTTP (OTEL_ENDPOINT)   ┌─ Tempo (traces) ─────┐
+ CPU worker ───┼────────────────────────────► │  Prometheus (metrics) ├─► Grafana :3001
+ GPU worker ───┘   traces, metrics, logs      │  Loki (logs)          │   (+ Postgres: eval_runs,
+       │                                      └── grafana/otel-lgtm ──┘    pipeline_runs, feedback)
+       └── pydantic-ai spans only ─► Langfuse (when its keys are set)
+```
+
+- `lecture_core.telemetry.setup` installs the tracer, meter and logger providers when
+  `OTEL_ENDPOINT` or the Langfuse keys are set; otherwise nothing is recorded. Instrumented:
+  - FastAPI (not health checks, and not each chunk of a stream), httpx, SQLAlchemy and logging;
+  - Temporal, through its `TracingInterceptor` on the API's client and the workers, so a
+    process request, its workflow and the activities on both workers are one trace;
+  - Temporal's worker metrics (queue waits, slots), tagged `worker`;
+  - Pydantic AI's GenAI spans, with prompts, replies and tokens but not images.
+- The app's metrics (`lecture_core.metrics`) and where they're recorded:
+
+  | Metric (Prometheus name) | Labels | Recorded in |
+  |---|---|---|
+  | `lecture_stage_duration_seconds`, `lecture_stage_runs_total` | stage, cached | each activity (`_measured`) |
+  | `lecture_llm_tokens_total`, `lecture_llm_cost_usd_total` | model, purpose (stage or `qa`), direction | `lecture_llm.telemetry.record_usage` after each LLM stage and answer |
+  | `lecture_qa_first_token_milliseconds`, `lecture_qa_duration_milliseconds`, `lecture_qa_answers_total` | scope (lecture or course), outcome | the ask route |
+  | `lecture_feedback_total` | rating | the feedback route |
+  | `lecture_gpu_memory_used_bytes` | | the GPU worker, through NVML |
+
+- Costs come from `lecture_llm.pricing` (paid-tier prices, dated). Answers carry `cost_usd`;
+  a pipeline run's `llm_usage` holds the cost of the LLM calls behind its notes, cached ones
+  included, which is what "cost per lecture-hour" divides.
+- The dashboard is `infra/grafana/dashboards/lecture-summariser.json`. Counts use `anchored`
+  ranges and Prometheus writes a zero at each series' start, so sparse traffic gives exact
+  numbers ([ADR 0006](adr/0006-opentelemetry-to-grafana-and-langfuse.md)).
+- Measured on the stack: a question's trace has the query embedding (about 0.8 s on the
+  CPU), Qdrant, reranking (0.4 s on the GPU) and the Gemini call. A fully cached run of the
+  exercise clip takes 2.4 s end to end. Lecture 10's notes cost $0.041 in LLM calls at
+  paid-tier prices, $0.047 per lecture-hour; an answer costs about $0.0015.
+
 ### Pipeline stages (Phase 2a)
 
 The stages the workers run. `lecture-process <video>` also runs them in order on a local file
@@ -237,10 +276,9 @@ so a second run only redoes stages whose inputs, version, model, params or promp
   previous slide, so its chunk leads with the wrong slide text, and search ranks the next
   segment (which shows the right slide) first. Chunking by sentences with some overlap, or
   indexing slides on their own, would help.
-- Q&A isn't scored yet: answer faithfulness and citation accuracy come with Phase 4's eval
-  suites. Until auth arrives in Phase 6, anyone who can reach the API can ask questions and
-  spend the LLM quota; Compose binds the API to 127.0.0.1. An answer the client disconnects
-  from isn't saved.
+- Until auth arrives in Phase 6, anyone who can reach the API can ask questions and spend the
+  LLM quota; Compose binds the API to 127.0.0.1. An answer the client disconnects from isn't
+  saved.
 - A question is searched once, and the answer uses the top 6 segments. A two-part question
   across a course can get all six from one lecture: asked both how to check what code prints
   (the Lecture 1 exercise) and how to compare algorithms (Lecture 10), the answer covered the
@@ -255,7 +293,6 @@ so a second run only redoes stages whose inputs, version, model, params or promp
 
 ## Next: the rest of Phase 4
 
-Observability: OpenTelemetry traces and metrics from the API and workers into Grafana (stage
-durations, Q&A time to first token, tokens and cost, cache hits, feedback), LLM traces, and
-cost per lecture and per answer. Then the eval gate in CI. Slide-boundary precision and recall
-need hand-labelled slide changes, which come with the Phase 5 detector.
+The eval gate in CI (4c): it needs a processed lecture and a Gemini key there, or a smaller
+suite that runs against fixtures. Slide-boundary precision and recall need hand-labelled slide
+changes, which come with the Phase 5 detector.

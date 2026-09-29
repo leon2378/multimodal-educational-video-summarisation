@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from lecture_evals.pricing import Price, TokenUsage, cost_usd, price_for
+from lecture_llm.pricing import Price, TokenUsage, cost_usd, price_for, text_cost_usd
 
 
 def usage(prompt: int, output: int = 0, thinking: int = 0, audio: int = 0) -> TokenUsage:
@@ -40,3 +40,10 @@ def test_long_prompts_use_long_context_prices() -> None:
     assert price is not None
     assert cost_usd(usage(200_000), price) == pytest.approx(0.40)  # at the threshold: $2/M
     assert cost_usd(usage(250_000), price) == pytest.approx(1.00)  # above it: $4/M
+
+
+def test_text_cost_takes_the_provider_prefix_and_unknown_models() -> None:
+    # 1M input tokens at $0.30 and 100k output tokens at $2.50 per million.
+    cost = text_cost_usd("google:gemini-3.5-flash-lite", 1_000_000, 100_000, date(2026, 9, 29))
+    assert cost == pytest.approx(0.30 + 0.25)
+    assert text_cost_usd("function:fake-qa", 10, 10) is None

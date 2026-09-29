@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from lecture_core import metrics
 from lecture_core.models import (
     Lecture,
     LectureStatus,
@@ -33,6 +34,7 @@ from lecture_core.processing import ProcessInput, StageInfo
 from lecture_core.storage import ObjectStorage
 from lecture_core.timeline import SlideDeck, Timeline, Transcript
 from lecture_llm.agents import LectureLLM
+from lecture_llm.pricing import text_cost_usd
 from lecture_perception.asr import Transcriber
 from lecture_perception.media import MediaError, MediaInfo
 from lecture_perception.slides import DetectorConfig
@@ -132,7 +134,7 @@ class PipelineActivities:
         embeddings = self._load(request.embeddings, ChunkEmbeddings).output
         notes = self._load(request.notes, stages.NotesResult).output.notes
         self._search().index.replace_lecture(request.lecture_id, embeddings.chunks, notes.chapters)
-        return StageInfo(stage="index", seconds=time.monotonic() - started, cached=False)
+        return _measured(StageInfo(stage="index", seconds=time.monotonic() - started, cached=False))
 
     @activity.defn(name="persist_results")
     async def persist_results(self, request: PersistInput) -> None:
@@ -248,6 +250,7 @@ class PipelineActivities:
         plan = self._load(request.chapters, stages.ChapterPlan).output
         draft = self._load(request.draft, stages.NotesDraft).output
         usage = readings.usage + plan.usage + draft.usage
+        cost = text_cost_usd(draft.model, usage.input_tokens, usage.output_tokens)
         return _Loaded(
             info=self._load(request.probe, MediaInfo).output,
             transcript=self._load(request.transcript, Transcript).output,
@@ -255,7 +258,8 @@ class PipelineActivities:
             readings=readings,
             timeline=self._load(request.timeline, Timeline).output,
             notes=self._load(request.notes, stages.NotesResult).output,
-            usage={"model": draft.model, **usage.model_dump()},
+            # What the LLM calls cost at paid-tier prices, cached ones included.
+            usage={"model": draft.model, **usage.model_dump(), "cost_usd": cost},
         )
 
 
@@ -343,7 +347,15 @@ def _timed[T: BaseModel](
         result = step()
     except MediaError as error:
         raise ApplicationError(str(error), type="MediaError", non_retryable=True) from error
-    return result, StageInfo(stage=stage, seconds=time.monotonic() - started, cached=result.cached)
+    info = StageInfo(stage=stage, seconds=time.monotonic() - started, cached=result.cached)
+    return result, _measured(info)
+
+
+def _measured(info: StageInfo) -> StageInfo:
+    attributes = {"stage": info.stage, "cached": info.cached}
+    metrics.stage_duration.record(info.seconds, attributes)
+    metrics.stage_runs.add(1, attributes)
+    return info
 
 
 def _outcome[T: BaseModel](stage: str, step: Callable[[], StageResult[T]]) -> StageOutcome:
