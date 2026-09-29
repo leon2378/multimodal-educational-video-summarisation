@@ -1,250 +1,374 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  CaptionsIcon,
+  FolderPlusIcon,
+  LibraryIcon,
+  MessagesSquareIcon,
+  NotebookTextIcon,
+  SearchIcon,
+} from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
+import { toast } from "sonner";
 
-import { api, unwrap } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { type Course, type Lecture, api, unwrap } from "@/lib/api";
+import { formatDuration, formatRelative, hueFor, pluralise } from "@/lib/format";
 import { useCourses, useLectures } from "@/lib/queries";
+import { lectureHref } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
 
-import { Card, StatusBadge } from "./ui";
+import { Callout, LectureCover, StatusBadge, useDocumentTitle } from "./common";
+import { DropTarget } from "./upload";
 
-type UploadState =
-  | { phase: "idle" }
-  | { phase: "uploading"; percent: number }
-  | { phase: "starting" }
-  | { phase: "error"; message: string };
+type Filter = "all" | "ready" | "processing" | "attention";
 
-interface UploadTarget {
-  method: string;
-  url: string;
-  headers: Record<string, string>;
-}
+const FILTERS: Record<Filter, (lecture: Lecture) => boolean> = {
+  all: () => true,
+  ready: (lecture) => lecture.status === "ready",
+  processing: (lecture) => lecture.status === "processing",
+  attention: (lecture) => lecture.status !== "ready" && lecture.status !== "processing",
+};
 
-/** Upload a lecture straight to storage, then start processing it. */
-export function UploadForm() {
-  const router = useRouter();
-  const queryClient = useQueryClient();
+export function LibraryView() {
+  useDocumentTitle("Library");
+  const lectures = useLectures();
   const courses = useCourses();
-  const [title, setTitle] = useState("");
-  const [courseId, setCourseId] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [state, setState] = useState<UploadState>({ phase: "idle" });
-  const busy = state.phase === "uploading" || state.phase === "starting";
+  const [filter, setFilter] = useState<Filter>("all");
+  const [text, setText] = useState("");
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!file) return;
-    try {
-      setState({ phase: "uploading", percent: 0 });
-      const created = unwrap(
-        await api.POST("/v1/lectures", {
-          body: {
-            title: title.trim() || file.name,
-            filename: file.name,
-            content_type: file.type || "video/mp4",
-            course_id: courseId || null,
-          },
-        }),
-      );
-      await putWithProgress(created.upload, file, (percent) =>
-        setState({ phase: "uploading", percent }),
-      );
-      const params = { params: { path: { lecture_id: created.lecture.id } } };
-      unwrap(await api.POST("/v1/lectures/{lecture_id}/complete-upload", params));
-      setState({ phase: "starting" });
-      unwrap(await api.POST("/v1/lectures/{lecture_id}/process", params));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["lectures"] }),
-        queryClient.invalidateQueries({ queryKey: ["courses"] }),
-      ]);
-      router.push(`/lectures/${created.lecture.id}`);
-    } catch (error) {
-      setState({ phase: "error", message: error instanceof Error ? error.message : String(error) });
-    }
+  if (lectures.isPending) return <LibrarySkeleton />;
+  if (lectures.isError) {
+    return (
+      <Callout tone="error" title="Couldn't load the library">
+        {lectures.error.message}
+      </Callout>
+    );
   }
+  if (lectures.data.length === 0 && (courses.data?.length ?? 0) === 0) return <Welcome />;
+
+  const all = lectures.data;
+  const seconds = all.reduce((sum, lecture) => sum + (lecture.duration_s ?? 0), 0);
+  const courseTitles = new Map((courses.data ?? []).map((course) => [course.id, course.title]));
+  const needle = text.trim().toLowerCase();
+  const shown = all.filter(
+    (lecture) =>
+      FILTERS[filter](lecture) &&
+      (!needle ||
+        lecture.title.toLowerCase().includes(needle) ||
+        (courseTitles.get(lecture.course_id ?? "") ?? "").toLowerCase().includes(needle)),
+  );
+  const count = (f: Filter) => all.filter(FILTERS[f]).length;
 
   return (
-    <Card title="Add a lecture">
-      <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <label className="flex flex-1 flex-col gap-1 text-sm">
-          Title
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Defaults to the file name"
-            className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
-          />
-        </label>
-        {courses.data && courses.data.length > 0 && (
-          <label className="flex flex-col gap-1 text-sm">
-            Course
-            <select
-              value={courseId}
-              onChange={(e) => setCourseId(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-            >
-              <option value="">None</option>
-              {courses.data.map((course) => (
-                <option key={course.id} value={course.id}>
-                  {course.title}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <label className="flex flex-1 flex-col gap-1 text-sm">
-          Video
-          <input
-            type="file"
-            accept="video/*"
-            required
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-2 dark:file:bg-slate-800"
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={busy || !file}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          Upload and process
-        </button>
-      </form>
-      {state.phase === "uploading" && (
-        <div className="mt-3" role="status">
-          <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-            <div className="h-full bg-indigo-600 transition-all" style={{ width: `${state.percent}%` }} />
-          </div>
-          <p className="mt-1 text-sm text-slate-500">Uploading… {state.percent}%</p>
-        </div>
-      )}
-      {state.phase === "starting" && <p className="mt-3 text-sm text-slate-500">Starting processing…</p>}
-      {state.phase === "error" && (
-        <p className="mt-3 text-sm text-rose-600" role="alert">
-          {state.message}
+    <div className="flex flex-col gap-10">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-3xl font-semibold tracking-tight">Library</h1>
+        <p className="text-muted-foreground">
+          {pluralise(all.length, "lecture")}
+          {seconds > 0 && ` · ${formatDuration(seconds)} of video`}
+          {courses.data && ` · ${pluralise(courses.data.length, "course")}`}
         </p>
-      )}
-    </Card>
+      </div>
+
+      <section className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold tracking-tight">Courses</h2>
+          <NewCourseButton />
+        </div>
+        {courses.data && courses.data.length > 0 ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {courses.data.map((course) => (
+              <CourseCard key={course.id} course={course} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Group lectures into a course to search and ask questions across all of them.
+          </p>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <h2 className="text-lg font-semibold tracking-tight md:mr-auto">Lectures</h2>
+          <div className="relative md:w-64">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder="Filter by title or course"
+              aria-label="Filter lectures"
+              className="pl-8"
+            />
+          </div>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            value={filter}
+            onValueChange={(value) => value && setFilter(value as Filter)}
+            aria-label="Show lectures"
+            className="overflow-x-auto"
+          >
+            <ToggleGroupItem value="all" className="px-3">
+              All <Count n={all.length} />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="ready" className="px-3">
+              Ready <Count n={count("ready")} />
+            </ToggleGroupItem>
+            {count("processing") > 0 && (
+              <ToggleGroupItem value="processing" className="px-3">
+                Processing <Count n={count("processing")} />
+              </ToggleGroupItem>
+            )}
+            {count("attention") > 0 && (
+              <ToggleGroupItem value="attention" className="px-3">
+                Needs attention <Count n={count("attention")} />
+              </ToggleGroupItem>
+            )}
+          </ToggleGroup>
+        </div>
+        {all.length === 0 ? (
+          <DropTarget />
+        ) : shown.length === 0 ? (
+          <p className="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">
+            No lectures match.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {shown.map((lecture) => (
+              <LectureCard key={lecture.id} lecture={lecture} course={courseTitles.get(lecture.course_id ?? "")} />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
-/** PUT with upload progress, which fetch can't report. Headers must match what the URL was
- *  signed with. */
-function putWithProgress(target: UploadTarget, file: File, onProgress: (percent: number) => void) {
-  return new Promise<void>((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open(target.method, target.url);
-    for (const [name, value] of Object.entries(target.headers)) request.setRequestHeader(name, value);
-    request.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
-    };
-    request.onload = () =>
-      request.status >= 200 && request.status < 300
-        ? resolve()
-        : reject(new Error(`Upload failed: HTTP ${request.status}`));
-    request.onerror = () => reject(new Error("Upload failed: couldn't reach storage."));
-    request.send(file);
-  });
+function Count({ n }: { n: number }) {
+  return <span className="text-xs text-muted-foreground tabular-nums">{n}</span>;
 }
 
-/** Courses group lectures, so search and Q&A can span them. */
-export function CourseList() {
+function LectureCard({ lecture, course }: { lecture: Lecture; course?: string }) {
+  return (
+    <Link
+      href={lectureHref(lecture.id)}
+      className="group flex flex-col gap-3 rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
+      <LectureCover
+        lecture={lecture}
+        className="aspect-video rounded-xl shadow-sm ring-1 ring-border transition group-hover:shadow-md group-hover:ring-primary/40"
+      >
+        {lecture.status !== "ready" && <StatusBadge status={lecture.status} className="absolute top-2 left-2 shadow-sm backdrop-blur" />}
+        {lecture.duration_s != null && (
+          <span className="absolute right-2 bottom-2 rounded-md bg-black/75 px-1.5 py-0.5 font-mono text-xs text-white tabular-nums">
+            {formatTime(lecture.duration_s)}
+          </span>
+        )}
+      </LectureCover>
+      <div className="flex flex-col gap-1 px-0.5">
+        <h3 className="line-clamp-2 leading-snug font-medium transition-colors group-hover:text-primary">
+          {lecture.title}
+        </h3>
+        <p className="truncate text-sm text-muted-foreground">
+          {[course, formatRelative(lecture.created_at)].filter(Boolean).join(" · ")}
+        </p>
+      </div>
+    </Link>
+  );
+}
+
+function CourseCard({ course }: { course: Course }) {
+  const hue = hueFor(course.id);
+  return (
+    <Link
+      href={`/courses/${course.id}`}
+      className="group flex items-center gap-4 rounded-xl border bg-card p-4 shadow-xs transition hover:border-primary/40 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+    >
+      <span
+        className="flex size-11 shrink-0 items-center justify-center rounded-lg text-white shadow-sm"
+        style={{ backgroundImage: `linear-gradient(135deg, oklch(0.7 0.13 ${hue}), oklch(0.5 0.16 ${(hue + 50) % 360}))` }}
+      >
+        <LibraryIcon className="size-5" />
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate font-medium transition-colors group-hover:text-primary">{course.title}</span>
+        <span className="truncate text-sm text-muted-foreground">
+          {course.description || pluralise(course.lecture_count, "lecture")}
+        </span>
+      </span>
+      {course.description && (
+        <span className="ml-auto shrink-0 text-sm text-muted-foreground tabular-nums">{course.lecture_count}</span>
+      )}
+    </Link>
+  );
+}
+
+export function NewCourseButton({ variant = "outline" }: { variant?: "outline" | "default" }) {
   const queryClient = useQueryClient();
-  const courses = useCourses();
+  const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function create(event: FormEvent) {
     event.preventDefault();
+    setBusy(true);
     setError(null);
     try {
-      unwrap(await api.POST("/v1/courses", { body: { title: title.trim() } }));
-      setTitle("");
+      const course = unwrap(
+        await api.POST("/v1/courses", { body: { title: title.trim(), description: description.trim() || null } }),
+      );
       await queryClient.invalidateQueries({ queryKey: ["courses"] });
+      toast.success(`Created ${course.title}`);
+      setOpen(false);
+      setTitle("");
+      setDescription("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <Card title="Courses">
-      {courses.data && courses.data.length > 0 && (
-        <ul className="mb-3 divide-y divide-slate-100 dark:divide-slate-800">
-          {courses.data.map((course) => (
-            <li key={course.id} className="flex items-center gap-3 py-2">
-              <Link href={`/courses/${course.id}`} className="flex-1 font-medium hover:underline">
-                {course.title}
-              </Link>
-              <span className="text-sm text-slate-500">
-                {course.lecture_count} {course.lecture_count === 1 ? "lecture" : "lectures"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <form onSubmit={create} className="flex gap-2 text-sm">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="New course, e.g. MIT 6.0001 Fall 2016"
-          aria-label="New course title"
-          maxLength={300}
-          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
-        />
-        <button
-          type="submit"
-          disabled={!title.trim()}
-          className="rounded-lg border border-slate-300 px-3 py-2 font-medium hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
-        >
-          Create
-        </button>
-      </form>
-      {error && (
-        <p className="mt-2 text-sm text-rose-600" role="alert">
-          {error}
-        </p>
-      )}
-    </Card>
+    <>
+      <Button variant={variant} size="sm" onClick={() => setOpen(true)}>
+        <FolderPlusIcon />
+        New course
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New course</DialogTitle>
+            <DialogDescription>
+              A course groups lectures, so you can search and ask questions across all of them.
+            </DialogDescription>
+          </DialogHeader>
+          <form id="new-course" onSubmit={create} className="flex flex-col gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="course-title">Title</Label>
+              <Input
+                id="course-title"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="MIT 6.0001 Fall 2016"
+                maxLength={300}
+                required
+                autoFocus
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="course-description">
+                Description <span className="font-normal text-muted-foreground">(optional)</span>
+              </Label>
+              <Textarea
+                id="course-description"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="Introduction to Computer Science and Programming in Python"
+                maxLength={2000}
+                rows={3}
+              />
+            </div>
+            {error && <Callout tone="error">{error}</Callout>}
+          </form>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="new-course" disabled={!title.trim() || busy}>
+              Create course
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-export function LectureList() {
-  const lectures = useLectures();
-  const courses = useCourses();
-  const courseTitle = (id: string | null) => courses.data?.find((course) => course.id === id)?.title;
+const FEATURES = [
+  {
+    icon: CaptionsIcon,
+    title: "Transcript and slides",
+    text: "Speech is transcribed and every slide is read, formulas and code included, all in step with the video.",
+  },
+  {
+    icon: NotebookTextIcon,
+    title: "Notes and a quiz",
+    text: "Chapters, key concepts and formulas, with each point linked to the moment it's explained.",
+  },
+  {
+    icon: MessagesSquareIcon,
+    title: "Search and ask",
+    text: "Find what was said, or ask a question and get an answer that cites where in the lecture it comes from.",
+  },
+];
 
-  if (lectures.isPending) return <p className="text-sm text-slate-500">Loading lectures…</p>;
-  if (lectures.isError) {
-    return (
-      <p className="text-sm text-rose-600" role="alert">
-        Couldn&apos;t load lectures: {lectures.error.message}
-      </p>
-    );
-  }
-  if (lectures.data.length === 0) {
-    return <p className="text-sm text-slate-500">No lectures yet. Upload one above.</p>;
-  }
+function Welcome() {
   return (
-    <Card title="Lectures">
-      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-        {lectures.data.map((lecture) => (
-          <li key={lecture.id} className="flex items-center gap-3 py-2">
-            <Link href={`/lectures/${lecture.id}`} className="flex-1 font-medium hover:underline">
-              {lecture.title}
-            </Link>
-            {courseTitle(lecture.course_id) && (
-              <span className="truncate text-sm text-slate-500">{courseTitle(lecture.course_id)}</span>
-            )}
-            {lecture.duration_s != null && (
-              <span className="font-mono text-sm text-slate-500">{formatTime(lecture.duration_s)}</span>
-            )}
-            <StatusBadge status={lecture.status} />
-          </li>
+    <div className="mx-auto flex max-w-4xl flex-col gap-10 py-6 lg:py-12">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+          Turn lecture videos into notes you can study from
+        </h1>
+        <p className="max-w-2xl text-balance text-muted-foreground">
+          Add a recorded lecture and get a synced transcript, the slides&apos; text, chaptered notes, a quiz, and
+          answers that cite the moment they come from.
+        </p>
+      </div>
+      <DropTarget className="py-16" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {FEATURES.map(({ icon: Icon, title, text }) => (
+          <div key={title} className="flex flex-col gap-2 rounded-xl border bg-card p-5">
+            <Icon className="size-5 text-primary" />
+            <h2 className="font-medium">{title}</h2>
+            <p className="text-sm text-muted-foreground">{text}</p>
+          </div>
         ))}
-      </ul>
-    </Card>
+      </div>
+    </div>
+  );
+}
+
+function LibrarySkeleton() {
+  return (
+    <div className="flex flex-col gap-10" aria-busy>
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-9 w-40" />
+        <Skeleton className="h-5 w-72" />
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <Skeleton className="h-20 rounded-xl" />
+        <Skeleton className="h-20 rounded-xl" />
+      </div>
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => (
+          <div key={i} className="flex flex-col gap-3">
+            <Skeleton className="aspect-video rounded-xl" />
+            <Skeleton className="h-5 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

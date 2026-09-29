@@ -1,19 +1,53 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  CaptionsIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  DownloadIcon,
+  EllipsisIcon,
+  FileQuestionIcon,
+  FolderIcon,
+  GraduationCapIcon,
+  HistoryIcon,
+  LinkIcon,
+  MessagesSquareIcon,
+  NotebookTextIcon,
+  PresentationIcon,
+  RotateCcwIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import {
-  type Lecture,
-  type ProgressEvent,
-  type Slide,
-  type StudyNotes,
-  type TranscriptLine,
-  api,
-  unwrap,
-} from "@/lib/api";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { type Lecture, type Slide, type StudyNotes, type TranscriptLine, api, unwrap } from "@/lib/api";
+import { formatRelative } from "@/lib/format";
 import {
   courseKey,
   lectureKey,
@@ -26,11 +60,15 @@ import {
   useTranscript,
 } from "@/lib/queries";
 import { type Open, lectureHref } from "@/lib/scope";
-import { indexAt, slideAt } from "@/lib/timeline";
+import { formatTime, indexAt, slideAt } from "@/lib/timeline";
 
 import { ChatPanel } from "./chat";
-import { SearchPanel } from "./search";
-import { Card, Latex, StatusBadge, Tabs, TimeButton } from "./ui";
+import { StatusBadge, useDocumentTitle } from "./common";
+import { NotesPanel, QuizPanel, downloadNotes } from "./notes";
+import { ChapterRail, KeyHints, usePlayerKeys } from "./player";
+import { ProcessingPanel, RunsDialog, useStartProcessing } from "./processing";
+import { Filmstrip, SlidesPanel } from "./slides";
+import { TranscriptPanel } from "./transcript";
 
 type Seek = (seconds: number) => void;
 
@@ -46,6 +84,7 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
   const transcript = useTranscript(id, ready);
   const slides = useSlides(id, ready);
   const notes = useNotes(id, ready);
+  useDocumentTitle(lecture.data?.title);
 
   const video = useRef<HTMLVideoElement>(null);
   const [time, setTime] = useState(0);
@@ -53,6 +92,7 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
     const player = video.current;
     if (!player) return;
     player.currentTime = seconds;
+    setTime(seconds);
     // Browsers may block playing without a click on this page; the seek still happens.
     player.play().catch(() => undefined);
   }, []);
@@ -62,79 +102,200 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
     [id, seek, router],
   );
   const started = useRef(false);
+  usePlayerKeys(video);
 
-  if (lecture.isPending) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (lecture.isPending) return <LectureSkeleton />;
   if (lecture.isError) {
     return (
-      <p className="text-rose-600" role="alert">
-        {lecture.error.message}
-      </p>
+      <Empty className="min-h-[60vh]">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FileQuestionIcon />
+          </EmptyMedia>
+          <EmptyTitle>Couldn&apos;t open this lecture</EmptyTitle>
+          <EmptyDescription>{lecture.error.message}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button asChild variant="outline">
+            <Link href="/">Back to the library</Link>
+          </Button>
+        </EmptyContent>
+      </Empty>
     );
   }
   const info = lecture.data;
+  const chapters = notes.data?.notes.chapters ?? [];
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">{info.title}</h1>
-        <StatusBadge status={info.status} />
-        {(info.status === "uploaded" || info.status === "failed") && <ProcessButton id={id} />}
-        <CoursePicker lecture={info} />
-      </div>
-      {(info.licence || info.attribution) && (
-        <p className="text-sm text-slate-500">{[info.attribution, info.licence].filter(Boolean).join(" · ")}</p>
-      )}
-      {(status === "processing" || status === "failed") && <ProcessingPanel event={progress} />}
-
-      <div className="grid gap-4 lg:grid-cols-5">
-        <div className="flex flex-col gap-4 lg:col-span-3">
-          <div className="overflow-hidden rounded-xl bg-black">
-            {media.data ? (
-              <video
-                ref={video}
-                src={media.data.url}
-                controls
-                preload="metadata"
-                className="aspect-video w-full"
-                onTimeUpdate={(event) => setTime(event.currentTarget.currentTime)}
-                onLoadedMetadata={() => {
-                  if (start !== undefined && !started.current) {
-                    started.current = true;
-                    seek(start);
-                  }
-                }}
-              />
-            ) : (
-              <div className="flex aspect-video items-center justify-center text-sm text-slate-400">
-                {status === "awaiting_upload" ? "Waiting for the upload" : "Loading video…"}
-              </div>
-            )}
-          </div>
-          {slides.data && slides.data.length > 0 && (
-            <SlideStrip slides={slides.data} current={slideAt(slides.data, time)} onSeek={seek} />
+    // The title sits above the video rather than across the page, so the study panel beside
+    // them can run the full height of the window.
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_28rem]">
+      <div className="flex min-w-0 flex-col gap-5">
+        <LectureHeader lecture={info} notes={notes.data?.notes} slideCount={slides.data?.length} time={time} />
+        <div className="overflow-hidden rounded-xl bg-black shadow-sm ring-1 ring-border">
+          {media.data ? (
+            <video
+              ref={video}
+              src={media.data.url}
+              controls
+              playsInline
+              preload="metadata"
+              className="aspect-video w-full"
+              onTimeUpdate={(event) => setTime(event.currentTarget.currentTime)}
+              onLoadedMetadata={() => {
+                if (start !== undefined && !started.current) {
+                  started.current = true;
+                  seek(start);
+                }
+              }}
+            />
+          ) : (
+            <div className="flex aspect-video items-center justify-center text-sm text-white/60">
+              {status === "awaiting_upload" ? "The video wasn't uploaded" : "Loading the video…"}
+            </div>
           )}
-          {notes.data && <Chapters notes={notes.data.notes} time={time} onSeek={seek} />}
         </div>
-        <div className="lg:col-span-2">
-          {ready ? (
-            <SidePanel
-              id={id}
-              transcript={transcript.data ?? []}
-              notes={notes.data?.notes}
+        {chapters.length > 0 && (
+          <ChapterRail chapters={chapters} current={indexAt(chapters, time)} time={time} onSeek={seek} />
+        )}
+        {slides.data && slides.data.length > 0 && (
+          <Filmstrip slides={slides.data} current={slideAt(slides.data, time)} onSeek={seek} />
+        )}
+        {ready && <KeyHints />}
+      </div>
+
+      <aside className="h-[80dvh] min-h-[28rem] lg:sticky lg:top-[5.5rem] lg:h-[calc(100dvh-7.5rem)]">
+        {ready ? (
+          notes.data && transcript.data && slides.data ? (
+            <StudyPanel
+              lecture={info}
+              notes={notes.data.notes}
+              transcript={transcript.data}
+              slides={slides.data}
               time={time}
               onSeek={seek}
               onOpen={open}
             />
           ) : (
-            <Card>
-              <p className="text-sm text-slate-500">
-                The transcript, notes, quiz, search and Q&A appear here once processing finishes.
-              </p>
-            </Card>
-          )}
+            <Skeleton className="h-full rounded-xl" />
+          )
+        ) : (
+          <ProcessingPanel lecture={info} event={progress} />
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function LectureHeader({
+  lecture,
+  notes,
+  slideCount,
+  time,
+}: {
+  lecture: Lecture;
+  notes: StudyNotes | undefined;
+  slideCount: number | undefined;
+  time: number;
+}) {
+  const courses = useCourses();
+  const course = courses.data?.find((c) => c.id === lecture.course_id);
+  const [history, setHistory] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const { start } = useStartProcessing(lecture.id);
+  const ready = lecture.status === "ready";
+
+  const copyLink = async () => {
+    const seconds = Math.floor(time);
+    await navigator.clipboard.writeText(`${window.location.origin}${lectureHref(lecture.id, seconds || undefined)}`);
+    toast.success("Link copied", { description: seconds ? `It opens the lecture at ${formatTime(seconds)}.` : undefined });
+  };
+
+  return (
+    <header className="flex flex-col gap-3">
+      <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm text-muted-foreground">
+        <Link href="/" className="hover:text-foreground">
+          Library
+        </Link>
+        {course && (
+          <>
+            <ChevronRightIcon className="size-3.5" />
+            <Link href={`/courses/${course.id}`} className="truncate hover:text-foreground">
+              {course.title}
+            </Link>
+          </>
+        )}
+      </nav>
+      <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+        <div className="flex min-w-0 flex-[1_1_18rem] flex-col gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">{lecture.title}</h1>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
+            <StatusBadge status={lecture.status} />
+            {lecture.duration_s != null && (
+              <span className="flex items-center gap-1.5 tabular-nums">
+                <ClockIcon className="size-3.5" /> {formatTime(lecture.duration_s)}
+              </span>
+            )}
+            {slideCount !== undefined && slideCount > 0 && (
+              <span className="flex items-center gap-1.5">
+                <PresentationIcon className="size-3.5" /> {slideCount} slides
+              </span>
+            )}
+            <span>Added {formatRelative(lecture.created_at)}</span>
+            {(lecture.attribution || lecture.licence) && (
+              <span className="truncate">{[lecture.attribution, lecture.licence].filter(Boolean).join(" · ")}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <CoursePicker lecture={lecture} />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" aria-label="More actions">
+                <EllipsisIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              {ready && notes && (
+                <DropdownMenuItem onSelect={() => downloadNotes(notes, lecture.title)}>
+                  <DownloadIcon /> Download notes (.md)
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onSelect={() => void copyLink()}>
+                <LinkIcon /> {time >= 1 ? `Copy link at ${formatTime(time)}` : "Copy link"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setHistory(true)}>
+                <HistoryIcon /> Processing history
+              </DropdownMenuItem>
+              {ready && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setConfirm(true)}>
+                    <RotateCcwIcon /> Process again
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
-    </div>
+      <RunsDialog lectureId={lecture.id} open={history} onOpenChange={setHistory} />
+      <AlertDialog open={confirm} onOpenChange={setConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Process this lecture again?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Stages whose inputs haven&apos;t changed come from the cache, so this is quick unless the pipeline has
+              changed. The notes and Q&amp;A are unavailable until it finishes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void start()}>Process again</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </header>
   );
 }
 
@@ -142,11 +303,9 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
 function CoursePicker({ lecture }: { lecture: Lecture }) {
   const queryClient = useQueryClient();
   const courses = useCourses();
-  const [error, setError] = useState<string | null>(null);
   const current = courses.data?.find((course) => course.id === lecture.course_id);
 
   async function move(courseId: string | null) {
-    setError(null);
     try {
       unwrap(
         await api.PATCH("/v1/lectures/{lecture_id}", {
@@ -157,309 +316,149 @@ function CoursePicker({ lecture }: { lecture: Lecture }) {
       const changed = [lecture.course_id, courseId].filter((c): c is string => c !== null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: lectureKey(lecture.id) }),
+        queryClient.invalidateQueries({ queryKey: ["lectures"] }),
         queryClient.invalidateQueries({ queryKey: ["courses"] }),
         ...changed.map((c) => queryClient.invalidateQueries({ queryKey: courseKey(c) })),
       ]);
+      const title = courses.data?.find((course) => course.id === courseId)?.title;
+      toast.success(title ? `Moved to ${title}` : "Taken out of its course");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error("Couldn't move the lecture", { description: e instanceof Error ? e.message : String(e) });
     }
   }
 
   if (!courses.data || (courses.data.length === 0 && !lecture.course_id)) return null;
   return (
-    <span className="ml-auto flex items-center gap-2 text-sm">
-      {current && (
-        <Link href={`/courses/${current.id}`} className="text-indigo-700 hover:underline dark:text-indigo-300">
-          {current.title}
-        </Link>
-      )}
-      <select
-        value={lecture.course_id ?? ""}
-        onChange={(event) => void move(event.target.value || null)}
-        aria-label="Course"
-        className="rounded-lg border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
-      >
-        <option value="">No course</option>
-        {courses.data.map((course) => (
-          <option key={course.id} value={course.id}>
-            {course.title}
-          </option>
-        ))}
-      </select>
-      {error && <span className="text-rose-600">{error}</span>}
-    </span>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className="max-w-64">
+          <FolderIcon />
+          <span className="truncate">{current?.title ?? "Add to a course"}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuLabel>Course</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={lecture.course_id ?? "none"}
+          onValueChange={(value) => void move(value === "none" ? null : value)}
+        >
+          {courses.data.map((course) => (
+            <DropdownMenuRadioItem key={course.id} value={course.id}>
+              <span className="truncate">{course.title}</span>
+            </DropdownMenuRadioItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuRadioItem value="none">No course</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-function ProcessButton({ id }: { id: string }) {
-  const queryClient = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function start() {
-    setBusy(true);
-    setError(null);
-    try {
-      unwrap(await api.POST("/v1/lectures/{lecture_id}/process", { params: { path: { lecture_id: id } } }));
-      await queryClient.invalidateQueries({ queryKey: ["lecture", id] });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <span className="flex items-center gap-2">
-      <button
-        type="button"
-        onClick={start}
-        disabled={busy}
-        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-      >
-        Process
-      </button>
-      {error && <span className="text-sm text-rose-600">{error}</span>}
-    </span>
-  );
-}
-
-const STAGES: [string, string][] = [
-  ["probe", "Reading the video"],
-  ["audio", "Extracting audio"],
-  ["asr", "Transcribing"],
-  ["slides", "Finding slides"],
-  ["ocr", "Reading slide text"],
-  ["read_slides", "Reading slides"],
-  ["timeline", "Building the timeline"],
-  ["chapters", "Planning chapters"],
-  ["draft_notes", "Writing notes"],
-  ["notes", "Assembling notes"],
-  ["embed", "Embedding for search"],
-  ["index", "Indexing for search"],
-];
-
-function ProcessingPanel({ event }: { event: ProgressEvent | null }) {
-  const progress = event?.progress;
-  const done = new Set(progress?.done.map((stage) => stage.stage));
-  const running = new Set(progress?.running);
-
-  if (progress?.status === "failed") {
-    return (
-      <Card>
-        <p className="text-sm text-rose-600" role="alert">
-          Processing failed: {progress.error ?? "unknown error"}
-        </p>
-      </Card>
-    );
-  }
-  return (
-    <Card title="Processing">
-      <ol className="flex flex-wrap gap-2" aria-live="polite">
-        {STAGES.map(([stage, label]) => (
-          <li
-            key={stage}
-            className={`rounded-full px-3 py-1 text-xs ${
-              done.has(stage)
-                ? "bg-emerald-100 text-emerald-800"
-                : running.has(stage)
-                  ? "animate-pulse bg-amber-100 text-amber-800"
-                  : "bg-slate-100 text-slate-500 dark:bg-slate-800"
-            }`}
-          >
-            {done.has(stage) ? "✓ " : ""}
-            {label}
-          </li>
-        ))}
-      </ol>
-    </Card>
-  );
-}
-
-function SlideStrip({ slides, current, onSeek }: { slides: Slide[]; current: number | null; onSeek: Seek }) {
-  const active = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    active.current?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
-  }, [current]);
-
-  return (
-    <Card title="Slides">
-      <div className="flex gap-2 overflow-x-auto pb-2">
-        {slides.map((slide) => {
-          const isCurrent = slide.slide_id === current;
-          return (
-            <button
-              key={slide.slide_id}
-              ref={isCurrent ? active : undefined}
-              type="button"
-              onClick={() => onSeek(slide.first_seen_s)}
-              aria-current={isCurrent || undefined}
-              title={slide.title || `Slide ${slide.slide_id + 1}`}
-              className={`w-40 shrink-0 overflow-hidden rounded-lg border-2 text-left ${
-                isCurrent ? "border-indigo-600" : "border-transparent opacity-70 hover:opacity-100"
-              }`}
-            >
-              {/* Presigned storage URLs, loaded directly rather than through next/image. */}
-              <img src={slide.image_url} alt={slide.title || `Slide ${slide.slide_id + 1}`} loading="lazy" className="aspect-[4/3] w-full bg-white object-contain" />
-              <span className="block truncate px-1 py-0.5 text-xs">{slide.title || `Slide ${slide.slide_id + 1}`}</span>
-            </button>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
-function Chapters({ notes, time, onSeek }: { notes: StudyNotes; time: number; onSeek: Seek }) {
-  const current = indexAt(notes.chapters, time);
-  return (
-    <Card title="Chapters">
-      <ol className="flex flex-col gap-2">
-        {notes.chapters.map((chapter, index) => (
-          <li
-            key={chapter.start_s}
-            className={`rounded-lg p-2 ${index === current ? "bg-indigo-50 dark:bg-indigo-950" : ""}`}
-            aria-current={index === current || undefined}
-          >
-            <div className="flex items-baseline gap-2">
-              <TimeButton seconds={chapter.start_s} onSeek={onSeek} />
-              <span className="font-medium">{chapter.title}</span>
-            </div>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{chapter.summary}</p>
-          </li>
-        ))}
-      </ol>
-    </Card>
-  );
-}
-
-function SidePanel({
-  id,
-  transcript,
+/** The tabs beside the video. They stay mounted when hidden, so an answer keeps streaming and
+ *  a search stays put while you look at another tab. */
+function StudyPanel({
+  lecture,
   notes,
+  transcript,
+  slides,
   time,
   onSeek,
   onOpen,
 }: {
-  id: string;
+  lecture: Lecture;
+  notes: StudyNotes;
   transcript: TranscriptLine[];
-  notes: StudyNotes | undefined;
+  slides: Slide[];
   time: number;
   onSeek: Seek;
   onOpen: Open;
 }) {
-  const scope = { kind: "lecture", id } as const;
+  const scope = useMemo(() => ({ kind: "lecture", id: lecture.id }) as const, [lecture.id]);
+  const suggestions = useMemo(() => suggest(notes), [notes]);
+  const [selected, setSelected] = useState("notes");
+  const tab = "min-h-0 flex-1 data-[state=inactive]:hidden";
+
   return (
     <Tabs
-      className="max-h-[calc(100vh-7rem)] lg:sticky lg:top-4"
-      tabs={[
-        ["transcript", "Transcript"],
-        ["notes", "Notes"],
-        ["quiz", "Quiz"],
-        ["search", "Search"],
-        ["ask", "Ask"],
-      ]}
-      render={(tab) => (
-        <>
-          {tab === "transcript" && <Transcript lines={transcript} time={time} onSeek={onSeek} />}
-          {tab === "notes" && notes && <NotesPanel notes={notes} onSeek={onSeek} />}
-          {tab === "quiz" && notes && <Quiz notes={notes} onSeek={onSeek} />}
-          {tab === "search" && <SearchPanel scope={scope} onOpen={onOpen} />}
-          {tab === "ask" && <ChatPanel scope={scope} onOpen={onOpen} />}
-        </>
-      )}
-    />
+      value={selected}
+      onValueChange={setSelected}
+      className="h-full gap-0 overflow-hidden rounded-xl border bg-card shadow-sm"
+    >
+      <div className="overflow-x-auto border-b px-2 scrollbar-none">
+        <TabsList variant="line" className="h-11 w-full justify-start gap-0">
+          <TabsTrigger value="notes" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+            <NotebookTextIcon /> Notes
+          </TabsTrigger>
+          <TabsTrigger value="transcript" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+            <CaptionsIcon /> Transcript
+          </TabsTrigger>
+          <TabsTrigger value="slides" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+            <PresentationIcon /> Slides
+          </TabsTrigger>
+          <TabsTrigger value="quiz" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+            <GraduationCapIcon /> Quiz
+          </TabsTrigger>
+          <TabsTrigger value="ask" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+            <MessagesSquareIcon /> Ask
+          </TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent value="notes" forceMount className={`${tab} overflow-y-auto`}>
+        <NotesPanel notes={notes} title={lecture.title} currentChapter={indexAt(notes.chapters, time)} onSeek={onSeek} />
+      </TabsContent>
+      <TabsContent value="transcript" forceMount className={tab}>
+        <TranscriptPanel
+          lectureId={lecture.id}
+          lines={transcript}
+          chapters={notes.chapters}
+          current={indexAt(transcript, time)}
+          visible={selected === "transcript"}
+          onSeek={onSeek}
+          onOpen={onOpen}
+        />
+      </TabsContent>
+      <TabsContent value="slides" forceMount className={tab}>
+        <SlidesPanel
+          slides={slides}
+          current={slideAt(slides, time)}
+          visible={selected === "slides"}
+          onSeek={onSeek}
+        />
+      </TabsContent>
+      <TabsContent value="quiz" forceMount className={`${tab} overflow-y-auto`}>
+        <QuizPanel lectureId={lecture.id} quiz={notes.quiz} onSeek={onSeek} />
+      </TabsContent>
+      <TabsContent value="ask" forceMount className={tab}>
+        <ChatPanel scope={scope} onOpen={onOpen} suggestions={suggestions} />
+      </TabsContent>
+    </Tabs>
   );
 }
 
-function Transcript({ lines, time, onSeek }: { lines: TranscriptLine[]; time: number; onSeek: Seek }) {
-  const current = indexAt(lines, time);
-  const [follow, setFollow] = useState(true);
-  const active = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (follow) active.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [current, follow]);
+/** Questions to start a conversation from, taken from the lecture's own notes. */
+function suggest(notes: StudyNotes): string[] {
+  const [first, second] = notes.concepts;
+  return [
+    "Summarise this lecture in five points.",
+    first && `What is ${first.term}, and why does it matter here?`,
+    second && `Give an example of ${second.term} from the lecture.`,
+    notes.quiz[0]?.question,
+  ].filter((s): s is string => Boolean(s));
+}
 
+function LectureSkeleton() {
   return (
-    <div className="flex flex-col gap-2">
-      <label className="flex items-center gap-2 text-xs text-slate-500">
-        <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-        Follow the video
-      </label>
-      <ol className="flex flex-col">
-        {lines.map((line, index) => (
-          <li key={line.index}>
-            <button
-              ref={index === current ? active : undefined}
-              type="button"
-              onClick={() => onSeek(line.start_s)}
-              aria-current={index === current || undefined}
-              className={`w-full rounded px-2 py-1 text-left text-sm leading-relaxed ${
-                index === current ? "bg-amber-100 dark:bg-amber-900/40" : "hover:bg-slate-100 dark:hover:bg-slate-800"
-              }`}
-            >
-              {line.text}
-            </button>
-          </li>
-        ))}
-      </ol>
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_28rem]" aria-busy>
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-9 w-2/3" />
+          <Skeleton className="h-5 w-80" />
+        </div>
+        <Skeleton className="aspect-video rounded-xl" />
+      </div>
+      <Skeleton className="h-[80dvh] min-h-[28rem] rounded-xl lg:h-[calc(100dvh-7.5rem)]" />
     </div>
-  );
-}
-
-function NotesPanel({ notes, onSeek }: { notes: StudyNotes; onSeek: Seek }) {
-  return (
-    <div className="flex flex-col gap-5 text-sm">
-      <section>
-        <h3 className="mb-1 font-semibold">In short</h3>
-        <p className="leading-relaxed">{notes.tldr}</p>
-      </section>
-      <section>
-        <h3 className="mb-1 font-semibold">Key concepts</h3>
-        <dl className="flex flex-col gap-2">
-          {notes.concepts.map((concept) => (
-            <div key={`${concept.term}-${concept.at_s}`}>
-              <dt className="font-medium">
-                {concept.term} <TimeButton seconds={concept.at_s} onSeek={onSeek} />
-              </dt>
-              <dd className="text-slate-600 dark:text-slate-400">{concept.definition}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-      {notes.formulas.length > 0 && (
-        <section>
-          <h3 className="mb-1 font-semibold">Formulas</h3>
-          <ul className="flex flex-col gap-3">
-            {notes.formulas.map((formula) => (
-              <li key={`${formula.latex}-${formula.at_s}`}>
-                <Latex source={formula.latex} />
-                <p className="text-slate-600 dark:text-slate-400">
-                  {formula.meaning} <TimeButton seconds={formula.at_s} onSeek={onSeek} />
-                </p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function Quiz({ notes, onSeek }: { notes: StudyNotes; onSeek: Seek }) {
-  return (
-    <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm">
-      {notes.quiz.map((question) => (
-        <li key={question.question}>
-          <p className="font-medium">{question.question}</p>
-          <details className="mt-1">
-            <summary className="cursor-pointer text-indigo-700 dark:text-indigo-300">Show answer</summary>
-            <p className="mt-1 text-slate-600 dark:text-slate-400">
-              {question.answer} <TimeButton seconds={question.at_s} onSeek={onSeek} />
-            </p>
-          </details>
-        </li>
-      ))}
-    </ol>
   );
 }

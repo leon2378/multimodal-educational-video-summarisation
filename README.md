@@ -13,9 +13,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   recognition), `packages/llm` (Pydantic AI agents for the pipeline and Q&A), `packages/pipeline` (stages, stage cache,
   local runner), `packages/rag` (chunking, embeddings, the search index, hybrid search) and
   `evals` (baselines, golden sets and scoring).
-- A web app ([below](#web-app)): upload with a progress bar, live processing progress, and a
-  lecture page with the video, a transcript that follows playback, slides, chapters, notes, a
-  quiz, search and a Q&A chat, every timestamp clickable.
+- A web app ([below](#web-app)): drag-and-drop upload, live processing progress, and a
+  lecture page with the video, a transcript that follows playback, slides and what was read
+  from them, chapters, notes, a quiz, search and a Q&A chat, every timestamp clickable. Ctrl+K
+  searches the whole library.
 - Processing through the API: a Temporal workflow per lecture, CPU and GPU workers, progress
   over server-sent events, and results in Postgres ([below](#processing-a-lecture)).
 - The processing pipeline: speech recognition, slide detection, OCR on every slide with a vision
@@ -105,17 +106,34 @@ migrations in a one-off container, and starts the API on port 8000.
 `make app` builds and runs the API, the CPU worker and the web app in Docker; add
 `make gpu-worker` for speech recognition and the reranker. Then open http://localhost:3000:
 
-- **Library**: upload a lecture (straight to storage, with a progress bar), optionally into a
-  course. Processing starts on its own, and the page switches to the lecture. Courses are
-  created and listed here too.
+- **Library**: lectures (their first slide as the cover) and courses, filtered by title or
+  status. Drop a video anywhere, or use Add lecture: it uploads straight to storage with
+  progress, speed and time left (and can be cancelled), optionally into a course and with its
+  licence and attribution. Processing starts on its own, and the page switches to the lecture.
+- **Lecture page**: while it processes, each stage by phase, with timings and what came from
+  the cache. Then the video with a chapter bar under it and a slide strip that follows the slide
+  on screen, beside tabs for:
+  - **Notes**: the summary, chapters (the one playing marked), key concepts and formulas
+    (KaTeX), to copy or download as Markdown.
+  - **Transcript**: highlights and scrolls with playback, headed by chapter; its search box
+    searches the lecture.
+  - **Slides**: each slide's text, formulas, code and figure description, and whether OCR or
+    the vision model read it.
+  - **Quiz**: reveal answers and mark what you knew; it remembers, per lecture.
+  - **Ask**: a chat whose answers stream in (and can be stopped), with citations that play the
+    video from where they point, suggested questions from the notes, and each answer's model,
+    time and cost. Conversations can be switched between and deleted.
+
+  Every timestamp plays the video from there. K, J and L (or the arrows) control playback. The
+  header moves the lecture between courses, copies a link to the current moment, shows the
+  processing history (stage times, LLM tokens and cost per run) and processes it again.
 - **Course page**: its lectures, and tabs to ask or search across all of them. A citation or
-  result opens the lecture it points into, playing from there.
-- **Lecture page**: live processing progress, then the video with a slide strip that follows
-  the slide on screen, chapters, and tabs for a transcript that highlights and scrolls with
-  playback, the notes (formulas rendered with KaTeX), a quiz, search, and an Ask tab: a chat
-  whose answers stream in, with citations that play the video from where they point. Every
-  timestamp and search result plays the video from there. The header shows the lecture's
-  course and moves it to another.
+  result opens the lecture it points into, playing from there. Lectures can be added to it
+  directly, and the course deleted (its lectures stay).
+- **Ctrl+K** (⌘K on a Mac) anywhere: go to a lecture or course by title, or search what was
+  said and shown across every lecture.
+
+It has light and dark themes, following the system's by default, and works down to phone width.
 
 For hot reload while working on it, run `make web` (Node 24) alongside `make up`, `make api` and
 the workers. The web app calls the API from the browser: its address is baked in at build time
@@ -486,7 +504,7 @@ lectures are labelled. Every score here is against labels a model made, not chec
 
 ```
 apps/api/                  FastAPI service (routes, schemas, dependencies)
-apps/web/                  Next.js web app (library, lecture page); typed client from openapi.json
+apps/web/                  Next.js web app (library, lecture and course pages; shadcn/ui); typed client from openapi.json
 packages/core/             settings, SQLAlchemy models, Alembic migrations, S3 client
 packages/perception/       PyAV media reading, slide detection, speech recognition
 packages/llm/              Pydantic AI agents: read slides, chapters, notes
@@ -533,8 +551,6 @@ from the blueprint in these places:
 - **The player streams the uploaded MP4 directly** (a presigned URL with range requests) rather
   than HLS renditions. Transcoding to HLS comes back if other formats or adaptive bitrate are
   needed.
-- **The web app uses Tailwind without shadcn/ui**, which can come in when there are more
-  components to share.
 - **CI builds the images (API, CPU worker, web) but doesn't scan or push them.** That comes with
   deployment in Phase 6.
 - **Slides are routed to the vision LLM by simple image measures until the detector exists.**

@@ -15,11 +15,18 @@ export const scopeKey = (scope: Scope, ...rest: string[]) =>
   scope.kind === "lecture" ? lectureKey(scope.id, ...rest) : courseKey(scope.id, ...rest);
 const path = (id: string) => ({ params: { path: { lecture_id: id } } });
 
+/** Presigned storage URLs last an hour: refetching sooner only makes images load again. */
+const PRESIGNED = 30 * 60 * 1000;
+/** Results change only when a lecture is processed again, which invalidates its queries. */
+const RESULTS = 10 * 60 * 1000;
+
 export function useLectures() {
   return useQuery({
     queryKey: ["lectures"],
     queryFn: async () => unwrap(await api.GET("/v1/lectures")),
-    refetchInterval: 5000,
+    // Poll only while something is processing, so the library shows it finish.
+    refetchInterval: (query) =>
+      query.state.data?.some((lecture) => lecture.status === "processing") ? 5000 : false,
   });
 }
 
@@ -35,8 +42,7 @@ export function useMedia(id: string, enabled: boolean) {
     queryKey: key(id, "media"),
     queryFn: async () => unwrap(await api.GET("/v1/lectures/{lecture_id}/media", path(id))),
     enabled,
-    // The presigned URL lasts an hour; refresh it well before then.
-    staleTime: 30 * 60 * 1000,
+    staleTime: PRESIGNED,
   });
 }
 
@@ -45,6 +51,7 @@ export function useTranscript(id: string, enabled: boolean) {
     queryKey: key(id, "transcript"),
     queryFn: async () => unwrap(await api.GET("/v1/lectures/{lecture_id}/transcript", path(id))),
     enabled,
+    staleTime: RESULTS,
   });
 }
 
@@ -53,6 +60,7 @@ export function useSlides(id: string, enabled: boolean) {
     queryKey: key(id, "slides"),
     queryFn: async () => unwrap(await api.GET("/v1/lectures/{lecture_id}/slides", path(id))),
     enabled,
+    staleTime: PRESIGNED,
   });
 }
 
@@ -61,6 +69,29 @@ export function useNotes(id: string, enabled: boolean) {
     queryKey: key(id, "notes"),
     queryFn: async () => unwrap(await api.GET("/v1/lectures/{lecture_id}/notes", path(id))),
     enabled,
+    staleTime: RESULTS,
+  });
+}
+
+/** A lecture's processing runs, newest first, with each stage's time and the LLM usage. */
+export function useRuns(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: key(id, "runs"),
+    queryFn: async () => unwrap(await api.GET("/v1/lectures/{lecture_id}/runs", path(id))),
+    enabled,
+  });
+}
+
+/** Whether the API answers, and whether its database and storage do. */
+export function useHealth() {
+  return useQuery({
+    queryKey: ["health"],
+    queryFn: async () => {
+      const { data, response } = await api.GET("/readyz");
+      return { ok: response.ok, checks: (data ?? {}) as Record<string, string> };
+    },
+    refetchInterval: (query) => (query.state.status === "error" || !query.state.data?.ok ? 5000 : 30_000),
+    retry: false,
   });
 }
 

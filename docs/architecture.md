@@ -52,20 +52,28 @@ fails. A ready or failed lecture can be processed again.
 
 ### Web app (Phase 2c)
 
-`apps/web`, Next.js 16 with TanStack Query and Tailwind. The browser calls the API directly
-(CORS allows the web origin) through a client generated from the API's OpenAPI schema, and loads
-the video and slide images straight from storage through presigned URLs.
+`apps/web`, Next.js 16 with TanStack Query, Tailwind and shadcn/ui (Radix primitives, copied
+into `src/components/ui`). The browser calls the API directly (CORS allows the web origin)
+through a client generated from the API's OpenAPI schema, and loads the video and slide images
+straight from storage through presigned URLs, cached for half an hour so images don't reload on
+every refetch. Colours are CSS variables in `globals.css`, one set per theme; a script in
+`<head>` sets the theme before the first paint.
 
 - **Library** (`/`): upload with progress (a presigned PUT from the browser), then it starts
-  processing and opens the lecture.
+  processing and opens the lecture. The upload dialog is app-wide, so a video dropped on any
+  page opens it, and so does Add lecture on a course page (with that course chosen).
 - **Lecture** (`/lectures/{id}`): an `EventSource` on `/events` shows each stage while it
   processes and refreshes the page's data when the run ends. The video's `timeupdate` drives
   everything else: the transcript line (a binary search over sentence start times), the current
   slide (the span containing the time, so camera shots keep the last slide) and the current
-  chapter. Every timestamp seeks the video. A search tab searches the lecture and plays each hit
-  from where it starts.
+  chapter. Every timestamp seeks the video. The transcript's search box searches the lecture
+  and plays each hit from where it starts. The study tabs stay mounted while hidden, so an
+  answer keeps streaming and a search stays put on another tab; the lists re-render only when
+  the line, slide or chapter playing changes, not on every `timeupdate`.
 - Transcript lines are sentences: runs split batched ASR segments at sentence ends using word
   timings when saving results, without touching the cached ASR output.
+- **Ctrl+K**: a command palette that matches lecture and course titles as you type and, after a
+  pause, runs `/v1/search` across every lecture.
 
 ### Processing (Phase 2b)
 

@@ -1,31 +1,38 @@
 import "katex/dist/katex.min.css";
 import "./globals.css";
 
-import type { Metadata } from "next";
-import Link from "next/link";
+import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
+
+import { THEME_SCRIPT } from "@/components/theme";
 
 import { Providers } from "./providers";
 
+const sans = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
+const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
+
 export const metadata: Metadata = {
   title: "Lecture Summariser",
-  description: "Timestamped study notes, transcripts and slides for lecture videos.",
+  description: "Timestamped study notes, transcripts, slides, a quiz and cited Q&A for lecture videos.",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fafafb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f0f12" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen">
-        <Providers>
-          <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-            <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
-              <Link href="/" className="font-semibold tracking-tight">
-                Lecture Summariser
-              </Link>
-            </div>
-          </header>
-          <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
-        </Providers>
+    // The theme script sets a class on <html> before React hydrates.
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
+      <body className={`${sans.variable} ${mono.variable} font-sans`}>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

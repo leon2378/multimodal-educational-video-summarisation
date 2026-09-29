@@ -1,11 +1,136 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-:root {
-  color-scheme: light dark;
+/* Dark mode follows a class on <html>, set before first paint by the script in layout.tsx. */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* App tokens: a soft tint of the brand colour, and what's playing right now. */
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-now: var(--now);
+  --color-now-ink: var(--now-ink);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 }
 
-body {
-  @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.985 0.002 286);
+  --foreground: oklch(0.21 0.006 286);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 286);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 286);
+  --primary: oklch(0.511 0.23 277);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.962 0.003 286);
+  --secondary-foreground: oklch(0.21 0.006 286);
+  --muted: oklch(0.962 0.003 286);
+  --muted-foreground: oklch(0.54 0.016 286);
+  --accent: oklch(0.955 0.005 286);
+  --accent-foreground: oklch(0.21 0.006 286);
+  --destructive: oklch(0.577 0.245 27.3);
+  --border: oklch(0.915 0.005 286);
+  --input: oklch(0.9 0.006 286);
+  --ring: oklch(0.585 0.2 277);
+  --brand-soft: oklch(0.955 0.028 277);
+  --brand-ink: oklch(0.457 0.21 277);
+  --now: oklch(0.963 0.055 95);
+  --now-ink: oklch(0.476 0.114 62);
+  --success: oklch(0.596 0.145 163);
+  --warning: oklch(0.666 0.179 58);
+}
+
+.dark {
+  --background: oklch(0.141 0.005 286);
+  --foreground: oklch(0.975 0.002 286);
+  --card: oklch(0.178 0.006 286);
+  --card-foreground: oklch(0.975 0.002 286);
+  --popover: oklch(0.198 0.007 286);
+  --popover-foreground: oklch(0.975 0.002 286);
+  --primary: oklch(0.585 0.215 277);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.245 0.007 286);
+  --secondary-foreground: oklch(0.975 0.002 286);
+  --muted: oklch(0.235 0.007 286);
+  --muted-foreground: oklch(0.71 0.015 286);
+  --accent: oklch(0.25 0.008 286);
+  --accent-foreground: oklch(0.975 0.002 286);
+  --destructive: oklch(0.704 0.191 22.2);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.673 0.182 277);
+  --brand-soft: oklch(0.29 0.075 277);
+  --brand-ink: oklch(0.8 0.105 277);
+  --now: oklch(0.31 0.06 75);
+  --now-ink: oklch(0.87 0.11 88);
+  --success: oklch(0.72 0.15 163);
+  --warning: oklch(0.78 0.15 70);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  /* Thin scrollbars that suit both themes. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* A faint dot grid behind empty states and the drop target. */
+@utility bg-dots {
+  background-image: radial-gradient(
+    color-mix(in oklch, var(--muted-foreground) 22%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 16px 16px;
 }
 
 /* KaTeX sets its own colours; keep formulas readable in dark mode. */
