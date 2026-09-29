@@ -12,10 +12,10 @@ old one "Superseded by NNNN" instead of editing it.
 | [0004](0004-hosted-llms-through-pydantic-ai.md) | Hosted LLMs through Pydantic AI, Gemini's free tier for development | Accepted |
 | [0005](0005-qdrant-for-hybrid-search.md) | Qdrant for hybrid search, next to Postgres | Accepted |
 | [0006](0006-opentelemetry-to-grafana-and-langfuse.md) | OpenTelemetry into a local Grafana stack, LLM calls to Langfuse | Accepted |
+| [0007](0007-rf-detr-for-the-frame-detector.md) | RF-DETR (Apache-2.0) for the frame detector, YOLO26 as the fallback | Accepted |
 
 ## Still to write
 
 | Decision | Write it by |
 |---|---|
-| YOLO26 (AGPL-3.0) vs RF-DETR (Apache-2.0) | Phase 5 |
 | Scale-out path: Kubernetes, Temporal Cloud, autoscaled GPU workers | Phase 6 |

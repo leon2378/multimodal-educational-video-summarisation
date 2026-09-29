@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "lecture-api",
     "lecture-core",
+    "lecture-detector",
     "lecture-evals",
     "lecture-llm",
     "lecture-perception",
@@ -28,21 +29,30 @@ dev = [
 
 [tool.uv.workspace]
 # Listed explicitly: apps/web (Next.js) will live next to apps/api and has no pyproject.
-members = ["apps/api", "evals", "packages/*"]
+members = ["apps/api", "evals", "ml/*", "packages/*"]
 
 [tool.uv]
 # rapidocr requires opencv-python, which needs GUI libraries the slim images don't have.
 # opencv-python-headless (a dependency of lecture-perception) provides the same cv2 module.
 override-dependencies = ["opencv-python ; sys_platform == 'never'"]
 
+# PyTorch with CUDA, for training the detector only (lecture-detector's train extra).
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
 [tool.uv.sources]
 lecture-api = { workspace = true }
 lecture-core = { workspace = true }
+lecture-detector = { workspace = true }
 lecture-evals = { workspace = true }
 lecture-llm = { workspace = true }
 lecture-perception = { workspace = true }
 lecture-pipeline = { workspace = true }
 lecture-rag = { workspace = true }
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
 
 [tool.ruff]
 line-length = 100
@@ -66,19 +76,19 @@ select = [
 "tests/**" = ["S101"]  # assert is how pytest works
 
 [tool.ruff.lint.isort]
-known-first-party = ["lecture_api", "lecture_core", "lecture_evals", "lecture_llm", "lecture_perception", "lecture_pipeline", "lecture_rag"]
+known-first-party = ["lecture_api", "lecture_core", "lecture_detector", "lecture_evals", "lecture_llm", "lecture_perception", "lecture_pipeline", "lecture_rag"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-mypy_path = ["apps/api/src", "evals/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src"]
-files = ["apps/api/src", "evals/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src", "tests"]
+mypy_path = ["apps/api/src", "evals/src", "ml/detector/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src"]
+files = ["apps/api/src", "evals/src", "ml/detector/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src", "tests"]
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
 # Optional extras, not installed in the dev environment or CI, or without type information.
-module = ["ctranslate2.*", "docker.*", "faster_whisper.*", "pynvml", "testcontainers.*"]
+module = ["ctranslate2.*", "docker.*", "faster_whisper.*", "pynvml", "pypdfium2", "pypdfium2.*", "rfdetr.*", "supervision.*", "testcontainers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

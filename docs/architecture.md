@@ -3,7 +3,7 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 5 under way (OCR and routing done, the detector next)
+## Current state: Phase 5 under way (OCR and routing done, a frame detector trained)
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
@@ -306,6 +306,39 @@ Every slide is OCR'd, and only the slides OCR can't handle go to the vision LLM
   fix both. OCR's slide area and ink measure make the same light-slide assumption.
 - OCR reads lines top to bottom, so text written across a slide interleaves with the slide's
   own lines. Routing sends such slides to the vision LLM; with `SLIDE_READER=ocr` one answer
+### Frame detector (Phase 5b)
+
+RF-DETR Nano ([ADR 0007](adr/0007-rf-detr-for-the-frame-detector.md)) finding four things in a
+video frame: the slide, people, figures and annotations. It lives in `ml/detector`
+(`lecture-detector`), outside the pipeline; results are in the README.
+
+```
+ slide PDF ─► pages rendered ─► vision LLM boxes figures, annotations (once per page, saved)
+     │                                              │
+     └─ text lines ─┐                               ▼
+ video ─► slides + OCR ─► align: page ↔ frame (affine, RANSAC) ─► every page drawn into
+          (the pipeline's code)                                   frame geometry
+ video ─► frames every 2 s ─► match each to a page ─► slide frame: slide box + the page's
+                                                      boxes it shows; camera frame; or left out
+                                     COCO RF-DETR ─► person boxes ─► COCO dataset, split by lecture
+```
+
+- **Alignment**: each slide found in the video is matched to the PDF page it shares most words
+  with; OCR lines that read like the page's lines give point pairs, and one affine transform per
+  lecture fits them (median error 1.4 to 1.7 pixels on Lectures 10 to 12). It squeezes the page
+  horizontally (the video's pixels are 4:3) and crops its margins.
+- **Which frames**: a frame is a slide when it's bright and correlates with a page (blurred,
+  over the slide area) at 0.6 or more, or at 0.35 or more and the page is the one OCR found for
+  that stretch of video (a slide mid-build). A dark frame with no slide title band is a camera
+  shot. The rest is left out rather than guessed: a slide playing a video, a code demo. Each
+  page gives at most 6 frames, 10 s apart; camera shots one every 20 s.
+- **Labels**: the slide box is the slide area; a page's region goes onto a frame only where the
+  frame shows at least half its ink (slides build up); tables count as figures (2 in 117
+  pages). People come from RF-DETR's COCO weights, on every frame kept.
+- **Splits**: Lectures 10 and 11 train, the last fifth of each validates, Lecture 12 tests.
+- **Scoring**: RF-DETR's test pass gives AP per class; `lecture-detector evaluate` asks the
+  routing question (figure or annotation, or not) of the detector and of the 5a rule.
+
   in Lecture 10's eval missed a bullet that way. Routing thresholds were set on one lecture.
 - No verification pass yet (flagging claims the cited segments don't support). It comes with the
   eval suites in Phase 4.
@@ -329,12 +362,16 @@ Every slide is OCR'd, and only the slides OCR can't handle go to the vision LLM
   run takes about 6 minutes rather than 2. The GPU could do it in seconds, next to speech
   recognition if VRAM allows.
 
-## Next: the detector (Phase 5b)
+## Next: more lectures, then the detector in the pipeline
 
-A detector for the slide region, the presenter, and figures, tables and equations: it crops the
-slide before change detection (fixing the merged slides), masks the presenter, and replaces the
-ink measure in routing. It needs frames from more lectures, labelled by hand (500 to 1,000,
-split by lecture), and a choice between YOLO26 (AGPL-3.0) and RF-DETR (Apache-2.0), which gets
-its ADR. Slide-boundary precision and recall need hand-labelled slide changes too. Then the
-speed benchmarks (5c). The eval gate in CI (4c) waits for more lectures and somewhere to keep
+The detector finds slides (AP 1.00) and people (0.99) on the held-out lecture, and a slide
+playing a video, which the brightness test misses; but it routes slides worse than the 5a rule
+(F1 0.59 against 0.78), because figures don't generalise from two lectures. More labelled
+lectures come first; the labelling needs only each lecture's video and slide PDF. Once it
+routes as well as the rule, the pipeline can run it (exported to ONNX) instead of both the
+brightness test and the ink measure. Lectures filmed with a projector in the room would need a
+transform per frame (a homography), and chalkboard lectures a board class.
+
+Then the speed benchmarks (5c): ONNX, TensorRT and int8 for the detector, speech recognition
+and the embedding model. The eval gate in CI (4c) waits for more lectures and somewhere to keep
 them.

@@ -3,7 +3,7 @@ COMPOSE := docker compose -f infra/compose.yaml
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app observability gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval test test-unit lint fmt typecheck audit check
+.PHONY: help install up app observability gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval detector-data detector-train test test-unit lint fmt typecheck audit check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-15s %s\n", $$1, $$2}'
@@ -61,6 +61,15 @@ eval: ## Run every eval suite against the running stack, record it, and check th
 
 eval-retrieval: ## Score search only, on the golden Q&A set
 	uv run lecture-eval --suites retrieval
+
+detector-data: ## Label frames for the frame detector from the lectures' videos and slide PDFs
+	uv sync --inexact --package lecture-detector --extra train
+	uv run lecture-detector regions
+	uv run lecture-detector dataset
+
+detector-train: ## Fine-tune the frame detector on the GPU, then score the held-out lecture
+	uv sync --inexact --package lecture-detector --extra train
+	uv run lecture-detector train
 
 test: ## Run all tests (integration tests need Docker)
 	uv run pytest

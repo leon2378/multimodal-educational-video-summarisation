@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 to 3 of 6 done, Phase 4 done but for the CI gate, Phase 5 under way: upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 3 of 6 done, Phase 4 done but for the CI gate, Phase 5 under way (OCR routing done, a frame detector trained): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -36,6 +36,9 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   for correctness and faithfulness, plus citation accuracy), recorded in Postgres and gated by
   thresholds.
 - Observability ([below](#observability)): OpenTelemetry traces, metrics and logs from the API
+- A frame detector ([below](#frame-detector)): RF-DETR fine-tuned to find slides, people,
+  figures and annotations in video frames, on frames labelled automatically from the lectures'
+  slide PDFs. Trained and scored; not in the pipeline yet.
   and workers into Grafana. One trace follows a request through the workflow's activities to
   each LLM call. A dashboard tracks the blueprint's targets, and every answer and pipeline run
   records its cost. The LLM calls can also go to Langfuse.
@@ -287,7 +290,9 @@ each pipeline run stores what the LLM calls behind its notes cost (`pipeline_run
 To send the LLM calls to Langfuse as well, add `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
 (plus `LANGFUSE_HOST` for the US region or a self-hosted instance) to `.env`. Only the model calls
 go there, not SQL or HTTP spans. They include the prompts and replies, so lecture text and
-questions leave the machine: fine for openly licensed lectures, not for private ones. Why this
+questions leave the machine: fine for openly licensed lectures, not for private ones. On
+Langfuse Cloud each answer shows up as an agent run and a model call, with the model, prompt,
+reply, tokens, cost and latency. Why this
 setup: [ADR 0006](docs/adr/0006-opentelemetry-to-grafana-and-langfuse.md).
 
 ## Gemini baseline
@@ -432,6 +437,46 @@ within what one lecture and one judge can separate.
 | `make revision m="add chapters"` | Generate a migration after changing `packages/core/src/lecture_core/models.py` |
 | `make test` / `make test-unit` | All tests / unit tests only |
 | `make lint` / `make fmt` / `make typecheck` | Ruff check / Ruff fix and format / mypy (strict) |
+### Frame detector
+
+RF-DETR Nano ([ADR 0007](docs/adr/0007-rf-detr-for-the-frame-detector.md)), fine-tuned on
+frames from MIT 6.0001 Lectures 10 and 11 and scored on Lecture 12, which it never saw. No box
+was drawn by hand (`make detector-data`, `make detector-train`): each slide frame is matched to
+its page of the lecture's slide PDF and aligned to it by OCR'd text lines (median error under 2
+pixels); the vision LLM boxes each page's figures and annotations once (125 boxes on 117 pages),
+and those boxes carry onto every frame that shows the page; a COCO-trained RF-DETR finds people.
+Frames the labeller can't be sure of (a slide playing a video, a code demo) are left out.
+
+| | Train (Lectures 10, 11) | Valid | Test (Lecture 12) |
+|---|---|---|---|
+| Frames | 324 | 96 | 177 |
+| Boxes: slide / person / figure / annotation | 144 / 176 / 67 / 47 | 53 / 43 / 14 / 11 | 78 / 102 / 25 / 8 |
+
+On the test lecture, against its automatic labels (mAP50:95 0.66, mAP50 0.73):
+
+| Class | AP50:95 | Precision | Recall |
+|---|---|---|---|
+| slide | 1.00 | 0.96 | 1.00 |
+| person | 0.99 | 1.00 | 1.00 |
+| annotation | 0.50 | 1.00 | 0.63 |
+| figure | 0.15 | 0.32 | 0.36 |
+
+Routing, deciding which slides go to the vision LLM, on the test lecture's 78 slide frames (24
+with a figure or annotation by the labels):
+
+| | Slides routed | Precision | Recall | F1 |
+|---|---|---|---|---|
+| The 5a rule: ink outside text, angled lines, OCR confidence | 27 | 0.74 | 0.83 | 0.78 |
+| The detector, confidence 0.5 | 13 | 0.85 | 0.46 | 0.59 |
+
+Finding slides and people is solved at this scale, and the detector also recognises a slide
+playing a video, which the brightness test takes for a camera shot. Figures don't generalise
+from two lectures: Lecture 12's photos and sorting diagrams look nothing like the plots and
+memory diagrams of 10 and 11, and the LLM's boxes aren't consistent (highlighted code sometimes
+counts as a figure). Training at 512 px instead of 384 didn't help (figure AP 0.03, mAP 0.63).
+So the 5a rule keeps routing slides, and the detector stays out of the pipeline until more
+lectures are labelled. Every score here is against labels a model made, not checked by hand.
+
 | `make audit` | pip-audit on the locked dependencies |
 | `make check` | Lint, type-check and test, like CI |
 
@@ -446,6 +491,8 @@ packages/llm/              Pydantic AI agents: read slides, chapters, notes
 packages/pipeline/         stages, stage cache, timeline, local runner, Temporal workflow and workers
 packages/rag/              chunks, encoders (TEI, BM25), Qdrant index, hybrid search
 evals/                     eval suites (lecture-eval), datasets, thresholds, Gemini baseline
+| `make detector-data` | Label frames for the frame detector from the lectures' videos and slide PDFs (installs PyTorch, 2 GB, the first time) |
+| `make detector-train` | Fine-tune the frame detector on the GPU and score the held-out lecture |
 prompts/                   versioned prompts (pipeline, Q&A and baseline)
 data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
@@ -464,6 +511,7 @@ containers, so they need Docker but not `make up`. If Docker isn't running they'
 locally. In CI they must run and fail instead.
 
 One integration test runs `alembic check`: it fails if a model changed without a migration.
+ml/detector/               frame detector: labels from slide PDFs, dataset, RF-DETR training
 
 ## Decisions
 
@@ -537,8 +585,10 @@ from the blueprint in these places:
 - [ ] **Phase 5, CV and optimisation**
   - [x] 5a: OCR on every slide (RapidOCR), the vision LLM only for slides with figures,
         annotations or doubtful OCR, and a slides eval against the slide PDF
-  - [ ] 5b: a detector (YOLO26 or RF-DETR) to crop slides, mask the presenter and route by
-        figure, table and equation boxes, fine-tuned on labelled frames
+  - [ ] 5b: a frame detector (RF-DETR, [ADR 0007](docs/adr/0007-rf-detr-for-the-frame-detector.md))
+        for slides, people, figures and annotations, on frames labelled automatically from the
+        slide PDFs: trained and scored on 3 lectures; into the pipeline once more lectures
+        make it route better than the 5a rule
   - [ ] 5c: ONNX/TensorRT/int8 benchmarks, before and after
 - [ ] **Phase 6, ship**: auth, quotas, Terraform and Modal deploy, results write-up
 

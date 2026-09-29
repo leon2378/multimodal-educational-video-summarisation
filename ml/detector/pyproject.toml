@@ -1,0 +1,35 @@
+[project]
+name = "lecture-detector"
+version = "0.1.0"
+description = "The frame detector: labels made from slide PDFs, the dataset, training and export."
+requires-python = ">=3.12"
+dependencies = [
+    "lecture-core",
+    "lecture-llm",
+    "lecture-perception",
+    "numpy>=2.5",
+    "opencv-python-headless>=5.0",
+    "pillow>=12.3",
+    "pypdfium2>=5.13",
+]
+
+[project.optional-dependencies]
+# Fine-tuning RF-DETR on the GPU (docs/adr/0007). PyTorch comes from its CUDA index (root
+# pyproject); the pipeline never needs it.
+train = [
+    "rfdetr[train]>=1.11",
+    "torch>=2.14",
+    "torchvision>=0.29",
+]
+
+[project.scripts]
+lecture-detector = "lecture_detector.cli:main"
+
+[tool.uv.sources]
+lecture-core = { workspace = true }
+lecture-llm = { workspace = true }
+lecture-perception = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13"]
+build-backend = "uv_build"

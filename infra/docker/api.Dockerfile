@@ -15,6 +15,7 @@ COPY pyproject.toml uv.lock .python-version ./
 # uv needs every workspace member's pyproject.toml to resolve the lockfile, even unused ones.
 COPY apps/api/pyproject.toml apps/api/
 COPY evals/pyproject.toml evals/
+COPY ml/detector/pyproject.toml ml/detector/
 COPY packages/core/pyproject.toml packages/core/
 COPY packages/llm/pyproject.toml packages/llm/
 COPY packages/perception/pyproject.toml packages/perception/

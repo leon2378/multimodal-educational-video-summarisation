@@ -1,0 +1,30 @@
+{
+  "source": "MIT OpenCourseWare 6.0001, Fall 2016: https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/. Videos (300k MP4) from the Internet Archive's mirror, https://archive.org/details/MIT6.0001F16; slide PDFs from the course's lecture pages. Not in git: put them in data/lectures/.",
+  "licence": "CC BY-NC-SA 4.0. Eric Grimson, John Guttag and Ana Bell. 6.0001 Introduction to Computer Science and Programming in Python, Fall 2016. MIT OpenCourseWare.",
+  "lectures": [
+    {
+      "name": "mit-6.0001-lecture-10",
+      "video": "MIT6_0001F16_Lecture_10_300k.mp4",
+      "video_sha256": "55b4834e0eb6c48158e1ef14bbb4ff07a994e3fcad8d38aa9e6f124143721919",
+      "pdf": "MIT6_0001F16_Lec10.pdf",
+      "pdf_sha256": "af7deaa0170f150638040abe9da9d5588d327eac02451ac79a40777c78afb5ce",
+      "split": "train"
+    },
+    {
+      "name": "mit-6.0001-lecture-11",
+      "video": "MIT6_0001F16_Lecture_11_300k.mp4",
+      "video_sha256": "4704aa85a5b872353cccb46f01811fd1225d845e94c9af55b78769f1d88d17fd",
+      "pdf": "MIT6_0001F16_Lec11.pdf",
+      "pdf_sha256": "3948d6cfc00bf64cd4a52128e20661016a6c2707f00b8e4a9dd83bd93f2a9246",
+      "split": "train"
+    },
+    {
+      "name": "mit-6.0001-lecture-12",
+      "video": "MIT6_0001F16_Lecture_12_300k.mp4",
+      "video_sha256": "4a831997f8fcf16f75cc411e393df9f907bcee3c0444b440b1b37ff999baf7fa",
+      "pdf": "MIT6_0001F16_Lec12.pdf",
+      "pdf_sha256": "171c99744ae54f2e2693d5ae42da0120f083c2042a3a0526ae7b9bfad31cd2bf",
+      "split": "test"
+    }
+  ]
+}
