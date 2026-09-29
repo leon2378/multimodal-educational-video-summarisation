@@ -2,10 +2,26 @@ from pathlib import Path
 
 import pytest
 
-from lecture_core.notes import Concept
+from lecture_core.notes import Concept, QuizQuestion
 from lecture_core.timeline import SlideDeck, SlideImage, SlideReading, SlideSpan, Timeline
-from lecture_llm.agents import LectureLLM, PlannedChapter, Prompt, Prompts, render
-from lecture_pipeline.assemble import chapter_ranges, locate, merge_duplicate_concepts
+from lecture_llm.agents import (
+    ChapterNotes,
+    CitedQuestion,
+    LectureLLM,
+    Overview,
+    PlannedChapter,
+    Prompt,
+    Prompts,
+    render,
+)
+from lecture_pipeline.assemble import (
+    ChapterRange,
+    assemble,
+    chapter_ranges,
+    locate,
+    merge_duplicate_concepts,
+    unique_questions,
+)
 from lecture_pipeline.cli import run
 from lecture_pipeline.fuse import build_timeline, split_sentences
 from lecture_pipeline.settings import PipelineSettings
@@ -101,6 +117,44 @@ def test_duplicate_concepts_keep_the_fullest_definition() -> None:
         ("big O notation", 671),
         ("Indirection", 2605),
     ]
+
+
+def test_repeated_quiz_questions_keep_their_first_appearance() -> None:
+    questions = [
+        QuizQuestion(question="What does O(1) mean?", answer="Constant time.", at_s=124),
+        QuizQuestion(question="Why not just time a program?", answer="Timings vary.", at_s=676),
+        QuizQuestion(question="what does  O(1) mean", answer="Constant.", at_s=2000),
+        QuizQuestion(question="Why not just time a program?", answer="Timings vary.", at_s=676),
+    ]
+
+    unique = unique_questions(questions)
+
+    # In the model's order. A repeat goes even with other case, spacing, punctuation or citation.
+    assert [(q.question, q.at_s) for q in unique] == [
+        ("What does O(1) mean?", 124),
+        ("Why not just time a program?", 676),
+    ]
+
+
+def test_a_repeat_stands_in_for_a_question_citing_an_unknown_segment() -> None:
+    timeline = build_timeline(TRANSCRIPT, DECK, [reading(0), reading(1)])
+    cited = timeline.segments[1]
+    overview = Overview(
+        tldr="",
+        quiz=[
+            CitedQuestion(question="What is memoisation?", answer="Caching.", segment="s9999"),
+            CitedQuestion(question="What is memoisation?", answer="Caching.", segment=cited.id),
+            CitedQuestion(question="What is memoisation?", answer="Caching.", segment=cited.id),
+        ],
+    )
+    span = ChapterRange(title="All", first=0, last=len(timeline.segments) - 1)
+
+    notes, dropped = assemble(
+        timeline, [(span, ChapterNotes(summary="", concepts=[], formulas=[]))], overview
+    )
+
+    assert [(q.question, q.at_s) for q in notes.quiz] == [("What is memoisation?", cited.start_s)]
+    assert dropped == ["quiz 'What is memoisation?': unknown segment 's9999'"]
 
 
 def test_untrusted_text_cannot_break_out_of_its_block() -> None:

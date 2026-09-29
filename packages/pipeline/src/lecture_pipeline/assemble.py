@@ -5,7 +5,7 @@ segment, found in the ASR word timestamps. Other items point at the start of the
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from pydantic import BaseModel
 
@@ -82,11 +82,11 @@ def assemble(
             if (found := segment(f"formula {f.latex!r}", f.segment)) is not None:
                 formulas.append(Formula(latex=f.latex, meaning=f.meaning, at_s=found.start_s))
 
-    quiz = [
+    quiz = unique_questions(
         QuizQuestion(question=q.question, answer=q.answer, at_s=found.start_s)
         for q in overview.quiz
         if (found := segment(f"quiz {q.question[:40]!r}", q.segment)) is not None
-    ]
+    )
     study_notes = StudyNotes(
         tldr=overview.tldr,
         chapters=notes_chapters,
@@ -108,6 +108,20 @@ def merge_duplicate_concepts(concepts: Sequence[Concept]) -> list[Concept]:
         if current is None or len(concept.definition) > len(current.definition):
             best[key] = concept
     return sorted(best.values(), key=lambda concept: concept.at_s)
+
+
+def unique_questions(questions: Iterable[QuizQuestion]) -> list[QuizQuestion]:
+    """The model sometimes repeats quiz questions within one reply, citing the same segment or
+    another. Keep each question where it first appears, in the model's order. Case, spacing and
+    punctuation don't make a question different."""
+    seen: set[tuple[str, ...]] = set()
+    unique: list[QuizQuestion] = []
+    for question in questions:
+        key = tuple(_tokens(question.question))
+        if key not in seen:
+            seen.add(key)
+            unique.append(question)
+    return unique
 
 
 def locate(words: Sequence[Word], phrase: str) -> float | None:

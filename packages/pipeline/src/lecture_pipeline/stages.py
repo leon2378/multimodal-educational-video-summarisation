@@ -290,7 +290,8 @@ def draft_notes(
 def notes(
     ctx: Context, timeline: StageResult[Timeline], draft: StageResult[NotesDraft]
 ) -> StageResult[NotesResult]:
-    """Assembly: segment ids to times, word-level concept times, duplicate concepts merged."""
+    """Assembly: segment ids to times, word-level concept times, duplicate concepts merged,
+    repeated quiz questions dropped."""
 
     def compute(_key: str) -> NotesResult:
         study_notes, dropped = assemble(
@@ -300,9 +301,10 @@ def notes(
         )
         return NotesResult(notes=study_notes, dropped=dropped)
 
-    # Bump the version when assembly logic changes; the LLM draft stays cached.
+    # Bump the version when assembly logic changes; the LLM draft stays cached. Version 3: repeated
+    # quiz questions dropped.
     return ctx.cache.run(
-        StageSpec("notes", "2"),
+        StageSpec("notes", "3"),
         {"timeline": timeline.key, "draft": draft.key},
         NotesResult,
         compute,
