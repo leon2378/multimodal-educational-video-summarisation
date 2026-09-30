@@ -278,7 +278,12 @@ GPU, Lecture 10 fetched and processed through the API (`--prepare`), then every 
 search scored without the reranker, which a CPU can't run at a usable speed. It runs on pushes
 that touch the API, the pipeline, prompts, search or the evals, every Monday, and on demand,
 and needs a `GEMINI_API_KEY` repository secret. The stage cache carries over between runs, so a
-run only redoes what changed.
+run only redoes what changed. The first run took 39 minutes, 24 of them processing the lecture
+(20 transcribing it on the runner's four CPU cores); since then a run takes about 9 minutes,
+with every stage of the lecture from the cache and 3 minutes for the suites, most of it the
+answers. A run makes 72 LLM calls, the 36 answers and their grades: about $0.12 on Gemini's
+paid tier. The free tier's 500 requests a day ran out during the first run, on a day that had
+spent most of them labelling slides.
 
 The captions and slide PDF aren't in git: they're the lecture's own material (CC BY-NC-SA).
 Each dataset file names the file, its URL and its SHA-256; `--prepare` downloads what's missing

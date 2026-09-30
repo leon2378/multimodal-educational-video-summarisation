@@ -4,8 +4,9 @@ name: eval
 # through the API, and every suite scored against evals/thresholds.json. There's no GPU here, so
 # speech recognition runs on the CPU and search without the reranker (infra/compose.eval.yaml).
 # The stage cache is kept between runs, so only the stages whose inputs changed run again: the
-# first run transcribes the lecture on the CPU, later ones take minutes. LLM calls use the
-# GEMINI_API_KEY repository secret (Gemini's free tier; the lecture is openly licensed).
+# first run took 39 minutes (20 of them transcribing the lecture on the CPU), later ones about 9.
+# LLM calls use the GEMINI_API_KEY repository secret, on Gemini's paid tier: 72 calls a run,
+# about $0.12.
 #
 # Actions are pinned to commit SHAs, as in ci.yml.
 

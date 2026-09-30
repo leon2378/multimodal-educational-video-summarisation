@@ -218,10 +218,15 @@ on demand.
 - **Caches**: the speech model, the embedding model and the lecture's media are cached by
   version. The stage cache (`artifacts/` in object storage) is synced out after each run and
   back in before the next, so only stages whose inputs changed run again: a change to a prompt
-  reruns the stages that use it, and nothing else. The first run transcribes the lecture on the
-  CPU; later ones spend their time on the answers suite's LLM calls.
-- **The LLM** is Gemini's free tier, through the `GEMINI_API_KEY` repository secret (the lecture
-  is openly licensed). Pull requests from forks don't get the secret, so the job skips them.
+  reruns the stages that use it, and nothing else. The first run took 39 minutes, 24 of them
+  processing the lecture (speech recognition 20 minutes on the runner's four CPU cores,
+  embedding 3); with the cache a run takes about 9 minutes, 15 s of it processing and 3 minutes
+  the suites, mostly the answers suite's LLM calls. The rest is preparing the runner and
+  starting the stack.
+- **The LLM** is Gemini on the paid tier, through the `GEMINI_API_KEY` repository secret: a run
+  makes 72 calls (36 answers and their grades), about $0.12. The free tier's 500 requests a day
+  are shared with development, and ran out during the first run, after a day of labelling
+  slides. Pull requests from forks don't get the secret, so the job skips them.
 - **Results** go to the job summary (each suite's tables and whether it's within its bounds) and
   the reports to a workflow artifact. The `eval_runs` rows stay in the runner's database.
 
