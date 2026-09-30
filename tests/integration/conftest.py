@@ -74,7 +74,11 @@ def s3_endpoint() -> Iterator[str]:
 
 @pytest.fixture(scope="session")
 def settings(database_url: str, s3_endpoint: str) -> Settings:
-    settings = Settings(database_url=database_url, s3_endpoint_url=s3_endpoint)
+    # Nothing listens on port 1: without the Temporal container (processing_settings), tests
+    # find no Temporal, as in CI, rather than a dev stack's on the default port.
+    settings = Settings(
+        database_url=database_url, s3_endpoint_url=s3_endpoint, temporal_address="127.0.0.1:1"
+    )
     alembic_config = Config(str(REPO_ROOT / "packages" / "core" / "alembic.ini"))
     alembic_config.set_main_option("sqlalchemy.url", database_url)
     command.upgrade(alembic_config, "head")

@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from lecture_api import quotas
 from lecture_api.auth import Viewer, get_verifier
+from lecture_api.deps import get_temporal
 from lecture_api.main import create_app
 from lecture_core.db import create_engine, create_sessionmaker
 from lecture_core.models import Lecture, MessageRole, QAMessage, QAThread, User
@@ -43,6 +44,9 @@ def signed(settings: Settings) -> Settings:
 def api(signed: Settings) -> Iterator[TestClient]:
     app = create_app(signed.model_copy(update={"quota_uploads_per_day": 2}))
     app.dependency_overrides[get_verifier] = FakeIssuer
+    # POST /process connects to Temporal before checking the lecture. None runs here, and the
+    # requests that get that far are refused, so a stand-in lets them reach the check.
+    app.dependency_overrides[get_temporal] = lambda: None
     with TestClient(app) as client:
         yield client
 
