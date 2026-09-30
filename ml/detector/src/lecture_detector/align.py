@@ -43,6 +43,9 @@ class Alignment:
     points: int
     inliers: int
     median_error_px: float
+    # Slides the transform fits: most of their points agree with it. Screens of live coding also
+    # get matched to a page by their words, but aren't slides.
+    fitted: frozenset[int] = frozenset()
 
     def box(self, box: Box) -> Box:
         """A page box in frame pixels (the bounding box of its mapped corners)."""
@@ -101,10 +104,13 @@ def align(slides: Sequence[SlideOcr], pdf: PageText) -> Alignment:
     page_words = [set(words(" ".join(line.text for line in lines))) for lines in page_lines]
     pages: dict[int, int] = {}
     pairs: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    owners: list[int] = []  # the slide each pair comes from
     for slide in slides:
         page = best_page(slide.lines, page_words)
         pages[slide.slide_id] = page
-        pairs += line_pairs(slide.lines, page_lines[page])
+        found = line_pairs(slide.lines, page_lines[page])
+        pairs += found
+        owners += [slide.slide_id] * len(found)
     if len(pairs) < 6:
         raise ValueError(f"too few matching text lines to align {pdf.path.name} ({len(pairs)})")
     src = np.array([p for p, _ in pairs], dtype=np.float32)
@@ -114,10 +120,12 @@ def align(slides: Sequence[SlideOcr], pdf: PageText) -> Alignment:
         raise ValueError(f"couldn't fit a transform for {pdf.path.name}")
     inlier = mask.ravel().astype(bool)
     errors = np.linalg.norm(dst - (src @ matrix[:, :2].T + matrix[:, 2]), axis=1)
+    owner = np.array(owners)
     return Alignment(
         matrix=matrix,
         pages=pages,
         points=len(pairs),
         inliers=int(inlier.sum()),
         median_error_px=float(np.median(errors[inlier])),
+        fitted=frozenset(s for s in set(owners) if inlier[owner == s].mean() >= 0.5),
     )

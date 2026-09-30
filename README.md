@@ -38,7 +38,8 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   thresholds, in CI as well as locally.
 - A frame detector ([below](#frame-detector)): RF-DETR fine-tuned to find slides, people,
   figures and annotations in video frames, on frames labelled automatically from the lectures'
-  slide PDFs. Trained and scored; not in the pipeline yet.
+  slide PDFs, from 12 lectures. Trained and scored; it routes slides worse than the 5a rule, so
+  it isn't in the pipeline.
 - Speed benchmarks ([below](#speed)): `lecture-bench` runs speech recognition, the embedding
   model and the frame detector each way they could run (CPU or GPU; fp32, fp16 or int8;
   PyTorch, ONNX Runtime or TensorRT) and scores every variant, so lost accuracy shows. The
@@ -369,7 +370,7 @@ reused for 48 hours, so repeat runs on the same video skip the upload.
 ## Results so far
 
 Mostly one lecture so far: MIT 6.0001 Lecture 10 (51 min), the one with eval datasets.
-Lectures 11 and 12 are processed too, and the frame detector uses all three.
+Lectures 11 and 12 are processed too, and the frame detector uses Lectures 1 to 12.
 
 ### Study notes
 
@@ -459,42 +460,47 @@ without a title now keeps OCR's.
 ### Frame detector
 
 RF-DETR Nano ([ADR 0007](docs/adr/0007-rf-detr-for-the-frame-detector.md)), fine-tuned on
-frames from MIT 6.0001 Lectures 10 and 11 and scored on Lecture 12, which it never saw. No box
-was drawn by hand (`make detector-data`, `make detector-train`): each slide frame is matched to
-its page of the lecture's slide PDF and aligned to it by OCR'd text lines (median error under 2
-pixels); the vision LLM boxes each page's figures and annotations once (125 boxes on 117 pages),
-and those boxes carry onto every frame that shows the page; a COCO-trained RF-DETR finds people.
-Frames the labeller can't be sure of (a slide playing a video, a code demo) are left out.
+frames from ten MIT 6.0001 lectures and scored on two it never saw, one from each half of the
+course: Lectures 6 and 12. No box was drawn by hand (`make detector-data`,
+`make detector-train`): each slide frame is matched to its page of the lecture's slide PDF and
+aligned to it by OCR'd text lines (median error under 2 pixels); the vision LLM boxes each
+page's figures and annotations once (427 boxes on 396 pages), and those boxes carry onto every
+frame that shows the page; a COCO-trained RF-DETR finds people. Frames the labeller can't be
+sure of (a slide playing a video, a screen of live coding) are left out.
 
-| | Train (Lectures 10, 11) | Valid | Test (Lecture 12) |
+| | Train (Lectures 1-5, 7-11) | Valid (their last fifth) | Test (Lectures 6, 12) |
 |---|---|---|---|
-| Frames | 324 | 96 | 177 |
-| Boxes: slide / person / figure / annotation | 144 / 176 / 67 / 47 | 53 / 43 / 14 / 11 | 78 / 102 / 25 / 8 |
+| Frames | 1,409 | 371 | 387 |
+| Boxes: slide / person / figure / annotation | 639 / 762 / 199 / 314 | 201 / 176 / 66 / 56 | 188 / 204 / 56 / 33 |
 
-On the test lecture, against its automatic labels (mAP50:95 0.66, mAP50 0.73):
+On the test lectures, against their automatic labels (mAP50:95 0.71, mAP50 0.81):
 
 | Class | AP50:95 | Precision | Recall |
 |---|---|---|---|
-| slide | 1.00 | 0.96 | 1.00 |
-| person | 0.99 | 1.00 | 1.00 |
-| annotation | 0.50 | 1.00 | 0.63 |
-| figure | 0.15 | 0.32 | 0.36 |
+| slide | 1.00 | 1.00 | 1.00 |
+| person | 0.99 | 1.00 | 0.99 |
+| annotation | 0.36 | 0.38 | 0.61 |
+| figure | 0.34 | 0.67 | 0.36 |
 
-Routing, deciding which slides go to the vision LLM, on the test lecture's 78 slide frames (24
+Routing, deciding which slides go to the vision LLM, on the test lectures' 188 slide frames (65
 with a figure or annotation by the labels):
 
-| | Slides routed | Precision | Recall | F1 |
-|---|---|---|---|---|
-| The 5a rule: ink outside text, angled lines, OCR confidence | 27 | 0.74 | 0.83 | 0.78 |
-| The detector, confidence 0.5 | 13 | 0.85 | 0.46 | 0.59 |
+| | Slides routed | Precision | Recall | F1 | On Lecture 12 alone |
+|---|---|---|---|---|---|
+| The 5a rule: ink outside text, angled lines, OCR confidence | 74 | 0.80 | 0.91 | **0.85** | 0.78 |
+| The detector, confidence 0.5 | 54 | 0.87 | 0.72 | 0.79 | 0.68 |
+| Either of them | 77 | 0.77 | 0.91 | 0.83 | |
 
-Finding slides and people is solved at this scale, and the detector also recognises a slide
-playing a video, which the brightness test takes for a camera shot. Figures don't generalise
-from two lectures: Lecture 12's photos and sorting diagrams look nothing like the plots and
-memory diagrams of 10 and 11, and the LLM's boxes aren't consistent (highlighted code sometimes
-counts as a figure). Training at 512 px instead of 384 didn't help (figure AP 0.03, mAP 0.63).
-So the 5a rule keeps routing slides, and the detector stays out of the pipeline until more
-lectures are labelled. Every score here is against labels a model made, not checked by hand.
+Ten training lectures instead of two lifted the detector's routing F1 on Lecture 12 from 0.59
+to 0.68, and figure AP from 0.15 on Lecture 12 to 0.34 on the two test lectures (annotation
+AP, 0.50 on Lecture 12's 8 annotations then, is 0.36 on the 33 now). But the rule still routes
+better: the detector misses more than a quarter of the slides with a figure or an annotation,
+almost half of Lecture 12's, and routing when either says so doesn't beat the rule alone. So
+the rule keeps routing slides, and the detector stays out of the pipeline. Finding slides and
+people is solved at this scale, and the detector also recognises a slide playing a video, which
+the brightness test takes for a camera shot. Every score here is against labels a model made,
+not checked by hand, and the LLM's boxes aren't consistent (highlighted code sometimes counts
+as a figure).
 
 ### Speed
 
@@ -541,9 +547,11 @@ the reranker and the embedding model beside it the card peaks at 5.1 of its 6 GB
 1.1 GB more, wouldn't fit. Without a GPU a 51-minute lecture takes 16 minutes. In the pipeline
 the stage takes 65 to 75 s: it also loads the model, and slide detection and OCR run beside it.
 
-**The frame detector** (RF-DETR Nano at 384 px, [above](#frame-detector)): each of Lecture 12's
-177 test frames through the network on its own, timed without the preprocessing and decoding
-every variant shares, and scored against the frames' automatic labels.
+**The frame detector** (RF-DETR Nano at 384 px, [above](#frame-detector), as first trained on
+Lectures 10 and 11): each of Lecture 12's 177 test frames through the network on its own, timed
+without the preprocessing and decoding every variant shares, and scored against the frames'
+automatic labels. Retraining on more lectures changes the weights, not the network, so the
+timings stand.
 
 | Runtime | Device | ms a frame, median | mAP50:95 | mAP50 | slide | person | figure | annotation |
 |---|---|---|---|---|---|---|---|---|
@@ -574,7 +582,7 @@ PyTorch at the same accuracy.
   converting in and out of them costs more than it saves. Making the rest of it fp16 as well,
   tried separately, broke its accuracy (mAP 0.10).
 - The mAP here comes from the benchmark's own decoding, the same for every variant: 0.649 for
-  the trained model, against 0.66 from RF-DETR's test pass above.
+  the model trained on two lectures, against 0.66 from RF-DETR's own test pass on it.
 
 ## Commands
 
@@ -717,8 +725,9 @@ from the blueprint in these places:
         annotations or doubtful OCR, and a slides eval against the slide PDF
   - [ ] 5b: a frame detector (RF-DETR, [ADR 0007](docs/adr/0007-rf-detr-for-the-frame-detector.md))
         for slides, people, figures and annotations, on frames labelled automatically from the
-        slide PDFs: trained and scored on 3 lectures; into the pipeline once more lectures
-        make it route better than the 5a rule
+        slide PDFs: trained on 10 lectures and scored on 2. It finds slides and people, but
+        routes slides worse than the 5a rule (F1 0.79 against 0.85), so it isn't in the
+        pipeline
   - [x] 5c: speed benchmarks before and after (`make bench`): the embedding model moved to the
         GPU (150 times faster), speech recognition stays int8, and the detector would run as a
         TensorRT fp16 engine ([ADR 0008](docs/adr/0008-where-the-models-run.md))

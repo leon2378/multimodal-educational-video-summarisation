@@ -4,8 +4,8 @@ On each slide frame of the test split, the question is the one routing asks: doe
 show a figure or an annotation? The automatic labels (the LLM's boxes on the PDF pages) are the
 reference; the detector answers yes when it finds a figure or annotation above a confidence
 threshold, and 5a's rule (lecture_perception.ocr.route) from ink outside text, lines at an angle
-and OCR confidence, with the test lecture's frames as its deck. The reference is itself made by
-a model, so this measures agreement with it, not the truth.
+and OCR confidence, with each test lecture's frames as its deck. The reference is itself made
+by a model, so this measures agreement with it, not the truth.
 """
 
 import json
@@ -60,9 +60,16 @@ def slide_frames(split: Path) -> list[tuple[Path, bool]]:
 
 
 def rule_routes(images: list[Path]) -> list[bool]:
+    """The rule's baseline is a percentile of its deck, so each lecture is routed on its own
+    (frames are named <lecture>-<seconds>.jpg)."""
     ocr = SlideOCR()
-    deck = DeckOcr(slides=[ocr.read(i, Image.open(p)) for i, p in enumerate(images)], model="")
-    routed = route(deck, RoutingConfig())
+    decks: dict[str, list[int]] = {}
+    for index, path in enumerate(images):
+        decks.setdefault(path.stem.rsplit("-", 1)[0], []).append(index)
+    routed: set[int] = set()
+    for indices in decks.values():
+        deck = DeckOcr(slides=[ocr.read(i, Image.open(images[i])) for i in indices], model="")
+        routed |= set(route(deck, RoutingConfig()))
     return [i in routed for i in range(len(images))]
 
 

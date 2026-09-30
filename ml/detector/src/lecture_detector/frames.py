@@ -190,7 +190,10 @@ def labelled_frames(
     detection = detect_slides(media.sample_frames(video, 1.0), info.duration_s, config)
     ocr = SlideOCR()
     alignment = align([ocr.read(s.id, s.image) for s in detection.slides], pdf)
-    areas = np.array([slide_area(s.image) for s in detection.slides])
+    # Where slides sit in the frame, from the slides the transform fits: in a lecture with a lot
+    # of live coding, full-width screens of code would otherwise set it.
+    fitted = [s for s in detection.slides if s.id in alignment.fitted] or detection.slides
+    areas = np.array([slide_area(s.image) for s in fitted])
     left, top, right, bottom = (int(v) for v in np.median(areas, axis=0))
     area = (left, top, right, bottom)
     matcher = PageMatcher(pdf, alignment, area)

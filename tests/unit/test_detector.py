@@ -78,6 +78,21 @@ def test_slides_are_matched_to_pages_and_the_transform_recovered() -> None:
     assert alignment.box((100.0, 300.0, 300.0, 400.0)) == pytest.approx((90.0, 176.1, 190.0, 242.8))
 
 
+def test_a_screen_that_only_reads_like_a_page_isnt_fitted() -> None:
+    # Live coding: a screen with a page's words, but its lines sit elsewhere in the frame.
+    code = slide(2, 0)
+    moved = [
+        OcrLine(text=line.text, score=line.score, box=[(x + 150, y + 90) for x, y in line.box])
+        for line in code.lines
+    ]
+    screen = SlideOcr(slide_id=2, lines=moved, area=code.area, ink_outside_text=0.0)
+
+    alignment = align([slide(0, 2), slide(1, 1), screen], FakePdf(PAGES))
+
+    assert alignment.fitted == {0, 1}
+    np.testing.assert_allclose(alignment.matrix, MATRIX, atol=1e-3)
+
+
 def test_lines_that_dont_read_alike_give_no_points() -> None:
     lines = [as_ocr(page_line("something else entirely", 80))]
 

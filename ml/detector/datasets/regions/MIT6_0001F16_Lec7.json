@@ -1,0 +1,412 @@
+{
+ "pdf": "MIT6_0001F16_Lec7.pdf",
+ "pdf_sha256": "1ca469bae444338b64480f79480cc903fe4e95ea383d827aae4ddbdfe95703c1",
+ "model": "google:gemini-3.5-flash-lite",
+ "prompt": "page-regions.v1@0590337392ce",
+ "created_at": "2026-09-30T09:39:05.492116Z",
+ "pages": [
+  {
+   "page": 1,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      15.12,
+      9.72,
+      65.52,
+      63.72
+     ]
+    },
+    {
+     "label": "figure",
+     "box": [
+      660.96,
+      445.5,
+      712.08,
+      497.88
+     ]
+    }
+   ]
+  },
+  {
+   "page": 2,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      300.24,
+      188.46,
+      692.64,
+      517.32
+     ]
+    }
+   ]
+  },
+  {
+   "page": 3,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      64.8,
+      13.5,
+      646.56,
+      246.78
+     ]
+    },
+    {
+     "label": "figure",
+     "box": [
+      178.56,
+      162.0,
+      513.36,
+      244.08
+     ]
+    },
+    {
+     "label": "figure",
+     "box": [
+      20.16,
+      246.78,
+      346.32,
+      466.02
+     ]
+    },
+    {
+     "label": "figure",
+     "box": [
+      354.24,
+      246.78,
+      698.4,
+      466.02
+     ]
+    }
+   ]
+  },
+  {
+   "page": 4,
+   "regions": []
+  },
+  {
+   "page": 5,
+   "regions": []
+  },
+  {
+   "page": 6,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      12.96,
+      163.08,
+      69.84,
+      396.9
+     ]
+    }
+   ]
+  },
+  {
+   "page": 7,
+   "regions": []
+  },
+  {
+   "page": 8,
+   "regions": []
+  },
+  {
+   "page": 9,
+   "regions": [
+    {
+     "label": "table",
+     "box": [
+      49.68,
+      220.32,
+      689.04,
+      513.54
+     ]
+    }
+   ]
+  },
+  {
+   "page": 10,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      202.32,
+      325.08,
+      664.56,
+      503.82
+     ]
+    }
+   ]
+  },
+  {
+   "page": 11,
+   "regions": []
+  },
+  {
+   "page": 12,
+   "regions": []
+  },
+  {
+   "page": 13,
+   "regions": []
+  },
+  {
+   "page": 14,
+   "regions": []
+  },
+  {
+   "page": 15,
+   "regions": []
+  },
+  {
+   "page": 16,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      360.0,
+      239.22,
+      640.8,
+      475.2
+     ]
+    }
+   ]
+  },
+  {
+   "page": 17,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      302.4,
+      154.98,
+      383.04,
+      216.54
+     ]
+    },
+    {
+     "label": "figure",
+     "box": [
+      298.8,
+      352.62,
+      379.44,
+      414.72
+     ]
+    }
+   ]
+  },
+  {
+   "page": 18,
+   "regions": []
+  },
+  {
+   "page": 19,
+   "regions": []
+  },
+  {
+   "page": 20,
+   "regions": []
+  },
+  {
+   "page": 21,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      600.48,
+      326.16,
+      708.48,
+      423.9
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      622.08,
+      435.24,
+      691.92,
+      514.08
+     ]
+    }
+   ]
+  },
+  {
+   "page": 22,
+   "regions": []
+  },
+  {
+   "page": 23,
+   "regions": []
+  },
+  {
+   "page": 24,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      53.28,
+      377.46,
+      115.2,
+      423.9
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      170.64,
+      372.6,
+      299.52,
+      454.68
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      396.0,
+      376.38,
+      553.68,
+      485.46
+     ]
+    }
+   ]
+  },
+  {
+   "page": 25,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      3.6,
+      377.46,
+      138.24,
+      479.52
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      103.68,
+      442.8,
+      694.8,
+      469.26
+     ]
+    }
+   ]
+  },
+  {
+   "page": 26,
+   "regions": []
+  },
+  {
+   "page": 27,
+   "regions": []
+  },
+  {
+   "page": 28,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      294.48,
+      380.7,
+      440.64,
+      417.42
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      409.68,
+      416.88,
+      479.52,
+      460.08
+     ]
+    }
+   ]
+  },
+  {
+   "page": 29,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      460.08,
+      277.02,
+      720.0,
+      516.78
+     ]
+    }
+   ]
+  },
+  {
+   "page": 30,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      465.84,
+      301.86,
+      577.44,
+      367.2
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      565.2,
+      442.8,
+      690.48,
+      514.62
+     ]
+    }
+   ]
+  },
+  {
+   "page": 31,
+   "regions": []
+  },
+  {
+   "page": 32,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      534.24,
+      249.48,
+      673.2,
+      343.98
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      64.08,
+      206.28,
+      695.52,
+      242.46
+     ]
+    }
+   ]
+  },
+  {
+   "page": 33,
+   "regions": []
+  },
+  {
+   "page": 34,
+   "regions": []
+  },
+  {
+   "page": 35,
+   "regions": []
+  }
+ ],
+ "usage": {
+  "requests": 35,
+  "input_tokens": 49411,
+  "output_tokens": 1172
+ }
+}

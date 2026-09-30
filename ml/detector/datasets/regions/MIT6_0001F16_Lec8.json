@@ -1,0 +1,404 @@
+{
+ "pdf": "MIT6_0001F16_Lec8.pdf",
+ "pdf_sha256": "a60be130dd79443f929ecad6d9929a96a106529ee4435a93e13468fd6b9f9fda",
+ "model": "google:gemini-3.5-flash-lite",
+ "prompt": "page-regions.v1@0590337392ce",
+ "created_at": "2026-09-30T09:40:37.417282Z",
+ "pages": [
+  {
+   "page": 1,
+   "regions": []
+  },
+  {
+   "page": 2,
+   "regions": []
+  },
+  {
+   "page": 3,
+   "regions": []
+  },
+  {
+   "page": 4,
+   "regions": []
+  },
+  {
+   "page": 5,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      164.16,
+      182.52,
+      660.24,
+      212.22
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      534.24,
+      215.46,
+      655.92,
+      297.54
+     ]
+    }
+   ]
+  },
+  {
+   "page": 6,
+   "regions": []
+  },
+  {
+   "page": 7,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      0.0,
+      0.0,
+      333.36,
+      23.76
+     ]
+    },
+    {
+     "label": "figure",
+     "box": [
+      385.92,
+      0.0,
+      720.0,
+      23.76
+     ]
+    }
+   ]
+  },
+  {
+   "page": 8,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      9.36,
+      254.88,
+      110.88,
+      320.22
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      211.68,
+      165.78,
+      289.44,
+      216.54
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      394.56,
+      171.72,
+      453.6,
+      221.94
+     ]
+    }
+   ]
+  },
+  {
+   "page": 9,
+   "regions": []
+  },
+  {
+   "page": 10,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      457.2,
+      257.58,
+      613.44,
+      357.48
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      475.92,
+      349.38,
+      596.16,
+      460.08
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      224.64,
+      413.64,
+      420.48,
+      517.86
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      4.32,
+      360.18,
+      136.8,
+      485.46
+     ]
+    }
+   ]
+  },
+  {
+   "page": 11,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      107.28,
+      204.12,
+      540.0,
+      243.0
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      141.84,
+      266.76,
+      419.76,
+      305.64
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      540.72,
+      182.52,
+      686.16,
+      334.26
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      388.08,
+      284.04,
+      524.16,
+      376.38
+     ]
+    }
+   ]
+  },
+  {
+   "page": 12,
+   "regions": []
+  },
+  {
+   "page": 13,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      315.36,
+      193.86,
+      507.6,
+      299.7
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      402.48,
+      199.26,
+      604.08,
+      309.42
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      508.32,
+      239.76,
+      688.32,
+      336.42
+     ]
+    }
+   ]
+  },
+  {
+   "page": 14,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      354.24,
+      154.98,
+      437.04,
+      206.28
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      15.12,
+      386.64,
+      100.08,
+      463.32
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      112.32,
+      397.98,
+      174.96,
+      456.84
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      189.36,
+      389.34,
+      326.16,
+      508.68
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      372.24,
+      397.98,
+      427.68,
+      454.68
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      472.32,
+      397.98,
+      534.96,
+      454.68
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      541.44,
+      389.34,
+      717.12,
+      515.16
+     ]
+    }
+   ]
+  },
+  {
+   "page": 15,
+   "regions": []
+  },
+  {
+   "page": 16,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      154.08,
+      380.7,
+      250.56,
+      412.02
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      84.96,
+      426.06,
+      159.12,
+      503.28
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      237.6,
+      411.48,
+      715.68,
+      441.72
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      305.28,
+      443.34,
+      388.08,
+      511.92
+     ]
+    }
+   ]
+  },
+  {
+   "page": 17,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      428.4,
+      149.58,
+      574.56,
+      238.14
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      431.28,
+      194.4,
+      586.8,
+      298.08
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      438.48,
+      279.72,
+      583.2,
+      360.72
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      438.48,
+      279.72,
+      678.24,
+      406.62
+     ]
+    }
+   ]
+  },
+  {
+   "page": 18,
+   "regions": []
+  },
+  {
+   "page": 19,
+   "regions": []
+  },
+  {
+   "page": 20,
+   "regions": []
+  },
+  {
+   "page": 21,
+   "regions": []
+  }
+ ],
+ "usage": {
+  "requests": 21,
+  "input_tokens": 29643,
+  "output_tokens": 1153
+ }
+}

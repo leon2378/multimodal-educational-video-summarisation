@@ -1,0 +1,299 @@
+{
+ "pdf": "MIT6_0001F16_Lec1.pdf",
+ "pdf_sha256": "26d1bd5f1c42489dc0ffe8b3610bc245f1278d7035f368013e5a58c7cd8a890c",
+ "model": "google:gemini-3.5-flash-lite",
+ "prompt": "page-regions.v1@0590337392ce",
+ "created_at": "2026-09-30T09:27:34.619110Z",
+ "pages": [
+  {
+   "page": 1,
+   "regions": []
+  },
+  {
+   "page": 2,
+   "regions": []
+  },
+  {
+   "page": 3,
+   "regions": []
+  },
+  {
+   "page": 4,
+   "regions": []
+  },
+  {
+   "page": 5,
+   "regions": []
+  },
+  {
+   "page": 6,
+   "regions": []
+  },
+  {
+   "page": 7,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      0.0,
+      0.0,
+      720.0,
+      497.88
+     ]
+    }
+   ]
+  },
+  {
+   "page": 8,
+   "regions": []
+  },
+  {
+   "page": 9,
+   "regions": []
+  },
+  {
+   "page": 10,
+   "regions": []
+  },
+  {
+   "page": 11,
+   "regions": [
+    {
+     "label": "table",
+     "box": [
+      120.96,
+      377.46,
+      599.04,
+      493.56
+     ]
+    }
+   ]
+  },
+  {
+   "page": 12,
+   "regions": []
+  },
+  {
+   "page": 13,
+   "regions": []
+  },
+  {
+   "page": 14,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      63.36,
+      146.88,
+      651.6,
+      509.22
+     ]
+    }
+   ]
+  },
+  {
+   "page": 15,
+   "regions": []
+  },
+  {
+   "page": 16,
+   "regions": []
+  },
+  {
+   "page": 17,
+   "regions": []
+  },
+  {
+   "page": 18,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      0.0,
+      239.22,
+      481.68,
+      449.28
+     ]
+    },
+    {
+     "label": "figure",
+     "box": [
+      491.76,
+      239.22,
+      714.24,
+      448.74
+     ]
+    }
+   ]
+  },
+  {
+   "page": 19,
+   "regions": []
+  },
+  {
+   "page": 20,
+   "regions": []
+  },
+  {
+   "page": 21,
+   "regions": []
+  },
+  {
+   "page": 22,
+   "regions": []
+  },
+  {
+   "page": 23,
+   "regions": []
+  },
+  {
+   "page": 24,
+   "regions": []
+  },
+  {
+   "page": 25,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      329.04,
+      359.1,
+      473.76,
+      440.64
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      329.76,
+      427.68,
+      455.76,
+      497.88
+     ]
+    }
+   ]
+  },
+  {
+   "page": 26,
+   "regions": []
+  },
+  {
+   "page": 27,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      264.24,
+      183.06,
+      426.96,
+      303.48
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      372.24,
+      277.02,
+      556.56,
+      420.12
+     ]
+    }
+   ]
+  },
+  {
+   "page": 28,
+   "regions": []
+  },
+  {
+   "page": 29,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      303.84,
+      151.2,
+      704.16,
+      220.32
+     ]
+    }
+   ]
+  },
+  {
+   "page": 30,
+   "regions": []
+  },
+  {
+   "page": 31,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      74.16,
+      207.9,
+      131.76,
+      246.24
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      264.24,
+      206.28,
+      305.28,
+      234.36
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      0.0,
+      249.48,
+      269.28,
+      295.92
+     ]
+    }
+   ]
+  },
+  {
+   "page": 32,
+   "regions": []
+  },
+  {
+   "page": 33,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      167.76,
+      279.18,
+      555.12,
+      490.32
+     ]
+    }
+   ]
+  },
+  {
+   "page": 34,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      408.24,
+      306.72,
+      720.0,
+      513.54
+     ]
+    }
+   ]
+  },
+  {
+   "page": 35,
+   "regions": []
+  }
+ ],
+ "usage": {
+  "requests": 35,
+  "input_tokens": 49411,
+  "output_tokens": 882
+ }
+}

@@ -1,0 +1,175 @@
+{
+ "pdf": "MIT6_0001F16_Lec3.pdf",
+ "pdf_sha256": "fa3357521ac4e1a07091dbec1c0e920252a1dfc6b3315a3924eb734c79cfcf03",
+ "model": "google:gemini-3.5-flash-lite",
+ "prompt": "page-regions.v1@0590337392ce",
+ "created_at": "2026-09-30T09:29:48.581850Z",
+ "pages": [
+  {
+   "page": 1,
+   "regions": []
+  },
+  {
+   "page": 2,
+   "regions": []
+  },
+  {
+   "page": 3,
+   "regions": []
+  },
+  {
+   "page": 4,
+   "regions": []
+  },
+  {
+   "page": 5,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      94.32,
+      239.76,
+      451.44,
+      259.74
+     ]
+    },
+    {
+     "label": "annotation",
+     "box": [
+      94.32,
+      264.6,
+      486.72,
+      284.04
+     ]
+    }
+   ]
+  },
+  {
+   "page": 6,
+   "regions": [
+    {
+     "label": "annotation",
+     "box": [
+      545.04,
+      227.34,
+      699.84,
+      345.06
+     ]
+    }
+   ]
+  },
+  {
+   "page": 7,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      89.28,
+      331.56,
+      404.64,
+      495.18
+     ]
+    }
+   ]
+  },
+  {
+   "page": 8,
+   "regions": []
+  },
+  {
+   "page": 9,
+   "regions": []
+  },
+  {
+   "page": 10,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      264.24,
+      239.76,
+      426.96,
+      321.84
+     ]
+    },
+    {
+     "label": "figure",
+     "box": [
+      66.24,
+      397.44,
+      98.64,
+      437.4
+     ]
+    },
+    {
+     "label": "figure",
+     "box": [
+      0.0,
+      254.88,
+      703.44,
+      323.46
+     ]
+    }
+   ]
+  },
+  {
+   "page": 11,
+   "regions": []
+  },
+  {
+   "page": 12,
+   "regions": []
+  },
+  {
+   "page": 13,
+   "regions": []
+  },
+  {
+   "page": 14,
+   "regions": []
+  },
+  {
+   "page": 15,
+   "regions": []
+  },
+  {
+   "page": 16,
+   "regions": []
+  },
+  {
+   "page": 17,
+   "regions": [
+    {
+     "label": "figure",
+     "box": [
+      27.36,
+      270.0,
+      702.72,
+      515.16
+     ]
+    }
+   ]
+  },
+  {
+   "page": 18,
+   "regions": []
+  },
+  {
+   "page": 19,
+   "regions": []
+  },
+  {
+   "page": 20,
+   "regions": []
+  },
+  {
+   "page": 21,
+   "regions": []
+  }
+ ],
+ "usage": {
+  "requests": 21,
+  "input_tokens": 29643,
+  "output_tokens": 486
+ }
+}

@@ -354,19 +354,24 @@ video frame: the slide, people, figures and annotations. It lives in `ml/detecto
 
 - **Alignment**: each slide found in the video is matched to the PDF page it shares most words
   with; OCR lines that read like the page's lines give point pairs, and one affine transform per
-  lecture fits them (median error 1.4 to 1.7 pixels on Lectures 10 to 12). It squeezes the page
-  horizontally (the video's pixels are 4:3) and crops its margins.
+  lecture fits them (median error 1.1 to 1.9 pixels across the twelve lectures). It squeezes
+  the page horizontally (the video's pixels are 4:3) and crops its margins. Screens of live
+  coding also match a page by their words, but don't fit the transform, so where slides sit in
+  the frame (the area frames are compared over) comes from the slides that do: in Lectures 2, 3
+  and 8, screens of code outnumber the slides.
 - **Which frames**: a frame is a slide when it's bright and correlates with a page (blurred,
   over the slide area) at 0.6 or more, or at 0.35 or more and the page is the one OCR found for
   that stretch of video (a slide mid-build). A dark frame with no slide title band is a camera
   shot. The rest is left out rather than guessed: a slide playing a video, a code demo. Each
   page gives at most 6 frames, 10 s apart; camera shots one every 20 s.
 - **Labels**: the slide box is the slide area; a page's region goes onto a frame only where the
-  frame shows at least half its ink (slides build up); tables count as figures (2 in 117
+  frame shows at least half its ink (slides build up); tables count as figures (10 in 396
   pages). People come from RF-DETR's COCO weights, on every frame kept.
-- **Splits**: Lectures 10 and 11 train, the last fifth of each validates, Lecture 12 tests.
+- **Splits**: Lectures 1 to 5 and 7 to 11 train, the last fifth of each validates, and
+  Lectures 6 and 12 test, one from each half of the course.
 - **Scoring**: RF-DETR's test pass gives AP per class; `lecture-detector evaluate` asks the
-  routing question (figure or annotation, or not) of the detector and of the 5a rule.
+  routing question (figure or annotation, or not) of the detector and of the 5a rule, each test
+  lecture being the rule's deck.
 
 ### Speed (Phase 5c)
 
@@ -441,15 +446,17 @@ measures. The tables are in the README; what they decided is
   get wrong vectors. The GPU server got 60 such bursts right, and every vector in the index
   was checked. Worth reporting to TEI.
 
-## Next: shipping (Phase 6), and the detector once more lectures are labelled
+## Next: shipping (Phase 6), and a detector that routes as well as the rule
 
 Phase 6 puts it online: auth and quotas, then deployment (Terraform, Modal for the GPU work)
 and CD.
 
-The detector finds slides (AP 1.00) and people (0.99) on the held-out lecture, and a slide
-playing a video, which the brightness test misses; but it routes slides worse than the 5a rule
-(F1 0.59 against 0.78), because figures don't generalise from two lectures. More labelled
-lectures come first; the labelling needs only each lecture's video and slide PDF. Once it
+The detector finds slides (AP 1.00) and people (0.99) on the held-out lectures, and a slide
+playing a video, which the brightness test misses; but trained on ten lectures it still routes
+slides worse than the 5a rule (F1 0.79 against 0.85, up from 0.59 on two): it misses figures and
+annotations, and the LLM's page boxes it learns from aren't consistent. What could close the
+gap: hand-checked labels for the test lectures (so the scores measure the detector, not the
+labeller), RF-DETR Small (ADR 0007's next step), and lectures from other courses. Once it
 routes as well as the rule, the pipeline can run it instead of both the brightness test and
 the ink measure, as a TensorRT fp16 engine on the GPU worker: about 12 s for a 51-minute
 lecture's frames. Lectures filmed with a projector in the room would need a transform per

@@ -3,6 +3,78 @@
   "licence": "CC BY-NC-SA 4.0. Eric Grimson, John Guttag and Ana Bell. 6.0001 Introduction to Computer Science and Programming in Python, Fall 2016. MIT OpenCourseWare.",
   "lectures": [
     {
+      "name": "mit-6.0001-lecture-01",
+      "video": "MIT6_0001F16_Lecture_01_300k.mp4",
+      "video_sha256": "06236664b370ca2309aa5e74918a36a39512fad690ad9938d50b776217c02dcf",
+      "pdf": "MIT6_0001F16_Lec1.pdf",
+      "pdf_sha256": "26d1bd5f1c42489dc0ffe8b3610bc245f1278d7035f368013e5a58c7cd8a890c",
+      "split": "train"
+    },
+    {
+      "name": "mit-6.0001-lecture-02",
+      "video": "MIT6_0001F16_Lecture_02_300k.mp4",
+      "video_sha256": "84460ee538b02e950c343b28518afa2b9e48f7a29e6cc82d4d9ad33aa7583dcb",
+      "pdf": "MIT6_0001F16_Lec2.pdf",
+      "pdf_sha256": "c65fb02d7a68f9bdbd9f715ff9f1a8eec61235510bb931ca5c2f039b2ea3adf9",
+      "split": "train"
+    },
+    {
+      "name": "mit-6.0001-lecture-03",
+      "video": "MIT6_0001F16_Lecture_03_300k.mp4",
+      "video_sha256": "0071878688a02e2e155374a413be81ce70fd2e3d1732d9199c1d218c25149ae5",
+      "pdf": "MIT6_0001F16_Lec3.pdf",
+      "pdf_sha256": "fa3357521ac4e1a07091dbec1c0e920252a1dfc6b3315a3924eb734c79cfcf03",
+      "split": "train"
+    },
+    {
+      "name": "mit-6.0001-lecture-04",
+      "video": "MIT6_0001F16_Lecture_04_300k.mp4",
+      "video_sha256": "4e89688d2f1cbefb31f79430abb978d039760f5e6944b64405fb3a137ce5890a",
+      "pdf": "MIT6_0001F16_Lec4.pdf",
+      "pdf_sha256": "eac916af74cd039a9f1a85a611e1ef5776a14e1ae0f4a0e6b3fccbcb2e782530",
+      "split": "train"
+    },
+    {
+      "name": "mit-6.0001-lecture-05",
+      "video": "MIT6_0001F16_Lecture_05_300k.mp4",
+      "video_sha256": "baa74671b7e4733439100c084c390b92b3cd213e0fbbbabaa403629787af088b",
+      "pdf": "MIT6_0001F16_Lec5.pdf",
+      "pdf_sha256": "a5f0a9da11b4209292e592e4fbfd152e932385847aa26c99c2cacd9eee143f54",
+      "split": "train"
+    },
+    {
+      "name": "mit-6.0001-lecture-06",
+      "video": "MIT6_0001F16_Lecture_06_300k.mp4",
+      "video_sha256": "1ecea97ea15350faae11a6def9d54e8496832c3529b14d7347f7a1c57f7c969b",
+      "pdf": "MIT6_0001F16_Lec6.pdf",
+      "pdf_sha256": "b1611c2187fbec85db4c6d6e3a5229c6470ce25567049a436b4fe802dac286fd",
+      "split": "test"
+    },
+    {
+      "name": "mit-6.0001-lecture-07",
+      "video": "MIT6_0001F16_Lecture_07_300k.mp4",
+      "video_sha256": "6f4c4945632e2a599a9df1b1c66d22f94fa83e4f5f1eb8fea4fdce27fddd29e7",
+      "pdf": "MIT6_0001F16_Lec7.pdf",
+      "pdf_sha256": "1ca469bae444338b64480f79480cc903fe4e95ea383d827aae4ddbdfe95703c1",
+      "split": "train"
+    },
+    {
+      "name": "mit-6.0001-lecture-08",
+      "video": "MIT6_0001F16_Lecture_08_300k.mp4",
+      "video_sha256": "bcc621cb9485542904be15bbbf225658ffb445dec009c7a12b8183ba0cbcd32d",
+      "pdf": "MIT6_0001F16_Lec8.pdf",
+      "pdf_sha256": "a60be130dd79443f929ecad6d9929a96a106529ee4435a93e13468fd6b9f9fda",
+      "split": "train"
+    },
+    {
+      "name": "mit-6.0001-lecture-09",
+      "video": "MIT6_0001F16_Lecture_09_300k.mp4",
+      "video_sha256": "7e06dc2bc33df9ad2ec2de79f1f522ba78a345850a40d01290559c201e5d9810",
+      "pdf": "MIT6_0001F16_Lec9.pdf",
+      "pdf_sha256": "e6bcf03609b47b2215453f8a5efc5ea8f5e0309faf3092e1e6c542081acf1a2a",
+      "split": "train"
+    },
+    {
       "name": "mit-6.0001-lecture-10",
       "video": "MIT6_0001F16_Lecture_10_300k.mp4",
       "video_sha256": "55b4834e0eb6c48158e1ef14bbb4ff07a994e3fcad8d38aa9e6f124143721919",

@@ -134,6 +134,7 @@ def _dataset(
             alignment = lecture.alignment
             print(
                 f"{entry.name}: {len(alignment.pages)} slides matched to pages, "
+                f"{len(alignment.fitted)} fit the transform, "
                 f"{alignment.inliers} of {alignment.points} points fit, median error "
                 f"{alignment.median_error_px:.2f} px"
             )
