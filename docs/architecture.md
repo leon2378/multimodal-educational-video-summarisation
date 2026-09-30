@@ -3,7 +3,7 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 5 under way (OCR and routing done, a frame detector trained)
+## Current state: Phase 5 done but for the detector in the pipeline
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
@@ -21,7 +21,7 @@ workers report traces, metrics and logs over OpenTelemetry.
    └── GET  .../notes|transcript|slides     │         ├─ cpu queue ─► CPU worker ─┤ (media, slides,
                                             ▼         │                │           timeline, save)
                                          Postgres ◄───┼────────────────┤
-                                                      │                └─► TEI (embeddings) ─► Qdrant
+                                                      │                └─► TEI (embeddings, GPU) ─► Qdrant
                                                       ├─ llm queue ─► CPU worker (Gemini calls)
                                                       └─ gpu queue ─► GPU worker (speech, 1 at a time)
 
@@ -104,8 +104,9 @@ Code in `packages/rag`; the choice of Qdrant is [ADR 0005](adr/0005-qdrant-for-h
 1. **Chunks**: one per timeline segment (30 to 90 s of speech on one slide), the slide's title and
    text followed by the transcript. Lecture 10 gives 47.
 2. **Embed** (a cached stage on the cpu queue, in parallel with the notes): a dense vector from
-   Qwen3-Embedding-0.6B served by Text Embeddings Inference (TEI), and BM25 term weights from
-   FastEmbed. Queries get an instruction prefix; passages don't.
+   Qwen3-Embedding-0.6B served by Text Embeddings Inference (TEI), on the GPU when there is one
+   (Phase 5c), and BM25 term weights from FastEmbed. Queries get an instruction prefix; passages
+   don't.
 3. **Index** (cpu queue, before the lecture is marked ready): one Qdrant point per chunk, with the
    lecture id, times, slide, chapter and text as payload. Point ids come from the lecture and
    segment ids; new points are written before stale ones are deleted.
@@ -113,7 +114,8 @@ Code in `packages/rag`; the choice of Qdrant is [ADR 0005](adr/0005-qdrant-for-h
    each, fused by reciprocal rank with k = 60), or `rerank` (hybrid, then bge-reranker-v2-m3 on
    TEI reorders the 30). Ties are ordered by position in the lecture, so results repeat.
    `SEARCH_MODE` sets the default: `rerank` in Compose, where the reranker runs on the GPU
-   (a search takes about 0.8 s), and `hybrid` without a GPU, where reranking takes over a minute.
+   (a search takes about 0.4 s with the embedding model there too, 0.8 s with it on the CPU),
+   and `hybrid` without a GPU, where reranking takes over a minute.
 
 `retrieval-eval` (`make eval-retrieval`) asks the golden questions in
 `evals/datasets/golden-qa/` through the API and scores each mode: Recall@5, MRR@10 and nDCG@10.
@@ -339,6 +341,42 @@ video frame: the slide, people, figures and annotations. It lives in `ml/detecto
 - **Scoring**: RF-DETR's test pass gives AP per class; `lecture-detector evaluate` asks the
   routing question (figure or annotation, or not) of the detector and of the 5a rule.
 
+### Speed (Phase 5c)
+
+`ml/bench` (`lecture-bench`, `make bench`) measures the three models the stack runs itself,
+every way they could run, on one laptop, and scores each variant with the eval suites' own
+measures. The tables are in the README; what they decided is
+[ADR 0008](adr/0008-where-the-models-run.md).
+
+- **Embeddings** (`lecture-bench embeddings`): Lecture 10's chunks as the index holds them,
+  embedded by two TEI servers the command starts and stops, one on the CPU and one on the GPU,
+  each as Compose runs it (the same model and revision; the GPU one in the reranker's image),
+  whichever the stack itself is running. Tokens are counted by TEI's tokenizer, questions are
+  embedded one at a time, search is scored as the retrieval eval scores it (dense only), and
+  the two sets of vectors are compared. VRAM is sampled through NVML every 50 ms.
+- **Speech recognition** (`lecture-bench asr`): Lecture 10's audio, extracted as the pipeline
+  extracts it, transcribed inside the GPU worker's image (which has CUDA and faster-whisper;
+  the script is mounted into a `docker compose run`) by the pipeline's own transcriber, once
+  per compute type. A second of silence loads the model first, so the time is recognition
+  alone; the card's memory is sampled while it runs, and the transcript is scored like the ASR
+  eval.
+- **Frame detector** (`lecture-bench detector`): RF-DETR exports the trained model to ONNX;
+  ONNX Runtime's tools make an fp16 version and two int8 ones: dynamic (weights stored in
+  int8, activations quantized as they arrive) and calibrated (fixed scales from 65 training
+  frames, written into the model as QuantizeLinear/DequantizeLinear pairs around the
+  convolutions and matrix multiplies). TensorRT 11 builds engines from the fp32, fp16 and
+  calibrated files, and they're kept beside them: it has no fp16 or int8 switches, and takes
+  each layer's precision from the model. Every variant shares RF-DETR's preprocessing and
+  decoding, so only the network differs; it's timed alone, a frame at a time, over the test
+  lecture's 177 frames after 10 to warm up, and scored by COCO mAP against the automatic labels.
+- **What changed**: the embedding model runs on the GPU when there is one:
+  `infra/compose.gpu.yaml` swaps its server for TEI's GPU image, and the Makefile adds the file
+  when `nvidia-smi` finds a GPU. Its vectors are the CPU's (mean cosine 1.0000), so the embed
+  stage's cache key stays as it was and moving between the two re-embeds nothing. With speech
+  recognition running beside the reranker and the embedding model, the card peaks at 5.1 of its
+  6 GB. Speech recognition stays at int8_float16, and the detector, once in the pipeline, would
+  run as a TensorRT fp16 engine.
+
 ### Known limitations
 
 - Slide detection assumes light slides on a dark hall, as in MIT OCW recordings. Two slides with the
@@ -365,21 +403,27 @@ video frame: the slide, people, figures and annotations. It lives in `ml/detecto
   keeping a segment from each lecture that matches well, would help.
 - Lectures processed before search existed (Phase 3a) aren't indexed. Processing one again
   indexes it, and only the embedding and indexing steps run: the rest is cached.
-- Embedding runs on the CPU, at about 95 tokens a second on a Ryzen 7 5800H: 5 minutes for a
-  51-minute lecture, the slowest stage. A lecture is ready only once it's indexed, so a fresh
-  run takes about 6 minutes rather than 2. The GPU could do it in seconds, next to speech
-  recognition if VRAM allows.
+- Without a GPU, embedding runs on the CPU, at about 75 tokens a second on a Ryzen 7 5800H:
+  3.5 minutes for a 51-minute lecture on an idle machine, the slowest stage, and a lecture is
+  ready only once it's indexed. The GPU takes 1.4 s.
+- TEI's CPU server (1.9.4) sometimes returns the wrong vector for a text sent while other
+  requests are in flight: in 3 of 12 bursts of 15 overlapping requests, texts came back with
+  vectors at cosine 0.13 to 0.16 to their own (short questions, where it was recorded), and one
+  input per forward pass (`--max-batch-requests 1`) didn't stop it. On the CPU, then, a question
+  asked while a lecture is being embedded, or a lecture embedded while questions are asked, can
+  get wrong vectors. The GPU server got 60 such bursts right, and every vector in the index
+  was checked. Worth reporting to TEI.
 
-## Next: more lectures, then the detector in the pipeline
+## Next: shipping (Phase 6), and the detector once more lectures are labelled
+
+Phase 6 puts it online: auth and quotas, then deployment (Terraform, Modal for the GPU work)
+and CD. The eval gate in CI (4c) waits for more lectures and somewhere to keep them.
 
 The detector finds slides (AP 1.00) and people (0.99) on the held-out lecture, and a slide
 playing a video, which the brightness test misses; but it routes slides worse than the 5a rule
 (F1 0.59 against 0.78), because figures don't generalise from two lectures. More labelled
 lectures come first; the labelling needs only each lecture's video and slide PDF. Once it
-routes as well as the rule, the pipeline can run it (exported to ONNX) instead of both the
-brightness test and the ink measure. Lectures filmed with a projector in the room would need a
-transform per frame (a homography), and chalkboard lectures a board class.
-
-Then the speed benchmarks (5c): ONNX, TensorRT and int8 for the detector, speech recognition
-and the embedding model. The eval gate in CI (4c) waits for more lectures and somewhere to keep
-them.
+routes as well as the rule, the pipeline can run it instead of both the brightness test and
+the ink measure, as a TensorRT fp16 engine on the GPU worker: about 12 s for a 51-minute
+lecture's frames. Lectures filmed with a projector in the room would need a transform per
+frame (a homography), and chalkboard lectures a board class.

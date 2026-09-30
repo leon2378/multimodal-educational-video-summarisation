@@ -1,0 +1,17 @@
+# With an NVIDIA GPU, the embedding model runs on it too: the Makefile adds this file when
+# nvidia-smi finds a GPU (`make up GPU=` leaves it out). Same model and revision as the CPU service
+# in compose.yaml and the same vectors, 150 times faster: Lecture 10 embeds in 1.4 s instead of
+# 218 s, and a question in 16 ms instead of 437 (lecture-bench embeddings). TEI's CPU server also
+# sometimes returns wrong vectors when requests overlap; this one didn't. It holds 1.5 GB of VRAM:
+# with the reranker and speech recognition running too, a 6 GB card peaks at 5.1 GB. Like the
+# reranker's, this image is for RTX 30-series cards (compute capability 8.6). See ADR 0008.
+services:
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.9.4
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

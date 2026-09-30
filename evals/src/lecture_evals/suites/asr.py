@@ -8,6 +8,7 @@ speech recognition rather than reading it from the cache.
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,40 @@ class AsrReport(BaseModel):
     real_time_factor: float | None
 
 
+class TranscriptScore(BaseModel):
+    reference_words: int
+    hypothesis_words: int
+    wer: float
+    substitutions: int
+    deletions: int
+    insertions: int
+    term_recall: float
+    terms: list[TermCount]
+
+
+def score(text: str, cues: list[Cue], terms: Sequence[str]) -> TranscriptScore:
+    """A transcript's word error rate and term recall against the captions."""
+    hypothesis = normalise(text)
+    reference = [word for cue in cues for word in normalise(cue.text)]
+    measures = jiwer.process_words(" ".join(reference), " ".join(hypothesis))
+    counts = [
+        TermCount(term=term, reference=count(term, reference), hypothesis=count(term, hypothesis))
+        for term in terms
+    ]
+    said = sum(t.reference for t in counts)
+    found = sum(min(t.reference, t.hypothesis) for t in counts)
+    return TranscriptScore(
+        reference_words=len(reference),
+        hypothesis_words=len(hypothesis),
+        wer=measures.wer,
+        substitutions=measures.substitutions,
+        deletions=measures.deletions,
+        insertions=measures.insertions,
+        term_recall=found / said if said else 1.0,
+        terms=counts,
+    )
+
+
 def evaluate(
     client: httpx.Client,
     captions: CaptionsSet,
@@ -83,17 +118,7 @@ def evaluate(
     started_at = datetime.now(UTC)
     lecture_id = lecture_id or find_lecture(client, captions.lecture)
     lines: list[dict[str, Any]] = get(client, f"/v1/lectures/{lecture_id}/transcript")
-    hypothesis = normalise(" ".join(line["text"] for line in lines))
-    reference = [word for cue in cues for word in normalise(cue.text)]
-    measures = jiwer.process_words(" ".join(reference), " ".join(hypothesis))
-
-    terms = [
-        TermCount(term=term, reference=count(term, reference), hypothesis=count(term, hypothesis))
-        for term in captions.terms
-    ]
-    said = sum(t.reference for t in terms)
-    found = sum(min(t.reference, t.hypothesis) for t in terms)
-
+    scored = score(" ".join(line["text"] for line in lines), cues, captions.terms)
     asr_seconds = _recognition_seconds(get(client, f"/v1/lectures/{lecture_id}/runs"))
     audio_seconds = get(client, f"/v1/lectures/{lecture_id}")["duration_s"]
     return AsrReport(
@@ -101,14 +126,7 @@ def evaluate(
         api_url=str(client.base_url),
         lecture_id=lecture_id,
         started_at=started_at,
-        reference_words=len(reference),
-        hypothesis_words=len(hypothesis),
-        wer=measures.wer,
-        substitutions=measures.substitutions,
-        deletions=measures.deletions,
-        insertions=measures.insertions,
-        term_recall=found / said if said else 1.0,
-        terms=terms,
+        **scored.model_dump(),
         asr_seconds=asr_seconds,
         audio_seconds=audio_seconds,
         real_time_factor=asr_seconds / audio_seconds if asr_seconds and audio_seconds else None,

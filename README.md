@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 to 3 of 6 done, Phase 4 done but for the CI gate, Phase 5 under way (OCR routing done, a frame detector trained): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 3 of 6 done, Phase 4 done but for the CI gate, Phase 5 done but for the detector in the pipeline (OCR routing, a trained frame detector, speed benchmarks): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -39,6 +39,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - A frame detector ([below](#frame-detector)): RF-DETR fine-tuned to find slides, people,
   figures and annotations in video frames, on frames labelled automatically from the lectures'
   slide PDFs. Trained and scored; not in the pipeline yet.
+- Speed benchmarks ([below](#speed)): `lecture-bench` runs speech recognition, the embedding
+  model and the frame detector each way they could run (CPU or GPU; fp32, fp16 or int8;
+  PyTorch, ONNX Runtime or TensorRT) and scores every variant, so lost accuracy shows. The
+  embedding model is 150 times faster on the GPU, so Compose now runs it there when there is one.
 - Observability ([below](#observability)): OpenTelemetry traces, metrics and logs from the API
   and workers into Grafana. One trace follows a request through the workflow's activities to
   each LLM call. A dashboard tracks the blueprint's targets, and every answer and pipeline run
@@ -354,7 +358,8 @@ reused for 48 hours, so repeat runs on the same video skip the upload.
 
 ## Results so far
 
-One lecture so far: MIT 6.0001 Lecture 10 (51 min).
+Mostly one lecture so far: MIT 6.0001 Lecture 10 (51 min), the one with eval datasets.
+Lectures 11 and 12 are processed too, and the frame detector uses all three.
 
 ### Study notes
 
@@ -404,7 +409,9 @@ The reranker is the only step that clearly helps: it puts the answer first for 2
 against 24 for hybrid. On the CPU it took 77 seconds a query, which is why it runs on the GPU.
 With a single lecture there's little for hybrid to beat dense on (one question is 0.03 of
 Recall@5); more lectures, and course-wide search, should separate them. Embedding a lecture
-takes 5 minutes on the CPU, so a fresh run now takes about 6 minutes, up from 2. More in
+took 5 minutes on the CPU, so a fresh run took about 6 minutes, up from 2. Since Phase 5c the
+embedding model runs on the GPU when there is one: Lecture 10 embeds in 1.4 s, and each search
+that embeds the question is about 0.4 s faster than above ([speed](#speed)). More in
 [ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md).
 
 ### Slide reading
@@ -477,11 +484,91 @@ counts as a figure). Training at 512 px instead of 384 didn't help (figure AP 0.
 So the 5a rule keeps routing slides, and the detector stays out of the pipeline until more
 lectures are labelled. Every score here is against labels a model made, not checked by hand.
 
+### Speed
+
+`lecture-bench` (`make bench`) runs the three models the stack hosts itself every way they
+could run, on the same laptop (RTX 3060 Laptop GPU with 6 GB, Ryzen 7 5800H), and scores every
+variant, so one that gets faster by getting worse shows it. What the numbers decided is
+[ADR 0008](docs/adr/0008-where-the-models-run.md); the raw results are saved in `data/bench/`.
+
+**The embedding model** (Qwen3-Embedding-0.6B on Text Embeddings Inference): Lecture 10's 47
+chunks (16,439 tokens), then each golden question on its own, searched by the dense vectors
+alone.
+
+| | Lecture 10 embedded | Tokens/s | A question, median | Recall@5 / MRR@10 / nDCG@10 | Cosine to the CPU's vectors | VRAM |
+|---|---|---|---|---|---|---|
+| CPU, fp32 (before) | 218 s | 75 | 437 ms | 0.97 / 0.87 / 0.85 | – | – |
+| GPU, fp16 (now) | 1.4 s | 11,560 | 16 ms | 0.97 / 0.87 / 0.85 | 1.0000 | 1.5 GB |
+
+The same vectors, 150 times faster, so Compose now runs the embedding model on the GPU when
+there is one. It was the pipeline's slowest stage and the first step of every answer: through
+the API, a reranked search now takes 0.43 s instead of 0.86, and a dense or hybrid one 30 to
+40 ms instead of 0.43 s.
+
+The benchmark also turned up a bug in TEI's CPU server: a text sent while other requests are in
+flight sometimes comes back with the wrong vector. The benchmark's first run found the CPU's
+chunk vectors at a mean cosine of 0.96 to the GPU's; rerun on an idle stack, 1.0000. Bursts of
+15 overlapping requests (24 texts) went wrong in 3 of 12 on the CPU, with vectors at cosine
+0.13 to 0.16 to the right ones, and in none of 60 on the GPU. Every vector in the index was
+checked and is right, but on the CPU a question asked while a lecture is being embedded, or a
+lecture embedded while questions are asked, can get wrong vectors.
+
+**Speech recognition** (faster-whisper large-v3-turbo): Lecture 10 at each of CTranslate2's
+compute types, scored against the human captions as the ASR eval scores it. The time is
+recognition alone, after the model has loaded.
+
+| Compute type | Load | Lecture 10 (51 min) | Real-time factor | VRAM added | WER | Technical terms |
+|---|---|---|---|---|---|---|
+| GPU, float16 | 14.3 s | 44 s | 0.014 | 3.3 GB | 2.8% | 99.6% |
+| GPU, int8_float16 (the pipeline's) | 11.0 s | 40 s | 0.013 | 2.2 GB | 3.0% | 99.1% |
+| GPU, int8 | 11.1 s | 42 s | 0.014 | 2.2 GB | 3.0% | 99.1% |
+| CPU, int8 (4 threads) | 17.5 s | 938 s | 0.30 | – | 2.9% | 99.1% |
+
+int8 weights take a third less VRAM than float16 and are no slower, for 0.2 points of WER. With
+the reranker and the embedding model beside it the card peaks at 5.1 of its 6 GB, so float16,
+1.1 GB more, wouldn't fit. Without a GPU a 51-minute lecture takes 16 minutes. In the pipeline
+the stage takes 65 to 75 s: it also loads the model, and slide detection and OCR run beside it.
+
+**The frame detector** (RF-DETR Nano at 384 px, [above](#frame-detector)): each of Lecture 12's
+177 test frames through the network on its own, timed without the preprocessing and decoding
+every variant shares, and scored against the frames' automatic labels.
+
+| Runtime | Device | ms a frame, median | mAP50:95 | mAP50 | slide | person | figure | annotation |
+|---|---|---|---|---|---|---|---|---|
+| PyTorch, fp32 | CPU | 156.6 | 0.649 | 0.719 | 1.00 | 0.99 | 0.14 | 0.47 |
+| ONNX Runtime, fp32 | CPU | 122.4 | 0.649 | 0.719 | 1.00 | 0.99 | 0.14 | 0.47 |
+| ONNX Runtime, int8 dynamic | CPU | **68.9** | 0.645 | 0.720 | 0.99 | 0.99 | 0.14 | 0.46 |
+| ONNX Runtime, int8 calibrated | CPU | 123.5 | 0.553 | 0.646 | 0.92 | 0.93 | 0.06 | 0.31 |
+| PyTorch, fp32 | GPU | 17.6 | 0.649 | 0.719 | 1.00 | 0.99 | 0.14 | 0.47 |
+| PyTorch, fp16 | GPU | 22.3 | 0.650 | 0.719 | 1.00 | 0.99 | 0.14 | 0.47 |
+| TensorRT, fp32 | GPU | 6.9 | 0.649 | 0.720 | 1.00 | 0.99 | 0.14 | 0.47 |
+| TensorRT, fp16 | GPU | **3.8** | 0.648 | 0.720 | 1.00 | 0.99 | 0.14 | 0.46 |
+| TensorRT, int8 calibrated | GPU | 7.5 | 0.569 | 0.644 | 0.94 | 0.95 | 0.11 | 0.28 |
+
+At a frame a second, a 51-minute lecture is about 3,060 frames: 12 s of network time in
+TensorRT fp16, 54 s in PyTorch on the GPU, 3.5 minutes on the CPU in int8 and 6 in fp32. So
+when the detector joins the pipeline it runs as a TensorRT fp16 engine, 4.6 times faster than
+PyTorch at the same accuracy.
+
+- **fp16 doesn't help PyTorch.** One frame at a time, the Nano model is too small to keep the
+  GPU busy: PyTorch launches its operations one by one, and the launching takes longer than
+  the arithmetic. TensorRT compiles the network into fewer, fused kernels.
+- **int8 pays off only on the CPU, and only dynamic.** Dynamic int8 (weights stored in int8,
+  each activation quantized as it arrives) is 1.8 times faster than fp32 for 0.004 of mAP.
+  Calibrated int8 fixes each activation's scale in advance from training frames, which TensorRT
+  requires; it loses 0.08 to 0.10 of mAP in both runtimes, probably because the vision
+  transformer's activations have outliers one fixed scale per tensor can't cover, and in
+  TensorRT it's slower than fp32: only the convolutions and matrix multiplies are int8, and
+  converting in and out of them costs more than it saves. Making the rest of it fp16 as well,
+  tried separately, broke its accuracy (mAP 0.10).
+- The mAP here comes from the benchmark's own decoding, the same for every variant: 0.649 for
+  the trained model, against 0.66 from RF-DETR's test pass above.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `make up` / `make down` | Start or stop Postgres, SeaweedFS, Temporal, Qdrant and the embedding server (`make reset` also deletes their data) |
+| `make up` / `make down` | Start or stop Postgres, SeaweedFS, Temporal, Qdrant and the embedding server, on the GPU if `nvidia-smi` finds one (`make reset` also deletes their data) |
 | `make app` | Build and run the API, the web app and the CPU worker in Docker |
 | `make gpu-worker` | Build and run the GPU services in Docker: speech recognition and the reranker |
 | `make observability` | Start Grafana with traces, metrics and logs on http://localhost:3001 (set `OTEL_ENDPOINT` to send to it) |
@@ -493,6 +580,7 @@ lectures are labelled. Every score here is against labels a model made, not chec
 | `make eval-retrieval` | Score search only |
 | `make detector-data` | Label frames for the frame detector from the lectures' videos and slide PDFs (installs PyTorch, 2 GB, the first time) |
 | `make detector-train` | Fine-tune the frame detector on the GPU and score the held-out lecture |
+| `make bench` | Benchmark speech recognition, the embedding model and the frame detector, before and after (needs the stack with the GPU services, Lecture 10 processed and the detector trained; installs TensorRT, 2.3 GB, the first time) |
 | `make migrate` | Apply migrations |
 | `make revision m="add chapters"` | Generate a migration after changing `packages/core/src/lecture_core/models.py` |
 | `make test` / `make test-unit` | All tests / unit tests only |
@@ -512,11 +600,13 @@ packages/pipeline/         stages, stage cache, timeline, local runner, Temporal
 packages/rag/              chunks, encoders (TEI, BM25), Qdrant index, hybrid search
 evals/                     eval suites (lecture-eval), datasets, thresholds, Gemini baseline
 ml/detector/               frame detector: labels from slide PDFs, dataset, RF-DETR training
+ml/bench/                  speed benchmarks (lecture-bench): speech recognition, embeddings, the detector
 prompts/                   versioned prompts (pipeline, Q&A and baseline)
 data/                      lecture videos and run outputs (not in git)
 tests/unit/                fast tests, no Docker
 tests/integration/         real Postgres, SeaweedFS, Temporal and Qdrant via testcontainers
 infra/compose.yaml         local stack (`app` profile adds the API, web app and CPU worker)
+infra/compose.gpu.yaml     the embedding server on the GPU, added by the Makefile when there is one
 infra/grafana/             Grafana datasource and dashboard (JSON), loaded by `make observability`
 infra/docker/              Dockerfiles: API, worker (CPU and GPU variants)
 infra/seaweedfs/s3.json    dev-only S3 credentials
@@ -542,10 +632,13 @@ from the blueprint in these places:
 - **Temporal and Qdrant came into Compose when first used**, not in Phase 1: Temporal in Phase 2
   ([ADR 0002](docs/adr/0002-temporal-for-orchestration.md)), Qdrant in Phase 3
   ([ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md)).
-- **The reranker runs on the GPU locally**, not the CPU: on a laptop CPU it took 77 seconds to
-  rerank one query's passages. It needs 1.3 GB of VRAM beside speech recognition. The embedding
-  model stays on the CPU. Without a GPU, set `SEARCH_MODE=hybrid`
-  ([ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md)).
+- **The reranker and the embedding model run on the GPU locally**, not the CPU: on a laptop
+  CPU the reranker took 77 seconds to rerank one query's passages, embedding a lecture took
+  minutes (seconds on the GPU), and TEI's CPU server can return a wrong vector when requests
+  overlap. Together they need 2.8 GB of VRAM beside speech recognition. Without a GPU the
+  embedding model stays on the CPU; set `SEARCH_MODE=hybrid`
+  ([ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md),
+  [ADR 0008](docs/adr/0008-where-the-models-run.md)).
 - **Uploads are a single presigned PUT** (up to 5 GiB), not resumable multipart through Uppy.
   Worth adding when uploads get large or flaky.
 - **The player streams the uploaded MP4 directly** (a presigned URL with range requests) rather
@@ -559,8 +652,11 @@ from the blueprint in these places:
   ([architecture](docs/architecture.md#ocr-and-routing-phase-5a)). OCR uses the PP-OCRv6 models
   that come with RapidOCR rather than the PP-OCRv5 the blueprint names: newer, and nothing more
   to download.
-- **Eval runs are recorded in Postgres (`eval_runs`) and charted in Grafana**, not MLflow.
-  MLflow comes in with detector training in Phase 5.
+- **No MLflow.** Eval runs are recorded in Postgres (`eval_runs`) and charted in Grafana;
+  detector training runs and benchmark results are files under `data/` (RF-DETR's logs,
+  `data/bench/*.json`), and the numbers that matter are in this README. MLflow would come in
+  with more training runs than a handful, or a registry for the detector once it's in the
+  pipeline.
 - **Langfuse only receives LLM calls, and only when its keys are set.** Prompts are versioned in
   git and eval datasets live in `evals/`, so Langfuse isn't where those are kept. No Sentry yet:
   errors are logged to Loki with their trace ids
@@ -605,7 +701,9 @@ from the blueprint in these places:
         for slides, people, figures and annotations, on frames labelled automatically from the
         slide PDFs: trained and scored on 3 lectures; into the pipeline once more lectures
         make it route better than the 5a rule
-  - [ ] 5c: ONNX/TensorRT/int8 benchmarks, before and after
+  - [x] 5c: speed benchmarks before and after (`make bench`): the embedding model moved to the
+        GPU (150 times faster), speech recognition stays int8, and the detector would run as a
+        TensorRT fp16 engine ([ADR 0008](docs/adr/0008-where-the-models-run.md))
 - [ ] **Phase 6, ship**: auth, quotas, Terraform and Modal deploy, results write-up
 
 ## Data and licensing

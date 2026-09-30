@@ -1,0 +1,39 @@
+[project]
+name = "lecture-bench"
+version = "0.1.0"
+description = "Speed benchmarks: speech recognition, embeddings and the frame detector, before and after."
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28",
+    "lecture-core",
+    "lecture-detector",
+    "lecture-evals",
+    "lecture-perception",
+    "lecture-rag",
+    "numpy>=2.5",
+    "nvidia-ml-py>=12",
+    "qdrant-client>=1.15",
+]
+
+[project.optional-dependencies]
+# Exporting the detector: ONNX (with RF-DETR's own export tools) and TensorRT for CUDA 13, whose
+# wheels come from NVIDIA's index (root pyproject). Benchmarks only; never in the images.
+export = [
+    "rfdetr[onnx]>=1.11",
+    "tensorrt-cu13-bindings>=11.3 ; sys_platform == 'win32' or sys_platform == 'linux'",
+    "tensorrt-cu13-libs>=11.3 ; sys_platform == 'win32' or sys_platform == 'linux'",
+]
+
+[project.scripts]
+lecture-bench = "lecture_bench.cli:main"
+
+[tool.uv.sources]
+lecture-core = { workspace = true }
+lecture-detector = { workspace = true }
+lecture-evals = { workspace = true }
+lecture-perception = { workspace = true }
+lecture-rag = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13"]
+build-backend = "uv_build"

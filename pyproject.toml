@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "lecture-api",
+    "lecture-bench",
     "lecture-core",
     "lecture-detector",
     "lecture-evals",
@@ -42,8 +43,15 @@ name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
+# TensorRT, for benchmarking the detector only (lecture-bench's export extra): PyPI has stubs.
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+explicit = true
+
 [tool.uv.sources]
 lecture-api = { workspace = true }
+lecture-bench = { workspace = true }
 lecture-core = { workspace = true }
 lecture-detector = { workspace = true }
 lecture-evals = { workspace = true }
@@ -51,6 +59,8 @@ lecture-llm = { workspace = true }
 lecture-perception = { workspace = true }
 lecture-pipeline = { workspace = true }
 lecture-rag = { workspace = true }
+tensorrt-cu13-bindings = { index = "nvidia" }
+tensorrt-cu13-libs = { index = "nvidia" }
 torch = { index = "pytorch-cu130" }
 torchvision = { index = "pytorch-cu130" }
 
@@ -76,19 +86,19 @@ select = [
 "tests/**" = ["S101"]  # assert is how pytest works
 
 [tool.ruff.lint.isort]
-known-first-party = ["lecture_api", "lecture_core", "lecture_detector", "lecture_evals", "lecture_llm", "lecture_perception", "lecture_pipeline", "lecture_rag"]
+known-first-party = ["lecture_api", "lecture_bench", "lecture_core", "lecture_detector", "lecture_evals", "lecture_llm", "lecture_perception", "lecture_pipeline", "lecture_rag"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-mypy_path = ["apps/api/src", "evals/src", "ml/detector/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src"]
-files = ["apps/api/src", "evals/src", "ml/detector/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src", "tests"]
+mypy_path = ["apps/api/src", "evals/src", "ml/bench/src", "ml/detector/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src"]
+files = ["apps/api/src", "evals/src", "ml/bench/src", "ml/detector/src", "packages/core/src", "packages/llm/src", "packages/perception/src", "packages/pipeline/src", "packages/rag/src", "tests"]
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
 # Optional extras, not installed in the dev environment or CI, or without type information.
-module = ["ctranslate2.*", "docker.*", "faster_whisper.*", "pynvml", "pypdfium2", "pypdfium2.*", "rfdetr.*", "supervision.*", "testcontainers.*"]
+module = ["ctranslate2.*", "docker.*", "faster_whisper.*", "pynvml", "pypdfium2", "pypdfium2.*", "rfdetr.*", "supervision.*", "tensorrt_bindings", "tensorrt_bindings.*", "onnx", "onnx.*", "onnxruntime", "onnxruntime.*", "pycocotools.*", "testcontainers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

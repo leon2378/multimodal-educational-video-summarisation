@@ -1,9 +1,12 @@
 # Run from WSL2 (see README). Each target is a thin wrapper, so the commands also work on their own.
-COMPOSE := docker compose -f infra/compose.yaml
+# With an NVIDIA GPU (nvidia-smi finds one), the embedding model runs on it too
+# (infra/compose.gpu.yaml). `make up GPU=` keeps it on the CPU.
+GPU ?= $(shell nvidia-smi -L >/dev/null 2>&1 && echo 1)
+COMPOSE := docker compose -f infra/compose.yaml $(if $(GPU),-f infra/compose.gpu.yaml)
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app observability gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval detector-data detector-train test test-unit lint fmt typecheck audit check
+.PHONY: help install up app observability gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval detector-data detector-train bench test test-unit lint fmt typecheck audit check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-15s %s\n", $$1, $$2}'
@@ -70,6 +73,12 @@ detector-data: ## Label frames for the frame detector from the lectures' videos 
 detector-train: ## Fine-tune the frame detector on the GPU, then score the held-out lecture
 	uv sync --inexact --package lecture-detector --extra train
 	uv run lecture-detector train
+
+bench: ## Benchmark embeddings, speech recognition and the detector, before and after (GPU stack)
+	uv sync --inexact --package lecture-bench --extra export
+	uv run lecture-bench embeddings
+	uv run lecture-bench asr
+	uv run lecture-bench detector
 
 test: ## Run all tests (integration tests need Docker)
 	uv run pytest

@@ -1,6 +1,7 @@
 # 0005: Qdrant for hybrid search, next to Postgres
 
-- Status: Accepted
+- Status: Accepted; where the embedding model runs is superseded by
+  [0008](0008-where-the-models-run.md)
 - Date: 2026-09-29
 - Code: `packages/rag`
 
