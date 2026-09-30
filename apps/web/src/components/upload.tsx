@@ -21,11 +21,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, unwrap } from "@/lib/api";
-import { formatBytes, formatDuration, titleFromFilename } from "@/lib/format";
-import { useCourses } from "@/lib/queries";
+import { allowance, refusal, resetText } from "@/lib/access";
+import { ApiError, api, unwrap } from "@/lib/api";
+import { formatBytes, formatDuration, pluralise, titleFromFilename } from "@/lib/format";
+import { meKey, useCourses } from "@/lib/queries";
 import { formatTime } from "@/lib/timeline";
 
+import { SignInPrompt, useAccount } from "./account";
 import { Callout } from "./common";
 
 interface UploadOptions {
@@ -158,6 +160,7 @@ function UploadDialog({
   const router = useRouter();
   const queryClient = useQueryClient();
   const courses = useCourses();
+  const account = useAccount();
   const [file, setFile] = useState<File | null>(initial.file ?? null);
   const [title, setTitle] = useState(initial.file ? titleFromFilename(initial.file.name) : "");
   const [titleEdited, setTitleEdited] = useState(false);
@@ -170,6 +173,21 @@ function UploadDialog({
 
   useEffect(() => onBusyChange(busy), [busy, onBusyChange]);
 
+  // A lecture can join only a course the viewer may change.
+  const joinable = (courses.data ?? []).filter((course) => account.canChange(course));
+  const course = joinable.some((c) => c.id === courseId) ? courseId : "none";
+  const quotas = account.quotas;
+  const left = quotas && allowance(quotas);
+  const blocked = quotas?.paused
+    ? `Today's shared budget for the language model is spent. Uploads resume at ${resetText(quotas.resets_at)}.`
+    : quotas && left?.uploads === 0
+      ? `You've added ${pluralise(quotas.uploads_per_day, "lecture")} today, the most a day. More at ${resetText(quotas.resets_at)}.`
+      : null;
+  const tooBig =
+    file && quotas && file.size > quotas.upload_bytes
+      ? `This video is ${formatBytes(file.size)}; you can upload up to ${formatBytes(quotas.upload_bytes)}.`
+      : null;
+
   function choose(next: File | null) {
     setFile(next);
     if (next && !titleEdited) setTitle(titleFromFilename(next.name));
@@ -178,7 +196,7 @@ function UploadDialog({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!file || busy) return;
+    if (!file || busy || blocked || tooBig) return;
     try {
       setPhase({ kind: "uploading", loaded: 0, total: file.size, rate: 0 });
       const created = unwrap(
@@ -187,30 +205,48 @@ function UploadDialog({
             title: title.trim() || titleFromFilename(file.name),
             filename: file.name,
             content_type: file.type || "video/mp4",
-            course_id: courseId === "none" ? null : courseId,
+            course_id: course === "none" ? null : course,
             licence: licence.trim() || null,
             attribution: attribution.trim() || null,
           },
         }),
       );
+      // Straight to storage: the presigned URL carries its own signature, not the session token.
       await put(created.upload, file, request, (loaded, rate) =>
         setPhase({ kind: "uploading", loaded, total: file.size, rate }),
       );
       const params = { params: { path: { lecture_id: created.lecture.id } } };
       unwrap(await api.POST("/v1/lectures/{lecture_id}/complete-upload", params));
       setPhase({ kind: "starting" });
-      unwrap(await api.POST("/v1/lectures/{lecture_id}/process", params));
+      // The upload is kept even if processing can't start now (say the day's budget is spent):
+      // its page has a Process button for later.
+      const started = await api
+        .POST("/v1/lectures/{lecture_id}/process", params)
+        .then(unwrap)
+        .then(
+          () => true,
+          (error: unknown) => {
+            toast.warning("Uploaded, but processing hasn't started", { description: refusal(error) });
+            return false;
+          },
+        );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["lectures"] }),
         queryClient.invalidateQueries({ queryKey: ["courses"] }),
+        queryClient.invalidateQueries({ queryKey: meKey }),
       ]);
-      toast.success("Uploaded. Processing has started.", { description: created.lecture.title });
+      if (started) toast.success("Uploaded. Processing has started.", { description: created.lecture.title });
       setPhase({ kind: "edit" });
       onOpenChange(false);
       router.push(`/lectures/${created.lecture.id}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setPhase(message === "cancelled" ? { kind: "edit" } : { kind: "error", message });
+      if (error instanceof Error && error.message === "cancelled") {
+        setPhase({ kind: "edit" });
+      } else if (error instanceof ApiError && error.status === 413) {
+        setPhase({ kind: "error", message: `The video is ${formatBytes(file.size)}, more than you can upload. ${error.message}` });
+      } else {
+        setPhase({ kind: "error", message: refusal(error) });
+      }
     }
   }
 
@@ -234,116 +270,130 @@ function UploadDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form id="upload" onSubmit={submit} className="flex flex-col gap-4">
-          {file ? (
-            <ChosenFile file={file} onClear={busy ? undefined : () => choose(null)} />
-          ) : (
-            <label className="group flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed bg-muted/30 bg-dots px-6 py-10 text-center transition-colors hover:border-primary/60 hover:bg-brand-soft/40 focus-within:border-primary">
-              <span className="flex size-11 items-center justify-center rounded-full bg-brand-soft text-brand-ink transition-transform group-hover:scale-105">
-                <CloudUploadIcon className="size-5" />
-              </span>
-              <span className="text-sm font-medium">Drop a video here, or click to choose one</span>
-              <span className="text-xs text-muted-foreground">MP4, WebM or MOV. Slides with spoken explanations work best.</span>
-              <input
-                type="file"
-                accept="video/*"
-                className="sr-only"
-                onChange={(event) => choose(event.target.files?.[0] ?? null)}
-              />
-            </label>
-          )}
+        {account.auth && !account.signedIn ? (
+          <SignInPrompt title="Sign in to add lectures">
+            What you upload is private to you. Without an account you can read, search and study the public lectures.
+          </SignInPrompt>
+        ) : (
+          <form id="upload" onSubmit={submit} className="flex flex-col gap-4">
+            {file ? (
+              <ChosenFile file={file} onClear={busy ? undefined : () => choose(null)} />
+            ) : (
+              <label className="group flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed bg-muted/30 bg-dots px-6 py-10 text-center transition-colors hover:border-primary/60 hover:bg-brand-soft/40 focus-within:border-primary">
+                <span className="flex size-11 items-center justify-center rounded-full bg-brand-soft text-brand-ink transition-transform group-hover:scale-105">
+                  <CloudUploadIcon className="size-5" />
+                </span>
+                <span className="text-sm font-medium">Drop a video here, or click to choose one</span>
+                <span className="text-xs text-muted-foreground">MP4, WebM or MOV. Slides with spoken explanations work best.</span>
+                <input
+                  type="file"
+                  accept="video/*"
+                  className="sr-only"
+                  onChange={(event) => choose(event.target.files?.[0] ?? null)}
+                />
+              </label>
+            )}
+            {quotas && left && !blocked && (
+              <p className="-mt-2 text-xs text-muted-foreground">
+                {pluralise(left.uploads, "upload")} of {quotas.uploads_per_day} left today, up to{" "}
+                {formatBytes(quotas.upload_bytes)} each. What you upload is private to you.
+              </p>
+            )}
+            {blocked && <Callout tone="warning">{blocked}</Callout>}
+            {tooBig && <Callout tone="error">{tooBig}</Callout>}
 
-          <div className="grid gap-2">
-            <Label htmlFor="upload-title">Title</Label>
-            <Input
-              id="upload-title"
-              value={title}
-              onChange={(event) => {
-                setTitle(event.target.value);
-                setTitleEdited(true);
-              }}
-              placeholder="Taken from the file name"
-              maxLength={300}
-              disabled={busy}
-            />
-          </div>
-
-          {courses.data && courses.data.length > 0 && (
             <div className="grid gap-2">
-              <Label htmlFor="upload-course">Course</Label>
-              <Select value={courseId} onValueChange={setCourseId} disabled={busy}>
-                <SelectTrigger id="upload-course" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No course</SelectItem>
-                  {courses.data.map((course) => (
-                    <SelectItem key={course.id} value={course.id}>
-                      {course.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="upload-title">Title</Label>
+              <Input
+                id="upload-title"
+                value={title}
+                onChange={(event) => {
+                  setTitle(event.target.value);
+                  setTitleEdited(true);
+                }}
+                placeholder="Taken from the file name"
+                maxLength={300}
+                disabled={busy}
+              />
             </div>
-          )}
 
-          <Collapsible>
-            <CollapsibleTrigger className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-              <ChevronDownIcon className="size-4 transition-transform group-data-[state=closed]:-rotate-90" />
-              Source and licence
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-3 grid gap-3 sm:grid-cols-2">
+            {joinable.length > 0 && (
               <div className="grid gap-2">
-                <Label htmlFor="upload-licence">Licence</Label>
-                <Input
-                  id="upload-licence"
-                  value={licence}
-                  onChange={(event) => setLicence(event.target.value)}
-                  placeholder="CC BY-NC-SA 4.0"
-                  maxLength={100}
-                  disabled={busy}
-                />
+                <Label htmlFor="upload-course">Course</Label>
+                <Select value={course} onValueChange={setCourseId} disabled={busy}>
+                  <SelectTrigger id="upload-course" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No course</SelectItem>
+                    {joinable.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="upload-attribution">Attribution</Label>
-                <Input
-                  id="upload-attribution"
-                  value={attribution}
-                  onChange={(event) => setAttribution(event.target.value)}
-                  placeholder="MIT OpenCourseWare"
-                  maxLength={2000}
-                  disabled={busy}
-                />
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
+            )}
 
-          {phase.kind === "uploading" && (
-            <div className="flex flex-col gap-2" role="status">
-              <Progress value={(phase.loaded / Math.max(phase.total, 1)) * 100} />
-              <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
-                <span>
-                  Uploading {formatBytes(phase.loaded)} of {formatBytes(phase.total)}
-                </span>
-                <span>
-                  {phase.rate > 0
-                    ? `${formatBytes(phase.rate)}/s · ${formatDuration((phase.total - phase.loaded) / phase.rate)} left`
-                    : "Starting…"}
-                </span>
+            <Collapsible>
+              <CollapsibleTrigger className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+                <ChevronDownIcon className="size-4 transition-transform group-data-[state=closed]:-rotate-90" />
+                Source and licence
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="upload-licence">Licence</Label>
+                  <Input
+                    id="upload-licence"
+                    value={licence}
+                    onChange={(event) => setLicence(event.target.value)}
+                    placeholder="CC BY-NC-SA 4.0"
+                    maxLength={100}
+                    disabled={busy}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="upload-attribution">Attribution</Label>
+                  <Input
+                    id="upload-attribution"
+                    value={attribution}
+                    onChange={(event) => setAttribution(event.target.value)}
+                    placeholder="MIT OpenCourseWare"
+                    maxLength={2000}
+                    disabled={busy}
+                  />
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
+            {phase.kind === "uploading" && (
+              <div className="flex flex-col gap-2" role="status">
+                <Progress value={(phase.loaded / Math.max(phase.total, 1)) * 100} />
+                <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
+                  <span>
+                    Uploading {formatBytes(phase.loaded)} of {formatBytes(phase.total)}
+                  </span>
+                  <span>
+                    {phase.rate > 0
+                      ? `${formatBytes(phase.rate)}/s · ${formatDuration((phase.total - phase.loaded) / phase.rate)} left`
+                      : "Starting…"}
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
-          {phase.kind === "starting" && (
-            <p className="text-sm text-muted-foreground" role="status">
-              Uploaded. Starting processing…
-            </p>
-          )}
-          {phase.kind === "error" && (
-            <Callout tone="error" title="The upload didn't finish">
-              {phase.message}
-            </Callout>
-          )}
-        </form>
+            )}
+            {phase.kind === "starting" && (
+              <p className="text-sm text-muted-foreground" role="status">
+                Uploaded. Starting processing…
+              </p>
+            )}
+            {phase.kind === "error" && (
+              <Callout tone="error" title="The upload didn't finish">
+                {phase.message}
+              </Callout>
+            )}
+          </form>
+        )}
 
         <DialogFooter>
           {phase.kind === "uploading" ? (
@@ -355,10 +405,12 @@ function UploadDialog({
               Close
             </Button>
           )}
-          <Button type="submit" form="upload" disabled={!file || busy}>
-            <CloudUploadIcon />
-            {busy ? "Uploading…" : "Upload and process"}
-          </Button>
+          {!(account.auth && !account.signedIn) && (
+            <Button type="submit" form="upload" disabled={!file || busy || Boolean(blocked || tooBig)}>
+              <CloudUploadIcon />
+              {busy ? "Uploading…" : "Upload and process"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

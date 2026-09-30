@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { API_URL } from "@/lib/api";
 import { useHealth } from "@/lib/queries";
 
+import { AccountMenu, AuthBanner } from "./account";
 import { Callout, Logo } from "./common";
 import { usePalette } from "./palette";
 import { ThemeToggle } from "./theme";
@@ -47,10 +48,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               <PlusIcon />
               <span className="hidden sm:inline">Add lecture</span>
             </Button>
+            <AccountMenu />
           </div>
         </div>
       </header>
       <ApiBanner />
+      <AuthBanner />
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6 lg:py-8">{children}</main>
     </div>
   );

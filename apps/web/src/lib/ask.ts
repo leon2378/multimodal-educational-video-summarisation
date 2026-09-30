@@ -1,22 +1,11 @@
 import { API_URL, type AskEvent } from "./api";
 import type { Scope } from "./scope";
-
-/** Complete server-sent events at the front of `buffer`, and what's left after them. */
-export function takeEvents(buffer: string): [AskEvent[], string] {
-  const events: AskEvent[] = [];
-  let rest = buffer;
-  for (let end = rest.indexOf("\n\n"); end >= 0; end = rest.indexOf("\n\n")) {
-    for (const line of rest.slice(0, end).split("\n")) {
-      if (line.startsWith("data: ")) events.push(JSON.parse(line.slice(6)) as AskEvent);
-    }
-    rest = rest.slice(end + 2);
-  }
-  return [events, rest];
-}
+import { streamEvents } from "./stream";
 
 /** Asks a question and calls `onEvent` for each event as the answer streams: start, sources,
  *  deltas, then done or error. The endpoint is a POST, so this reads the stream with fetch
- *  rather than EventSource. Throws with the API's message if the question is refused. */
+ *  rather than EventSource. Throws an ApiError if the question is refused: 401 signed out, 429
+ *  a limit (with how long to wait). */
 export async function askQuestion(
   scope: Scope,
   question: string,
@@ -25,23 +14,14 @@ export async function askQuestion(
   signal?: AbortSignal,
 ): Promise<void> {
   const owner = scope.kind === "lecture" ? "lectures" : "courses";
-  const response = await fetch(`${API_URL}/v1/${owner}/${scope.id}/ask`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(threadId ? { question, thread_id: threadId } : { question }),
-    signal,
-  });
-  if (!response.ok || !response.body) {
-    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-    throw new Error(typeof body?.detail === "string" ? body.detail : `HTTP ${response.status}`);
-  }
-  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-  let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    const [events, rest] = takeEvents(buffer + value);
-    buffer = rest;
-    events.forEach(onEvent);
-  }
+  await streamEvents<AskEvent>(
+    `${API_URL}/v1/${owner}/${scope.id}/ask`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(threadId ? { question, thread_id: threadId } : { question }),
+      signal,
+    },
+    onEvent,
+  );
 }

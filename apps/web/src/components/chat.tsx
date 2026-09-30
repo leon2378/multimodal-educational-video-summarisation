@@ -42,15 +42,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { type ChatMessage, type Citation, type Rating, type Source, api, unwrap } from "@/lib/api";
+import { allowance, refusal, resetText } from "@/lib/access";
+import { type ChatMessage, type Citation, type Rating, type Source, api, ensureOk, unwrap } from "@/lib/api";
 import { type Inline, parseAnswer, resolveCitation } from "@/lib/answer";
 import { askQuestion } from "@/lib/ask";
 import { formatCost, formatRelative, pluralise } from "@/lib/format";
-import { scopeKey, threadKey, useThread, useThreads } from "@/lib/queries";
+import { meKey, scopeKey, threadKey, useThread, useThreads } from "@/lib/queries";
 import type { Open, Scope } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
 
+import { SignInPrompt, useAccount } from "./account";
 import { Callout, Latex, TimeChip } from "./common";
 
 /** The answer being streamed, until it's saved and the thread reloads. */
@@ -61,9 +64,35 @@ interface Pending {
   sources: Source[] | null;
 }
 
+/** The Ask tab: the chat once signed in; with sign-in on at the API, visitors get a prompt to
+ *  sign in instead, since asking needs an account (conversations are private to their user). */
+export function AskPanel(props: { scope: Scope; onOpen: Open; suggestions?: string[] }) {
+  const account = useAccount();
+  const where = props.scope.kind === "lecture" ? "this lecture" : "this course";
+  if (account.pending) {
+    return (
+      <div className="flex flex-col gap-3 p-4">
+        <Skeleton className="h-8 w-1/2" />
+        <Skeleton className="h-24" />
+      </div>
+    );
+  }
+  if (account.auth && !account.signedIn) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <SignInPrompt title="Sign in to ask questions">
+          Answers come only from {where}, and each point links to the moment it comes from. Reading and
+          search work without an account.
+        </SignInPrompt>
+      </div>
+    );
+  }
+  return <ChatPanel {...props} />;
+}
+
 /** Q&A about a lecture, or across a course's lectures. Citations play the lecture they point
  *  into from where they point. `suggestions` are questions to start from. */
-export const ChatPanel = memo(function ChatPanel({
+const ChatPanel = memo(function ChatPanel({
   scope,
   onOpen,
   suggestions = [],
@@ -73,6 +102,7 @@ export const ChatPanel = memo(function ChatPanel({
   suggestions?: string[];
 }) {
   const queryClient = useQueryClient();
+  const account = useAccount();
   const threads = useThreads(scope);
   const where = scope.kind === "lecture" ? "this lecture" : "this course";
   // undefined until chosen: then the most recent thread, if any.
@@ -88,6 +118,15 @@ export const ChatPanel = memo(function ChatPanel({
   const abort = useRef<AbortController | null>(null);
   // Follow the answer as it streams, unless the reader has scrolled up to read.
   const stick = useRef(true);
+  // Signed-in users (not admins) have a daily allowance, and everyone waits when the day's
+  // shared budget is spent.
+  const quotas = account.quotas;
+  const left = quotas ? allowance(quotas).questions : null;
+  const limit = quotas?.paused
+    ? `Today's shared budget for the language model is spent. Questions resume at ${resetText(quotas.resets_at)}.`
+    : quotas && left === 0
+      ? `You've asked your ${quotas.questions_per_day} questions for today. More at ${resetText(quotas.resets_at)}.`
+      : null;
 
   const messageCount = thread.data?.messages.length ?? 0;
   useEffect(() => {
@@ -104,7 +143,7 @@ export const ChatPanel = memo(function ChatPanel({
 
   async function send(text = draft) {
     const question = text.trim();
-    if (!question || pending) return;
+    if (!question || pending || limit) return;
     setDraft("");
     setError(null);
     stick.current = true;
@@ -132,12 +171,13 @@ export const ChatPanel = memo(function ChatPanel({
         controller.signal,
       );
     } catch (e) {
-      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+      if (!controller.signal.aborted) setError(refusal(e));
     }
     abort.current = null;
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: threadKey(asked) }),
       queryClient.invalidateQueries({ queryKey: scopeKey(scope, "threads") }),
+      queryClient.invalidateQueries({ queryKey: meKey }),
     ]);
     setPending(null);
   }
@@ -145,12 +185,12 @@ export const ChatPanel = memo(function ChatPanel({
   async function remove() {
     if (!threadId) return;
     try {
-      await api.DELETE("/v1/threads/{thread_id}", { params: { path: { thread_id: threadId } } });
+      ensureOk(await api.DELETE("/v1/threads/{thread_id}", { params: { path: { thread_id: threadId } } }));
       setChosen(null);
       await queryClient.invalidateQueries({ queryKey: scopeKey(scope, "threads") });
       toast.success("Conversation deleted");
     } catch (e) {
-      toast.error("Couldn't delete the conversation", { description: e instanceof Error ? e.message : String(e) });
+      toast.error("Couldn't delete the conversation", { description: refusal(e) });
     }
   }
 
@@ -287,12 +327,13 @@ export const ChatPanel = memo(function ChatPanel({
       </div>
 
       <form
-        className="border-t p-3"
+        className="flex flex-col gap-2 border-t p-3"
         onSubmit={(event) => {
           event.preventDefault();
           void send();
         }}
       >
+        {limit && <Callout tone="warning">{limit}</Callout>}
         <div className="flex items-end gap-2 rounded-xl border bg-background p-1.5 shadow-xs transition focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
           <textarea
             ref={input}
@@ -306,6 +347,7 @@ export const ChatPanel = memo(function ChatPanel({
             }}
             rows={1}
             maxLength={1000}
+            disabled={limit !== null}
             placeholder={threadId ? "Ask a follow-up" : `Ask about ${where}`}
             aria-label="Your question"
             className="max-h-40 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground"
@@ -321,13 +363,15 @@ export const ChatPanel = memo(function ChatPanel({
               <SquareIcon className="fill-current" />
             </Button>
           ) : (
-            <Button type="submit" size="icon-sm" disabled={!draft.trim()} aria-label="Ask">
+            <Button type="submit" size="icon-sm" disabled={!draft.trim() || limit !== null} aria-label="Ask">
               <ArrowUpIcon />
             </Button>
           )}
         </div>
-        <p className="mt-1.5 px-1 text-[0.7rem] text-muted-foreground">
-          Answers come only from {where}. Enter to send, Shift+Enter for a new line.
+        <p className="px-1 text-[0.7rem] text-muted-foreground">
+          Answers come only from {where}.
+          {left !== null && ` ${pluralise(left, "question")} left today.`} Enter to send, Shift+Enter for a new
+          line.
         </p>
       </form>
 
@@ -542,7 +586,7 @@ function AnswerFooter({ message, threadId }: { message: ChatMessage; threadId: s
       await queryClient.invalidateQueries({ queryKey: threadKey(threadId) });
       toast.success(value === "up" ? "Thanks, marked helpful" : "Thanks, noted what went wrong");
     } catch (e) {
-      toast.error("Couldn't save the rating", { description: e instanceof Error ? e.message : String(e) });
+      toast.error("Couldn't save the rating", { description: refusal(e) });
     }
   }
 

@@ -1,3 +1,5 @@
+/* Clerk's styles (cssLayerName in layout.tsx) sit above Tailwind's base, below its utilities. */
+@layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
 @import "tw-animate-css";
 

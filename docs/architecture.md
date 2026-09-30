@@ -3,7 +3,7 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 6 under way (sign-in and quotas in the API)
+## Current state: Phase 6 under way (sign-in and quotas done, deployment next)
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
@@ -64,18 +64,26 @@ every refetch. Colours are CSS variables in `globals.css`, one set per theme; a 
 - **Library** (`/`): upload with progress (a presigned PUT from the browser), then it starts
   processing and opens the lecture. The upload dialog is app-wide, so a video dropped on any
   page opens it, and so does Add lecture on a course page (with that course chosen).
-- **Lecture** (`/lectures/{id}`): an `EventSource` on `/events` shows each stage while it
-  processes and refreshes the page's data when the run ends. The video's `timeupdate` drives
-  everything else: the transcript line (a binary search over sentence start times), the current
-  slide (the span containing the time, so camera shots keep the last slide) and the current
-  chapter. Every timestamp seeks the video. The transcript's search box searches the lecture
-  and plays each hit from where it starts. The study tabs stay mounted while hidden, so an
-  answer keeps streaming and a search stays put on another tab; the lists re-render only when
-  the line, slide or chapter playing changes, not on every `timeupdate`.
+- **Lecture** (`/lectures/{id}`): a stream on `/events`, read with `fetch` so it can carry
+  the session token (`EventSource` can't send headers) and reconnecting with backoff, shows each
+  stage while it processes and refreshes the page's data when the run ends. The video's
+  `timeupdate` drives everything else: the transcript line (a binary search over sentence start
+  times), the current slide (the span containing the time, so camera shots keep the last slide)
+  and the current chapter. Every timestamp seeks the video. The transcript's search box searches
+  the lecture and plays each hit from where it starts. The study tabs stay mounted while hidden,
+  so an answer keeps streaming and a search stays put on another tab; the lists re-render only
+  when the line, slide or chapter playing changes, not on every `timeupdate`.
 - Transcript lines are sentences: runs split batched ASR segments at sentence ends using word
   timings when saving results, without touching the cached ASR output.
 - **Ctrl+K**: a command palette that matches lecture and course titles as you type and, after a
   pause, runs `/v1/search` across every lecture.
+- **Sign-in** (Phase 6): with a Clerk publishable key built in, `@clerk/nextjs` provides the
+  sign-in and sign-up windows and the account button, and every API call carries the session
+  token as a bearer token: the generated client's middleware, the Q&A and progress streams, and
+  the upload's API calls (not its presigned PUT). Calls wait up to 8 s for Clerk to load, so a
+  visit's first requests don't go out signed out. `GET /v1/me` drives what's shown: nothing
+  about sign-in when the API has it off, sign-in prompts for anonymous visitors, and the quotas
+  left. Without the key, the app runs as before.
 
 ### Processing (Phase 2b)
 
@@ -442,8 +450,8 @@ measures. The tables are in the README; what they decided is
   reports them.
 - **Off by default**: without an issuer, every request is one local user with no limits, and
   what it makes is public: development, the tests and the eval gate run as before. The browser
-  sends the token with `fetch` (CORS allows `Authorization` and exposes `Retry-After`); the
-  progress stream moves off `EventSource`, which can't send it. Sign-in is checked before the
+  sends the token with `fetch` (CORS allows `Authorization` and exposes `Retry-After`),
+  including on the progress stream (see the web app, above). Sign-in is checked before the
   other dependencies, so an anonymous caller hears 401 rather than, say, 503 for a missing
   language model.
 
@@ -487,9 +495,8 @@ measures. The tables are in the README; what they decided is
 
 ## Next: shipping (Phase 6), and a detector that routes as well as the rule
 
-Phase 6 goes on with the web app's sign-in (Clerk's Next.js pages, the token on every call,
-the progress stream read with `fetch`), then deployment (Terraform, Modal for the GPU work) and
-CD.
+Phase 6 goes on with deployment (Terraform, Modal for the GPU work) and CD, now that the API
+and the web app both have sign-in.
 
 The detector finds slides (AP 1.00) and people (0.99) on the held-out lectures, and a slide
 playing a video, which the brightness test misses; but trained on ten lectures it still routes

@@ -22,11 +22,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { refusal } from "@/lib/access";
 import { type Lecture, type ProgressEvent, api, unwrap } from "@/lib/api";
 import { formatCost, formatDuration, formatRelative, formatSeconds } from "@/lib/format";
-import { lectureKey, useRuns } from "@/lib/queries";
+import { lectureKey, meKey, useRuns } from "@/lib/queries";
 import { PHASES, stageLabel, summarise } from "@/lib/stages";
 
+import { useAccount } from "./account";
 import { Callout } from "./common";
 import { useUpload } from "./upload";
 
@@ -41,9 +43,10 @@ export function useStartProcessing(id: string) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: lectureKey(id) }),
         queryClient.invalidateQueries({ queryKey: ["lectures"] }),
+        queryClient.invalidateQueries({ queryKey: meKey }),
       ]);
     } catch (e) {
-      toast.error("Couldn't start processing", { description: e instanceof Error ? e.message : String(e) });
+      toast.error("Couldn't start processing", { description: refusal(e) });
     } finally {
       setBusy(false);
     }
@@ -65,6 +68,8 @@ function useNow(active: boolean): number {
 export function ProcessingPanel({ lecture, event }: { lecture: Lecture; event: ProgressEvent | null }) {
   const { start, busy } = useStartProcessing(lecture.id);
   const { openUpload } = useUpload();
+  // Processing is for the lecture's owner (or an admin); others see where it stands.
+  const mine = useAccount().canChange(lecture);
   const status = lecture.status;
   const running = status === "processing";
   const runs = useRuns(lecture.id, running || status === "failed");
@@ -86,18 +91,21 @@ export function ProcessingPanel({ lecture, event }: { lecture: Lecture; event: P
             <p className="max-w-xs text-sm text-muted-foreground">
               {waiting
                 ? "The video never reached storage. Add the lecture again to upload it."
-                : "Process the lecture to get its transcript, slides, notes, quiz, search and Q&A."}
+                : mine
+                  ? "Process the lecture to get its transcript, slides, notes, quiz, search and Q&A."
+                  : "Its transcript, notes and the rest appear once its owner processes it."}
             </p>
           </div>
-          {waiting ? (
-            <Button onClick={() => openUpload({ courseId: lecture.course_id })}>
-              <CloudUploadIcon /> Add it again
-            </Button>
-          ) : (
-            <Button onClick={() => void start()} disabled={busy}>
-              {busy ? <Spinner /> : <PlayIcon />} Process
-            </Button>
-          )}
+          {mine &&
+            (waiting ? (
+              <Button onClick={() => openUpload({ courseId: lecture.course_id })}>
+                <CloudUploadIcon /> Add it again
+              </Button>
+            ) : (
+              <Button onClick={() => void start()} disabled={busy}>
+                {busy ? <Spinner /> : <PlayIcon />} Process
+              </Button>
+            ))}
         </div>
       </Shell>
     );
@@ -125,7 +133,7 @@ export function ProcessingPanel({ lecture, event }: { lecture: Lecture; event: P
                 : `Step ${Math.min(run.done + 1, run.total)} of ${run.total}${elapsed !== null ? ` · ${formatDuration(elapsed)} so far` : ""}`}
             </p>
           </div>
-          {failed && (
+          {failed && mine && (
             <Button className="ml-auto" size="sm" onClick={() => void start()} disabled={busy}>
               {busy ? <Spinner /> : <RotateCcwIcon />} Try again
             </Button>

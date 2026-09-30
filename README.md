@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 to 4 of 6 done, Phase 5 done but for the detector in the pipeline (OCR routing, a trained frame detector, speed benchmarks), Phase 6 under way (sign-in and quotas in the API): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions in CI, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 4 of 6 done, Phase 5 done but for the detector in the pipeline (OCR routing, a trained frame detector, speed benchmarks), Phase 6 under way (sign-in and quotas done, deployment next): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions in CI, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -44,10 +44,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   model and the frame detector each way they could run (CPU or GPU; fp32, fp16 or int8;
   PyTorch, ONNX Runtime or TensorRT) and scores every variant, so lost accuracy shows. The
   embedding model is 150 times faster on the GPU, so Compose now runs it there when there is one.
-- Sign-in and quotas ([below](#sign-in-and-quotas)): the API checks Clerk session tokens.
-  Visitors read and search the public demo lectures; signed-in users ask questions and
-  upload private lectures within daily quotas, under a daily ceiling on LLM spend. Off
-  locally.
+- Sign-in and quotas ([below](#sign-in-and-quotas)): Clerk sign-in in the web app, whose
+  session tokens the API checks. Visitors read and search the public demo lectures; signed-in
+  users ask questions and upload private lectures within daily quotas, under a daily ceiling on
+  LLM spend. Off until configured.
 - Observability ([below](#observability)): OpenTelemetry traces, metrics and logs from the API
   and workers into Grafana. One trace follows a request through the workflow's activities to
   each LLM call. A dashboard tracks the blueprint's targets, and every answer and pipeline run
@@ -141,6 +141,13 @@ migrations in a one-off container, and starts the API on port 8000.
   directly, and the course deleted (its lectures stay).
 - **Ctrl+K** (⌘K on a Mac) anywhere: go to a lecture or course by title, or search what was
   said and shown across every lecture.
+
+With sign-in on, it signs in and up through Clerk's own windows, with an account button in
+the header that also shows the questions and uploads left today. Signed out, the library shows
+the public lectures and courses and search works; asking, uploading and making courses ask you
+to sign in first. Your own private lectures carry a badge, and admins can make lectures and
+courses public. A spent quota says when it resets, and a banner says when everyone's daily
+budget has run out. With sign-in off (no Clerk key), none of this shows.
 
 It has light and dark themes, following the system's by default, and works down to phone width.
 
@@ -270,8 +277,18 @@ On top of that, everyone together stops at $2 of LLM spend a day (at paid-tier p
 questions and processing wait for 00:00 UTC. A limit answers 429 with `Retry-After`, and
 `GET /v1/me` says who the API takes the caller to be and what their quotas leave today.
 Conversations are private to whoever had them. The limits are settings (see `.env.example`).
-Lectures added before sign-in existed, or with it off, are public. The web app's Clerk sign-in
-comes next; until it's in, leave `AUTH_ISSUER` unset.
+Lectures added before sign-in existed, or with it off, are public.
+
+To turn it on, create a Clerk application and put in `.env`:
+
+- `AUTH_ISSUER`: the instance's Frontend API URL, and `AUTH_AUTHORIZED_PARTIES`: the web app's
+  origin, `["http://localhost:3000"]` locally. A token issued for another origin is refused,
+  so a missing origin shows up as the web app's sign-in being rejected.
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` for the web app. The publishable
+  key is built into it and public by design; the secret key stays on its server.
+- `ADMIN_USERS`: your own Clerk user id (`user_...`), to see everything and publish lectures.
+
+Then `make app` rebuilds the API and the web app and applies the migration.
 
 ## Evals
 
@@ -768,7 +785,8 @@ from the blueprint in these places:
 - [ ] **Phase 6, ship**
   - [x] 6a: sign-in in the API (Clerk tokens), public demo lectures and private uploads,
         per-user quotas and a daily LLM budget
-  - [ ] 6b: sign-in in the web app
+  - [x] 6b: sign-in in the web app (Clerk's sign-in windows, the token on every call, quotas
+        shown)
   - [ ] 6c: Terraform and Modal deploy, CD
   - [ ] 6d: results write-up, diagram and demo video
 

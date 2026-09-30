@@ -3,8 +3,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { API_URL, type ProgressEvent, api, unwrap } from "./api";
+import { API_URL, ApiError, type ProgressEvent, api, unwrap } from "./api";
 import type { Scope } from "./scope";
+import { streamEvents } from "./stream";
 
 /** Every query for a lecture starts with ["lecture", id], so one invalidation refreshes it all. */
 export const lectureKey = (id: string, ...rest: string[]) => ["lecture", id, ...rest];
@@ -95,6 +96,18 @@ export function useHealth() {
   });
 }
 
+export const meKey = ["me"];
+
+/** Who the API takes the viewer to be and what their quotas leave today. Refreshed after each
+ *  question and upload, which use them up. */
+export function useMe() {
+  return useQuery({
+    queryKey: meKey,
+    queryFn: async () => unwrap(await api.GET("/v1/me")),
+    staleTime: 30_000,
+  });
+}
+
 export function useCourses() {
   return useQuery({
     queryKey: ["courses"],
@@ -124,14 +137,16 @@ export function useSearch(scope: Scope, query: string) {
   });
 }
 
-/** A lecture's or course's Q&A threads, most recent first. */
-export function useThreads(scope: Scope) {
+/** The viewer's own Q&A threads about a lecture or course, most recent first (all of them for
+ *  an admin). Listing them needs sign-in. */
+export function useThreads(scope: Scope, enabled = true) {
   return useQuery({
     queryKey: scopeKey(scope, "threads"),
     queryFn: async () =>
       scope.kind === "lecture"
         ? unwrap(await api.GET("/v1/lectures/{lecture_id}/threads", path(scope.id)))
         : unwrap(await api.GET("/v1/courses/{course_id}/threads", { params: { path: { course_id: scope.id } } })),
+    enabled,
   });
 }
 
@@ -147,25 +162,52 @@ export function useThread(threadId: string | null) {
 }
 
 /** Live progress while a lecture processes, from the API's server-sent events. When the run
- *  ends, every query for the lecture refreshes, so results appear without a reload. */
+ *  ends, every query for the lecture refreshes, so results appear without a reload. Read with
+ *  fetch, since EventSource can't send the session token; a dropped connection reconnects, as
+ *  EventSource would, until the run ends. */
 export function useProgress(id: string, active: boolean): ProgressEvent | null {
   const [event, setEvent] = useState<ProgressEvent | null>(null);
   const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!active) return;
-    // A dropped connection reconnects on its own; the stream is closed here once the run ends.
-    const source = new EventSource(`${API_URL}/v1/lectures/${id}/events`);
-    source.onmessage = (message: MessageEvent<string>) => {
-      const data = JSON.parse(message.data) as ProgressEvent;
-      setEvent(data);
-      if (data.progress?.status !== "running") {
-        source.close();
-        void queryClient.invalidateQueries({ queryKey: key(id) });
+    const controller = new AbortController();
+    let finished = false;
+    const follow = async () => {
+      for (let attempt = 0; !finished && !controller.signal.aborted; attempt += 1) {
+        try {
+          await streamEvents<ProgressEvent>(
+            `${API_URL}/v1/lectures/${id}/events`,
+            { headers: { Accept: "text/event-stream" }, signal: controller.signal },
+            (data) => {
+              attempt = 0;
+              setEvent(data);
+              if (data.progress?.status !== "running") {
+                finished = true;
+                void queryClient.invalidateQueries({ queryKey: key(id) });
+              }
+            },
+          );
+        } catch (error) {
+          // Refused (not visible, signed out): trying again won't help.
+          if (controller.signal.aborted || (error instanceof ApiError && error.status < 500)) return;
+        }
+        if (!finished) await pause(Math.min(1000 * 2 ** attempt, 15_000), controller.signal);
       }
     };
-    return () => source.close();
+    void follow();
+    return () => controller.abort();
   }, [id, active, queryClient]);
 
   return event;
+}
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }

@@ -9,9 +9,11 @@ import {
   EllipsisIcon,
   FileQuestionIcon,
   FolderIcon,
+  GlobeIcon,
   GraduationCapIcon,
   HistoryIcon,
   LinkIcon,
+  LockIcon,
   MessagesSquareIcon,
   NotebookTextIcon,
   PresentationIcon,
@@ -46,7 +48,16 @@ import {
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { type Lecture, type Slide, type StudyNotes, type TranscriptLine, api, unwrap } from "@/lib/api";
+import { refusal } from "@/lib/access";
+import {
+  type Lecture,
+  type Slide,
+  type StudyNotes,
+  type TranscriptLine,
+  type Visibility,
+  api,
+  unwrap,
+} from "@/lib/api";
 import { formatRelative } from "@/lib/format";
 import {
   courseKey,
@@ -62,7 +73,8 @@ import {
 import { type Open, lectureHref } from "@/lib/scope";
 import { formatTime, indexAt, slideAt } from "@/lib/timeline";
 
-import { ChatPanel } from "./chat";
+import { PrivateBadge, useAccount } from "./account";
+import { AskPanel } from "./chat";
 import { StatusBadge, useDocumentTitle } from "./common";
 import { NotesPanel, QuizPanel, downloadNotes } from "./notes";
 import { ChapterRail, KeyHints, usePlayerKeys } from "./player";
@@ -198,12 +210,36 @@ function LectureHeader({
   slideCount: number | undefined;
   time: number;
 }) {
+  const queryClient = useQueryClient();
   const courses = useCourses();
+  const account = useAccount();
   const course = courses.data?.find((c) => c.id === lecture.course_id);
   const [history, setHistory] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const { start } = useStartProcessing(lecture.id);
   const ready = lecture.status === "ready";
+  // Someone else's public lecture reads the same, without the controls that change it.
+  const mine = account.canChange(lecture);
+
+  async function setVisibility(visibility: Visibility) {
+    try {
+      unwrap(
+        await api.PATCH("/v1/lectures/{lecture_id}", {
+          params: { path: { lecture_id: lecture.id } },
+          body: { visibility },
+        }),
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: lectureKey(lecture.id) }),
+        queryClient.invalidateQueries({ queryKey: ["lectures"] }),
+      ]);
+      toast.success(
+        visibility === "public" ? "Published: everyone can see it now" : "Made private: only its owner and admins see it",
+      );
+    } catch (e) {
+      toast.error("Couldn't change who sees the lecture", { description: refusal(e) });
+    }
+  }
 
   const copyLink = async () => {
     const seconds = Math.floor(time);
@@ -230,7 +266,10 @@ function LectureHeader({
         <div className="flex min-w-0 flex-[1_1_18rem] flex-col gap-2">
           <h1 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">{lecture.title}</h1>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
-            <StatusBadge status={lecture.status} />
+            <span className="flex gap-1.5">
+              <StatusBadge status={lecture.status} />
+              <PrivateBadge visibility={lecture.visibility} />
+            </span>
             {lecture.duration_s != null && (
               <span className="flex items-center gap-1.5 tabular-nums">
                 <ClockIcon className="size-3.5" /> {formatTime(lecture.duration_s)}
@@ -248,7 +287,7 @@ function LectureHeader({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <CoursePicker lecture={lecture} />
+          {mine && <CoursePicker lecture={lecture} />}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" aria-label="More actions">
@@ -267,14 +306,23 @@ function LectureHeader({
               <DropdownMenuItem onSelect={() => setHistory(true)}>
                 <HistoryIcon /> Processing history
               </DropdownMenuItem>
-              {ready && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => setConfirm(true)}>
-                    <RotateCcwIcon /> Process again
-                  </DropdownMenuItem>
-                </>
+              {((ready && mine) || (account.auth && account.admin)) && <DropdownMenuSeparator />}
+              {ready && mine && (
+                <DropdownMenuItem onSelect={() => setConfirm(true)}>
+                  <RotateCcwIcon /> Process again
+                </DropdownMenuItem>
               )}
+              {account.auth &&
+                account.admin &&
+                (lecture.visibility === "private" ? (
+                  <DropdownMenuItem onSelect={() => void setVisibility("public")}>
+                    <GlobeIcon /> Make public
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem onSelect={() => void setVisibility("private")}>
+                    <LockIcon /> Make private
+                  </DropdownMenuItem>
+                ))}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -303,7 +351,10 @@ function LectureHeader({
 function CoursePicker({ lecture }: { lecture: Lecture }) {
   const queryClient = useQueryClient();
   const courses = useCourses();
+  const account = useAccount();
   const current = courses.data?.find((course) => course.id === lecture.course_id);
+  // A lecture can join only a course the viewer may change; its current one stays listed.
+  const joinable = (courses.data ?? []).filter((course) => account.canChange(course) || course.id === current?.id);
 
   async function move(courseId: string | null) {
     try {
@@ -323,11 +374,11 @@ function CoursePicker({ lecture }: { lecture: Lecture }) {
       const title = courses.data?.find((course) => course.id === courseId)?.title;
       toast.success(title ? `Moved to ${title}` : "Taken out of its course");
     } catch (e) {
-      toast.error("Couldn't move the lecture", { description: e instanceof Error ? e.message : String(e) });
+      toast.error("Couldn't move the lecture", { description: refusal(e) });
     }
   }
 
-  if (!courses.data || (courses.data.length === 0 && !lecture.course_id)) return null;
+  if (!courses.data || (joinable.length === 0 && !lecture.course_id)) return null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -342,7 +393,7 @@ function CoursePicker({ lecture }: { lecture: Lecture }) {
           value={lecture.course_id ?? "none"}
           onValueChange={(value) => void move(value === "none" ? null : value)}
         >
-          {courses.data.map((course) => (
+          {joinable.map((course) => (
             <DropdownMenuRadioItem key={course.id} value={course.id}>
               <span className="truncate">{course.title}</span>
             </DropdownMenuRadioItem>
@@ -430,7 +481,7 @@ function StudyPanel({
         <QuizPanel lectureId={lecture.id} quiz={notes.quiz} onSeek={onSeek} />
       </TabsContent>
       <TabsContent value="ask" forceMount className={tab}>
-        <ChatPanel scope={scope} onOpen={onOpen} suggestions={suggestions} />
+        <AskPanel scope={scope} onOpen={onOpen} suggestions={suggestions} />
       </TabsContent>
     </Tabs>
   );

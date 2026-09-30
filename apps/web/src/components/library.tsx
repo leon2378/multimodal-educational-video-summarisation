@@ -27,18 +27,20 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { refusal } from "@/lib/access";
 import { type Course, type Lecture, api, unwrap } from "@/lib/api";
 import { formatDuration, formatRelative, hueFor, pluralise } from "@/lib/format";
 import { useCourses, useLectures } from "@/lib/queries";
 import { lectureHref } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
 
+import { PrivateBadge, SignInPrompt, useAccount } from "./account";
 import { Callout, LectureCover, StatusBadge, useDocumentTitle } from "./common";
 import { DropTarget } from "./upload";
 
-type Filter = "all" | "ready" | "processing" | "attention";
+type Filter = "all" | "yours" | "ready" | "processing" | "attention";
 
-const FILTERS: Record<Filter, (lecture: Lecture) => boolean> = {
+const BY_STATUS: Record<Exclude<Filter, "yours">, (lecture: Lecture) => boolean> = {
   all: () => true,
   ready: (lecture) => lecture.status === "ready",
   processing: (lecture) => lecture.status === "processing",
@@ -49,8 +51,11 @@ export function LibraryView() {
   useDocumentTitle("Library");
   const lectures = useLectures();
   const courses = useCourses();
+  const account = useAccount();
   const [filter, setFilter] = useState<Filter>("all");
   const [text, setText] = useState("");
+  const yours = (lecture: Lecture) => account.user !== null && lecture.owner_id === account.user.id;
+  const matches = (f: Filter, lecture: Lecture) => (f === "yours" ? yours(lecture) : BY_STATUS[f](lecture));
 
   if (lectures.isPending) return <LibrarySkeleton />;
   if (lectures.isError) {
@@ -68,12 +73,12 @@ export function LibraryView() {
   const needle = text.trim().toLowerCase();
   const shown = all.filter(
     (lecture) =>
-      FILTERS[filter](lecture) &&
+      matches(filter, lecture) &&
       (!needle ||
         lecture.title.toLowerCase().includes(needle) ||
         (courseTitles.get(lecture.course_id ?? "") ?? "").toLowerCase().includes(needle)),
   );
-  const count = (f: Filter) => all.filter(FILTERS[f]).length;
+  const count = (f: Filter) => all.filter((lecture) => matches(f, lecture)).length;
 
   return (
     <div className="flex flex-col gap-10">
@@ -129,6 +134,11 @@ export function LibraryView() {
             <ToggleGroupItem value="all" className="px-3">
               All <Count n={all.length} />
             </ToggleGroupItem>
+            {account.auth && count("yours") > 0 && (
+              <ToggleGroupItem value="yours" className="px-3">
+                Yours <Count n={count("yours")} />
+              </ToggleGroupItem>
+            )}
             <ToggleGroupItem value="ready" className="px-3">
               Ready <Count n={count("ready")} />
             </ToggleGroupItem>
@@ -176,7 +186,10 @@ function LectureCard({ lecture, course }: { lecture: Lecture; course?: string })
         lecture={lecture}
         className="aspect-video rounded-xl shadow-sm ring-1 ring-border transition group-hover:shadow-md group-hover:ring-primary/40"
       >
-        {lecture.status !== "ready" && <StatusBadge status={lecture.status} className="absolute top-2 left-2 shadow-sm backdrop-blur" />}
+        <span className="absolute top-2 left-2 flex gap-1.5">
+          {lecture.status !== "ready" && <StatusBadge status={lecture.status} className="shadow-sm backdrop-blur" />}
+          <PrivateBadge visibility={lecture.visibility} className="shadow-sm" />
+        </span>
         {lecture.duration_s != null && (
           <span className="absolute right-2 bottom-2 rounded-md bg-black/75 px-1.5 py-0.5 font-mono text-xs text-white tabular-nums">
             {formatTime(lecture.duration_s)}
@@ -209,7 +222,10 @@ function CourseCard({ course }: { course: Course }) {
         <LibraryIcon className="size-5" />
       </span>
       <span className="flex min-w-0 flex-col">
-        <span className="truncate font-medium transition-colors group-hover:text-primary">{course.title}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-medium transition-colors group-hover:text-primary">{course.title}</span>
+          <PrivateBadge visibility={course.visibility} className="shrink-0" />
+        </span>
         <span className="truncate text-sm text-muted-foreground">
           {course.description || pluralise(course.lecture_count, "lecture")}
         </span>
@@ -223,11 +239,16 @@ function CourseCard({ course }: { course: Course }) {
 
 export function NewCourseButton({ variant = "outline" }: { variant?: "outline" | "default" }) {
   const queryClient = useQueryClient();
+  const account = useAccount();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  // Only admins make public courses; everyone else's are private to them.
+  const [isPublic, setIsPublic] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const signIn = account.auth && !account.signedIn;
+  const choosesVisibility = account.auth && account.admin;
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -235,15 +256,22 @@ export function NewCourseButton({ variant = "outline" }: { variant?: "outline" |
     setError(null);
     try {
       const course = unwrap(
-        await api.POST("/v1/courses", { body: { title: title.trim(), description: description.trim() || null } }),
+        await api.POST("/v1/courses", {
+          body: {
+            title: title.trim(),
+            description: description.trim() || null,
+            visibility: choosesVisibility ? (isPublic ? "public" : "private") : null,
+          },
+        }),
       );
       await queryClient.invalidateQueries({ queryKey: ["courses"] });
       toast.success(`Created ${course.title}`);
       setOpen(false);
       setTitle("");
       setDescription("");
+      setIsPublic(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(refusal(e));
     } finally {
       setBusy(false);
     }
@@ -263,41 +291,65 @@ export function NewCourseButton({ variant = "outline" }: { variant?: "outline" |
               A course groups lectures, so you can search and ask questions across all of them.
             </DialogDescription>
           </DialogHeader>
-          <form id="new-course" onSubmit={create} className="flex flex-col gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="course-title">Title</Label>
-              <Input
-                id="course-title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="MIT 6.0001 Fall 2016"
-                maxLength={300}
-                required
-                autoFocus
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="course-description">
-                Description <span className="font-normal text-muted-foreground">(optional)</span>
-              </Label>
-              <Textarea
-                id="course-description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Introduction to Computer Science and Programming in Python"
-                maxLength={2000}
-                rows={3}
-              />
-            </div>
-            {error && <Callout tone="error">{error}</Callout>}
-          </form>
+          {signIn ? (
+            <SignInPrompt title="Sign in to make courses">
+              Your courses are private to you, and can hold your lectures.
+            </SignInPrompt>
+          ) : (
+            <form id="new-course" onSubmit={create} className="flex flex-col gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="course-title">Title</Label>
+                <Input
+                  id="course-title"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="MIT 6.0001 Fall 2016"
+                  maxLength={300}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="course-description">
+                  Description <span className="font-normal text-muted-foreground">(optional)</span>
+                </Label>
+                <Textarea
+                  id="course-description"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Introduction to Computer Science and Programming in Python"
+                  maxLength={2000}
+                  rows={3}
+                />
+              </div>
+              {choosesVisibility && (
+                <label className="flex items-start gap-2.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={isPublic}
+                    onChange={(event) => setIsPublic(event.target.checked)}
+                    className="mt-0.5 size-4 accent-primary"
+                  />
+                  <span>
+                    <span className="font-medium">Public</span>
+                    <span className="block text-muted-foreground">
+                      Everyone can see it, signed in or not. Otherwise only you can.
+                    </span>
+                  </span>
+                </label>
+              )}
+              {error && <Callout tone="error">{error}</Callout>}
+            </form>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
+              {signIn ? "Close" : "Cancel"}
             </Button>
-            <Button type="submit" form="new-course" disabled={!title.trim() || busy}>
-              Create course
-            </Button>
+            {!signIn && (
+              <Button type="submit" form="new-course" disabled={!title.trim() || busy}>
+                Create course
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

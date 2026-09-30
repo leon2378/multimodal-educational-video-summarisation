@@ -2,7 +2,8 @@
 # With an NVIDIA GPU (nvidia-smi finds one), the embedding model runs on it too
 # (infra/compose.gpu.yaml). `make up GPU=` keeps it on the CPU.
 GPU ?= $(shell nvidia-smi -L >/dev/null 2>&1 && echo 1)
-COMPOSE := docker compose -f infra/compose.yaml $(if $(GPU),-f infra/compose.gpu.yaml)
+# .env also fills in the Compose file's ${...} values (the web app's Clerk keys).
+COMPOSE := docker compose $(if $(wildcard .env),--env-file .env) -f infra/compose.yaml $(if $(GPU),-f infra/compose.gpu.yaml)
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
 
 .DEFAULT_GOAL := help

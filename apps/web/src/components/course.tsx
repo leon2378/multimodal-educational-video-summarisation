@@ -36,13 +36,15 @@ import {
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api } from "@/lib/api";
+import { refusal } from "@/lib/access";
+import { api, ensureOk } from "@/lib/api";
 import { formatDuration, hueFor, pluralise } from "@/lib/format";
 import { useCourse } from "@/lib/queries";
 import { type Open, lectureHref } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
 
-import { ChatPanel } from "./chat";
+import { PrivateBadge, useAccount } from "./account";
+import { AskPanel } from "./chat";
 import { LectureCover, StatusBadge, useDocumentTitle } from "./common";
 import { SearchBox, SearchResults } from "./search";
 import { DropTarget, useUpload } from "./upload";
@@ -60,6 +62,7 @@ export function CourseView({ id }: { id: string }) {
   const queryClient = useQueryClient();
   const course = useCourse(id);
   const { openUpload } = useUpload();
+  const account = useAccount();
   const [confirm, setConfirm] = useState(false);
   const [query, setQuery] = useState("");
   const open = useCallback<Open>((lectureId, seconds) => router.push(lectureHref(lectureId, seconds)), [router]);
@@ -68,7 +71,7 @@ export function CourseView({ id }: { id: string }) {
 
   async function remove() {
     try {
-      await api.DELETE("/v1/courses/{course_id}", { params: { path: { course_id: id } } });
+      ensureOk(await api.DELETE("/v1/courses/{course_id}", { params: { path: { course_id: id } } }));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["courses"] }),
         queryClient.invalidateQueries({ queryKey: ["lectures"] }),
@@ -76,7 +79,7 @@ export function CourseView({ id }: { id: string }) {
       toast.success(`Deleted ${course.data?.title ?? "the course"}`);
       router.push("/");
     } catch (e) {
-      toast.error("Couldn't delete the course", { description: e instanceof Error ? e.message : String(e) });
+      toast.error("Couldn't delete the course", { description: refusal(e) });
     }
   }
 
@@ -114,6 +117,8 @@ export function CourseView({ id }: { id: string }) {
   const ready = info.lectures.filter((lecture) => lecture.status === "ready").length;
   const seconds = info.lectures.reduce((sum, lecture) => sum + (lecture.duration_s ?? 0), 0);
   const hue = hueFor(info.id);
+  // Adding lectures and deleting are for its owner (or an admin); anyone who can see it reads it.
+  const mine = account.canChange(info);
 
   return (
     <div className="flex flex-col gap-6">
@@ -138,35 +143,40 @@ export function CourseView({ id }: { id: string }) {
                 <div className="flex min-w-0 flex-col gap-1">
                   <h1 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">{info.title}</h1>
                   {info.description && <p className="text-muted-foreground">{info.description}</p>}
-                  <p className="text-sm text-muted-foreground">
+                  <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+                    <PrivateBadge visibility={info.visibility} />
                     {pluralise(info.lecture_count, "lecture")}
                     {seconds > 0 && ` · ${formatDuration(seconds)}`}
                     {info.lecture_count > 0 && ` · ${ready} ready`}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button onClick={() => openUpload({ courseId: id })}>
-                  <PlusIcon /> Add lecture
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon" aria-label="More actions">
-                      <EllipsisIcon />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem variant="destructive" onSelect={() => setConfirm(true)}>
-                      <Trash2Icon /> Delete course
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+              {mine && (
+                <div className="flex items-center gap-2">
+                  <Button onClick={() => openUpload({ courseId: id })}>
+                    <PlusIcon /> Add lecture
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" aria-label="More actions">
+                        <EllipsisIcon />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem variant="destructive" onSelect={() => setConfirm(true)}>
+                        <Trash2Icon /> Delete course
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )}
             </div>
           </header>
           <section className="flex flex-col gap-3">
             <h2 className="text-lg font-semibold tracking-tight">Lectures</h2>
-            {info.lectures.length === 0 ? (
+            {info.lectures.length === 0 && !mine ? (
+              <p className="text-sm text-muted-foreground">No lectures in this course yet.</p>
+            ) : info.lectures.length === 0 ? (
               <DropTarget courseId={id} />
             ) : (
               <ol className="flex flex-col gap-2">
@@ -188,7 +198,10 @@ export function CourseView({ id }: { id: string }) {
                         <span className="line-clamp-2 leading-snug font-medium transition-colors group-hover:text-primary">
                           {lecture.title}
                         </span>
-                        {lecture.status !== "ready" && <StatusBadge status={lecture.status} />}
+                        <span className="flex gap-1.5">
+                          {lecture.status !== "ready" && <StatusBadge status={lecture.status} />}
+                          <PrivateBadge visibility={lecture.visibility} />
+                        </span>
                       </div>
                     </Link>
                   </li>
@@ -212,7 +225,7 @@ export function CourseView({ id }: { id: string }) {
                 </TabsList>
               </div>
               <TabsContent value="ask" forceMount className="min-h-0 flex-1 data-[state=inactive]:hidden">
-                <ChatPanel scope={scope} onOpen={open} suggestions={SUGGESTIONS} />
+                <AskPanel scope={scope} onOpen={open} suggestions={SUGGESTIONS} />
               </TabsContent>
               <TabsContent
                 value="search"
