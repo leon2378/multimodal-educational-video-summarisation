@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 to 3 of 6 done, Phase 4 done but for the CI gate, Phase 5 done but for the detector in the pipeline (OCR routing, a trained frame detector, speed benchmarks): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 4 of 6 done, Phase 5 done but for the detector in the pipeline (OCR routing, a trained frame detector, speed benchmarks): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions in CI, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -35,7 +35,7 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - Evals ([below](#evals)): suites for speech recognition (word error rate against the
   captions), notes (concept citations), search (Recall@5, MRR, nDCG) and answers (an LLM judge
   for correctness and faithfulness, plus citation accuracy), recorded in Postgres and gated by
-  thresholds.
+  thresholds, in CI as well as locally.
 - A frame detector ([below](#frame-detector)): RF-DETR fine-tuned to find slides, people,
   figures and annotations in video frames, on frames labelled automatically from the lectures'
   slide PDFs. Trained and scored; not in the pipeline yet.
@@ -56,7 +56,7 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - Unit tests, plus integration tests that start real Postgres, SeaweedFS, Temporal and Qdrant
   with testcontainers and drive the whole flow through the API.
 - CI: lint, type-check, tests, the web app's checks and build, dependency audits (Python and
-  npm), image builds. Actions are pinned to commit SHAs.
+  npm), image builds, and the eval gate on the whole stack. Actions are pinned to commit SHAs.
 
 ## Getting started
 
@@ -262,6 +262,7 @@ MIT 6.0001 Lecture 10 (process it first; the suites find it by the video's hash)
 ```bash
 make eval                                   # every suite; exits 1 if a metric is past its threshold
 uv run lecture-eval --suites asr,notes      # some of them
+uv run lecture-eval --prepare --gate        # on a fresh stack: fetch the media, process Lecture 10, gate
 uv run lecture-eval --suites notes --notes-file data/baselines/<video>/<run>/result.json   # score the Gemini baseline's notes
 ```
 
@@ -270,8 +271,17 @@ Each suite prints a summary, writes the details (every question, answer and verd
 commit, the models and settings, and the metrics. `evals/thresholds.json` holds the bounds the
 gate checks, set a little below today's scores.
 
+In CI, `.github/workflows/eval.yml` runs the same gate on GitHub's runner
+([architecture](docs/architecture.md#eval-gate-in-ci-phase-4c)): the stack in Docker without a
+GPU, Lecture 10 fetched and processed through the API (`--prepare`), then every suite, with
+search scored without the reranker, which a CPU can't run at a usable speed. It runs on pushes
+that touch the API, the pipeline, prompts, search or the evals, every Monday, and on demand,
+and needs a `GEMINI_API_KEY` repository secret. The stage cache carries over between runs, so a
+run only redoes what changed.
+
 The captions and slide PDF aren't in git: they're the lecture's own material (CC BY-NC-SA).
-Each dataset file names the file to put in `data/lectures/`, where to get it, and its SHA-256. The answer judge uses
+Each dataset file names the file, its URL and its SHA-256; `--prepare` downloads what's missing
+into `data/lectures/`. The answer judge uses
 `LLM_MODEL` (or `--judge-model`), the same Gemini model that answers, and it isn't calibrated
 against hand grades yet, so treat its scores as a trend. The golden questions were drafted from
 the captions and still need checking by hand against the video.
@@ -442,7 +452,9 @@ formulas, and one answer went wrong: asked for the three ways of measuring effic
 "order of growth", which OCR had read but between the lines of an annotation written across the
 slide. Routing sends slides with figures, angled text or doubtful OCR to the vision LLM, which
 keeps those, and halves the cost of reading slides. The differences in search and answers are
-within what one lecture and one judge can separate.
+within what one lecture and one judge can separate. The vision LLM's missing titles came back in
+the CI eval gate's first rehearsal (a batch of 8 of the routed slides), so a routed slide read
+without a title now keeps OCR's.
 
 ### Frame detector
 
@@ -652,6 +664,11 @@ from the blueprint in these places:
   ([architecture](docs/architecture.md#ocr-and-routing-phase-5a)). OCR uses the PP-OCRv6 models
   that come with RapidOCR rather than the PP-OCRv5 the blueprint names: newer, and nothing more
   to download.
+- **The eval gate runs every suite in CI, on the CPU.** The blueprint runs a small subset on
+  pull requests and the full suite nightly; here the stage cache makes the full suite cheap
+  enough for every push that could change a score, plus a weekly run. Without a GPU, speech
+  recognition runs on the CPU and the reranker's bounds are left to `make eval` on a machine
+  with one ([architecture](docs/architecture.md#eval-gate-in-ci-phase-4c)).
 - **No MLflow.** Eval runs are recorded in Postgres (`eval_runs`) and charted in Grafana;
   detector training runs and benchmark results are files under `data/` (RF-DETR's logs,
   `data/bench/*.json`), and the numbers that matter are in this README. MLflow would come in
@@ -688,12 +705,13 @@ from the blueprint in these places:
         golden Q&A set and retrieval eval
   - [x] 3b: streamed answers with checked `[mm:ss]` citations, chat panel, threads and feedback
   - [x] Courses: search and answers across a course's lectures
-- [ ] **Phase 4, evals and observability**
+- [x] **Phase 4, evals and observability**
   - [x] 4a: eval suites (search, answers with an LLM judge, speech recognition, notes),
         `eval_runs`, thresholds and a local gate (`make eval`)
   - [x] 4b: OpenTelemetry traces, metrics and logs, a Grafana dashboard, LLM tracing (Langfuse
         optional), cost per answer and per run
-  - [ ] 4c: the eval gate in CI
+  - [x] 4c: the eval gate in CI: every suite on GitHub's runner (CPU, no reranker), Lecture 10
+        fetched and processed through the API, the stage cache carried between runs
 - [ ] **Phase 5, CV and optimisation**
   - [x] 5a: OCR on every slide (RapidOCR), the vision LLM only for slides with figures,
         annotations or doubtful OCR, and a slides eval against the slide PDF

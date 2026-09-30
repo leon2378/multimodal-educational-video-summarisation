@@ -203,7 +203,11 @@ def read_slides(
         usage = Usage()
         if routed:
             from_vlm, usage = with_vlm(set(routed))
-            readings |= from_vlm
+            for slide_id, reading in from_vlm.items():
+                # Now and then the vision LLM returns a whole batch without titles; OCR has them.
+                if not reading.title and readings[slide_id].title:
+                    reading = reading.model_copy(update={"title": readings[slide_id].title})
+                readings[slide_id] = reading
         return SlideReadings(
             readings=[readings[s.id] for s in deck.output.slides], usage=usage, routed=routed
         )
@@ -212,7 +216,7 @@ def read_slides(
     if mode == "routed":
         params |= {**vlm_params, **asdict(routing)}
     spec = StageSpec(
-        "read_slides", "2", model=llm.model_name if mode == "routed" else None, params=params
+        "read_slides", "3", model=llm.model_name if mode == "routed" else None, params=params
     )
     return ctx.cache.run(spec, {"slides": deck.key, "ocr": texts.key}, SlideReadings, compute)
 

@@ -3,6 +3,7 @@
     uv run lecture-eval                          # every suite
     uv run lecture-eval --suites retrieval,asr   # some of them
     uv run lecture-eval --gate                   # exit 1 if a metric is past its threshold
+    uv run lecture-eval --prepare --gate         # on a fresh stack: fetch media, process, gate
 
 Suites: retrieval (search), answers (Q&A, with an LLM judge), asr (word error rate against the
 captions), notes (concept citations against the captions) and slides (slide text against the
@@ -18,7 +19,9 @@ from pathlib import Path
 import httpx
 
 from lecture_core.settings import Settings
-from lecture_evals.runs import SuiteResult, failures, load_thresholds, save
+from lecture_evals import prepare
+from lecture_evals.golden import GoldenLecture, GoldenSet
+from lecture_evals.runs import Bound, SuiteResult, failures, load_thresholds, save
 from lecture_evals.suites import answers, asr, notes, retrieval, slides
 from lecture_llm.models import LLMConfigError, make_model
 from lecture_llm.settings import LLMSettings
@@ -44,6 +47,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="score this result.json's notes (Gemini baseline or make process) in the notes suite",
     )
+    parser.add_argument(
+        "--video-dir", type=Path, default=Path("data/lectures"), help="for --prepare"
+    )
+    parser.add_argument(
+        "--modes",
+        default=",".join(retrieval.MODES),
+        help="search modes the retrieval suite scores; the others' thresholds aren't checked",
+    )
+    parser.add_argument(
+        "--prepare",
+        action="store_true",
+        help="first download the datasets' missing media and process their lecture (as CI does)",
+    )
     parser.add_argument("--judge-model", help="provider:model for the answer judge (LLM_MODEL)")
     parser.add_argument("--pause", type=float, default=0.0, help="seconds between questions")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="report directory")
@@ -53,10 +69,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
     if unknown := [s for s in suites if s not in SUITES]:
         parser.error(f"unknown suite(s): {', '.join(unknown)}")
+    modes = [m.strip() for m in args.modes.split(",") if m.strip()]
+    if unknown := [m for m in modes if m not in retrieval.MODES]:
+        parser.error(f"unknown search mode(s): {', '.join(unknown)}")
 
     runners: dict[str, Callable[[httpx.Client], tuple[SuiteResult, str]]] = {
         "retrieval": lambda client: _with_text(
-            retrieval.run(client, args.golden, args.out), retrieval.to_markdown
+            retrieval.run(client, args.golden, args.out, modes), retrieval.to_markdown
         ),
         "asr": lambda client: _with_text(
             asr.run(client, args.captions, args.captions_dir, args.out), asr.to_markdown
@@ -74,9 +93,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     }
     thresholds = load_thresholds(THRESHOLDS)
+    unmeasured = _unmeasured(thresholds, modes)
     results: list[tuple[SuiteResult, bool | None]] = []
     gate_failed = False
     with httpx.Client(base_url=args.api_url, timeout=300) as client:
+        if args.prepare:
+            try:
+                _prepare(client, suites, args)
+            except (httpx.HTTPError, LookupError, RuntimeError, TimeoutError) as error:
+                print(f"Couldn't prepare: {error}", file=sys.stderr)
+                return 1
         for suite in suites:
             print(f"\n## {suite}\n")
             try:
@@ -87,6 +113,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 continue
             failed = failures(result, thresholds)
             print(text)
+            if suite == "retrieval" and unmeasured:
+                print(f"\nNot gated, as their modes weren't run: {', '.join(unmeasured)}")
             print(f"\nReport: {result.report}")
             if failed:
                 print("Below threshold: " + "; ".join(failed))
@@ -98,6 +126,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     if results and not args.no_save:
         save(results, Settings())
     return 1 if args.gate and gate_failed else 0
+
+
+def _unmeasured(thresholds: dict[str, dict[str, Bound]], modes: Sequence[str]) -> list[str]:
+    """Takes the retrieval bounds for modes not run (named <mode>.<metric>) out of the gate."""
+    bounds = thresholds.get("retrieval", {})
+    unmeasured = [metric for metric in bounds if metric.split(".")[0] not in modes]
+    for metric in unmeasured:
+        del bounds[metric]
+    return unmeasured
+
+
+def _prepare(client: httpx.Client, suites: Sequence[str], args: argparse.Namespace) -> None:
+    """The chosen suites' media, downloaded where missing, then their lectures processed."""
+    lectures: dict[str, GoldenLecture] = {}
+    files: list[prepare.MediaFile] = []
+    if {"retrieval", "answers"} & set(suites):
+        golden = GoldenSet.load(args.golden)
+        lectures[golden.lecture.video_sha256] = golden.lecture
+    if {"asr", "notes"} & set(suites):
+        captions = asr.CaptionsSet.load(args.captions)
+        lectures[captions.lecture.video_sha256] = captions.lecture
+        srt = captions.captions
+        files.append(prepare.MediaFile(args.captions_dir / srt.file, srt.sha256, srt.url))
+    if "slides" in suites:
+        slides_set = slides.SlidesSet.load(args.slides)
+        lectures[slides_set.lecture.video_sha256] = slides_set.lecture
+        pdf = slides_set.pdf
+        files.append(prepare.MediaFile(args.pdf_dir / pdf.file, pdf.sha256, pdf.url))
+    for lecture in lectures.values():
+        video = args.video_dir / lecture.video
+        files.append(prepare.MediaFile(video, lecture.video_sha256, lecture.video_url))
+    with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(60, read=300)) as downloads:
+        prepare.fetch(files, downloads)
+    for lecture in lectures.values():
+        prepare.process(client, lecture, args.video_dir / lecture.video)
 
 
 def _with_text[R](

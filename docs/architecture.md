@@ -198,7 +198,32 @@ opens that lecture at 1:04. A big-O question was answered from Lecture 10 with c
 - Every run is an `eval_runs` row: suite, dataset path and SHA-256, git commit (`-dirty` with
   local changes), config (models, prompt fingerprints, modes) and flat metrics.
   `evals/thresholds.json` bounds the metrics that matter; `--gate` exits 1 past them.
-- A real CI gate needs the processed lecture and a Gemini key in CI; that's Phase 4c.
+
+### Eval gate in CI (Phase 4c)
+
+`.github/workflows/eval.yml` runs the suites on GitHub's runner and fails the build past
+`evals/thresholds.json`: on pushes to main (and pull requests) that touch the API, the
+pipeline, prompts, search or the evals, every Monday (the hosted LLM can change under us), and
+on demand.
+
+- **The stack** is the Compose file with `infra/compose.eval.yaml` on top. The runner has no
+  GPU, so one worker serves every queue with speech recognition on the CPU (the worker image's
+  `asr` extra: faster-whisper without CUDA), and search runs hybrid: reranking takes over a
+  minute a query on a CPU, so the reranker isn't started and `--modes dense,bm25,hybrid` leaves
+  its thresholds out of the gate.
+- **The lecture**: `lecture-eval --prepare` downloads what the datasets name and CI doesn't have
+  (the video and captions from the Internet Archive's mirror of the course, the slide PDF from
+  OCW; each dataset gives the URL and SHA-256), then uploads and processes Lecture 10 through
+  the API as a user would, and the suites run on the result.
+- **Caches**: the speech model, the embedding model and the lecture's media are cached by
+  version. The stage cache (`artifacts/` in object storage) is synced out after each run and
+  back in before the next, so only stages whose inputs changed run again: a change to a prompt
+  reruns the stages that use it, and nothing else. The first run transcribes the lecture on the
+  CPU; later ones spend their time on the answers suite's LLM calls.
+- **The LLM** is Gemini's free tier, through the `GEMINI_API_KEY` repository secret (the lecture
+  is openly licensed). Pull requests from forks don't get the secret, so the job skips them.
+- **Results** go to the job summary (each suite's tables and whether it's within its bounds) and
+  the reports to a workflow artifact. The `eval_runs` rows stay in the runner's database.
 
 ### Observability (Phase 4b)
 
@@ -294,7 +319,9 @@ Every slide is OCR'd, and only the slides OCR can't handle go to the vision LLM
   the vision LLM described a figure on is among them, except one with only faint arrows.
 - **OCR readings**: the title is the tall text starting in the top 30% of the slide, over as
   many lines as it runs; the rest is text, bullets as "- ". Lines in the bottom 8% (the
-  footer) are dropped. A reading records who made it (`slides.reader`: `ocr` or `vlm`).
+  footer) are dropped. A reading records who made it (`slides.reader`: `ocr` or `vlm`). A
+  slide the vision LLM returns without a title (Gemini sometimes drops a whole batch's) keeps
+  OCR's: a run of the eval gate found 8 of 24 slides untitled that way.
 - **Modes**: `SLIDE_READER` is `routed` (the default), `vlm` (every slide, as before 5a) or
   `ocr`. `vlm` keeps the cache key slide reading always had, so lectures read before 5a aren't
   read again.
@@ -417,7 +444,7 @@ measures. The tables are in the README; what they decided is
 ## Next: shipping (Phase 6), and the detector once more lectures are labelled
 
 Phase 6 puts it online: auth and quotas, then deployment (Terraform, Modal for the GPU work)
-and CD. The eval gate in CI (4c) waits for more lectures and somewhere to keep them.
+and CD.
 
 The detector finds slides (AP 1.00) and people (0.99) on the held-out lecture, and a slide
 playing a video, which the brightness test misses; but it routes slides worse than the 5a rule

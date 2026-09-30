@@ -17,6 +17,8 @@ class GoldenLecture(BaseModel):
     title: str
     video: str
     video_sha256: str
+    # Where `lecture-eval --prepare` downloads the video from when it's missing.
+    video_url: str | None = None
     duration: str
     source: str
     licence: str

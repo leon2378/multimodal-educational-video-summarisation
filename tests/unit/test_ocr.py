@@ -174,6 +174,21 @@ def test_routed_reading_sends_only_the_routed_slides_to_the_llm(tmp_path: Path) 
     assert fake.calls == ["_SlideBatch"]
 
 
+def test_a_routed_slide_the_llm_leaves_untitled_keeps_the_ocr_title(tmp_path: Path) -> None:
+    ctx, deck = _deck_with_images(tmp_path)
+    texts = StageResult(
+        key="ocr",
+        output=DeckOcr(model="test", slides=[text_slide(0), text_slide(1, ink=0.2), text_slide(2)]),
+        cached=False,
+    )
+    llm = LectureLLM(FakeLLM(untitled=True).model, PROMPTS)
+
+    reading = stages.read_slides(ctx, deck, llm, texts, "routed").output.readings[1]
+
+    # The vision LLM's reading, with OCR's title.
+    assert (reading.reader, reading.title, reading.latex) == ("vlm", "A TITLE", ["O(n)"])
+
+
 def test_reading_every_slide_with_the_llm_keeps_its_old_cache_key(tmp_path: Path) -> None:
     ctx, deck = _deck_with_images(tmp_path)
     llm = LectureLLM(FakeLLM().model, PROMPTS)

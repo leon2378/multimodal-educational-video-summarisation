@@ -1,0 +1,28 @@
+# The eval gate in CI (.github/workflows/eval.yml), on a GitHub runner without a GPU. One worker
+# serves every queue, with speech recognition on the CPU, and search runs hybrid: the reranker
+# takes over a minute a query on a CPU, so it isn't started and its thresholds aren't gated.
+# The embedding model's download lives in .eval/tei, which the workflow caches between runs.
+#   docker compose -f infra/compose.yaml -f infra/compose.eval.yaml --profile app up -d api cpu-worker
+services:
+  embeddings:
+    volumes:
+      - ../.eval/tei:/data
+
+  api:
+    environment:
+      SEARCH_MODE: hybrid
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?the eval gate needs GEMINI_API_KEY}
+
+  cpu-worker:
+    build:
+      args:
+        EXTRA: asr
+    image: lecture-summariser/worker:asr
+    command: ["lecture-worker", "--queues", "cpu,llm,gpu"]
+    environment:
+      SEARCH_MODE: hybrid
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?the eval gate needs GEMINI_API_KEY}
+      WHISPER_DEVICE: cpu
+      WHISPER_MODEL_PATH: /app/data/models/faster-whisper-large-v3-turbo
+    volumes:
+      - ../data/models:/app/data/models:ro

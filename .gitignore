@@ -20,6 +20,8 @@ data/
 *.mkv
 *.webm
 *.mov
+# What the eval gate caches between CI runs (infra/compose.eval.yaml).
+.eval/
 
 # Web app
 node_modules/

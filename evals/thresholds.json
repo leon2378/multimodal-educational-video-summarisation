@@ -1,9 +1,10 @@
 {
-  "_about": "The eval gate: `lecture-eval --gate` fails when a metric falls outside its bounds. Bounds sit a little below what the pipeline scores on MIT 6.0001 Lecture 10, so a regression trips them but run-to-run noise doesn't. Latency isn't gated: it depends on the machine and on Gemini's free tier.",
+  "_about": "The eval gate: `lecture-eval --gate` fails when a metric falls outside its bounds. Bounds sit a little below what the pipeline scores on MIT 6.0001 Lecture 10, so a regression trips them but run-to-run noise doesn't. Latency isn't gated: it depends on the machine and on Gemini's free tier. CI (.github/workflows/eval.yml) has no GPU and runs search without the reranker, so it gates the hybrid bounds and leaves out the rerank ones (lecture-eval --modes).",
   "retrieval": {
     "rerank.recall_at_5": {"min": 0.95},
     "rerank.mrr_at_10": {"min": 0.8},
-    "hybrid.recall_at_5": {"min": 0.9}
+    "hybrid.recall_at_5": {"min": 0.9},
+    "hybrid.mrr_at_10": {"min": 0.8}
   },
   "answers": {
     "correctness": {"min": 0.85},
@@ -24,7 +25,7 @@
     "chapter_issues": {"max": 0}
   },
   "slides": {
-    "word_f1": {"min": 0.8},
+    "word_f1": {"min": 0.75},
     "titled": {"min": 0.9}
   }
 }

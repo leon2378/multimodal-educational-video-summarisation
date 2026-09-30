@@ -117,9 +117,9 @@ services:
   # tei-data on first start. --max-batch-tokens also caps the longest input (longer ones are
   # truncated); chunks are under 1,000 tokens.
   #
-  # Embeddings run on the CPU, off the GPU that speech recognition needs. The CPU backend has no
-  # flash attention, so memory grows with the square of the batch: the 16384 default runs out
-  # of memory while warming up.
+  # Embeddings run on the CPU here; with a GPU, infra/compose.gpu.yaml moves them onto it (ADR
+  # 0008). The CPU backend has no flash attention, so memory grows with the square of the batch:
+  # the 16384 default runs out of memory while warming up.
   embeddings:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
     command: ["--model-id", "Qwen/Qwen3-Embedding-0.6B", "--revision", "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3", "--max-batch-tokens", "4096"]

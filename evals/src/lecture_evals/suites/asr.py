@@ -30,6 +30,7 @@ class CaptionsFile(BaseModel):
     file: str
     sha256: str
     source: str
+    url: str | None = None
 
 
 class CaptionsSet(BaseModel):

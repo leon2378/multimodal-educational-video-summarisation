@@ -36,6 +36,7 @@ class SlidesPdf(BaseModel):
     file: str
     sha256: str
     source: str
+    url: str | None = None
     # Text every page carries (course name, page number), removed before scoring.
     footer: str = ""
 

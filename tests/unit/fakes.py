@@ -64,9 +64,11 @@ class FakeLLM:
     """Answers each of the four agents by the title of its output schema, citing whatever
     segment ids appear in the prompt."""
 
-    def __init__(self, drop_slide: int | None = None) -> None:
+    def __init__(self, drop_slide: int | None = None, untitled: bool = False) -> None:
         self.calls: list[str] = []
         self.drop_slide = drop_slide
+        # Slides read without titles, as Gemini sometimes returns a whole batch.
+        self.untitled = untitled
         self.model = FunctionModel(self._respond, model_name="fake-llm")
 
     def _respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -84,7 +86,7 @@ class FakeLLM:
                 "slides": [
                     {
                         "slide_id": n,
-                        "title": f"Slide {n}",
+                        "title": "" if self.untitled else f"Slide {n}",
                         "text": "- a bullet",
                         "figure_description": "",
                         "latex": ["O(n)"] if n == 1 else [],
