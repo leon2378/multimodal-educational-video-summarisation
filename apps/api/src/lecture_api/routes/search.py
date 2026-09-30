@@ -9,7 +9,9 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
-from lecture_api.deps import SearcherDep, SessionDep, SettingsDep, course_or_404
+from lecture_api.access import course_or_404, lecture_or_404, readable
+from lecture_api.auth import ViewerDep
+from lecture_api.deps import SearcherDep, SessionDep, SettingsDep
 from lecture_api.schemas import SearchHitOut, SearchResults
 from lecture_core.models import Lecture
 from lecture_rag.search import SearchMode
@@ -22,6 +24,7 @@ async def search(
     searcher: SearcherDep,
     settings: SettingsDep,
     session: SessionDep,
+    viewer: ViewerDep,
     q: Annotated[str, Query(min_length=1, max_length=500, pattern=r"\S")],
     lecture_id: Annotated[
         list[uuid.UUID] | None, Query(description="Search only these lectures (repeatable).")
@@ -35,7 +38,8 @@ async def search(
         Query(description="Default: the server's `SEARCH_MODE`. `rerank` ranks best."),
     ] = None,
 ) -> SearchResults:
-    """The passages that best match `q`, best first, each with its place in the video."""
+    """The passages that best match `q`, best first, each with its place in the video. Only
+    lectures the caller may read are searched: the public ones, and their own."""
     mode = mode or SearchMode(settings.search_mode)
     lecture_ids = lecture_id
     if course_id is not None:
@@ -43,12 +47,21 @@ async def search(
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, "Search a course or lectures, not both."
             )
-        await course_or_404(session, course_id)
+        await course_or_404(session, course_id, viewer)
         lecture_ids = list(
-            await session.scalars(select(Lecture.id).where(Lecture.course_id == course_id))
+            await session.scalars(
+                select(Lecture.id).where(Lecture.course_id == course_id, readable(Lecture, viewer))
+            )
         )
-        if not lecture_ids:
-            return SearchResults(query=q, mode=mode, hits=[])
+    elif lecture_ids:
+        for wanted in lecture_ids:
+            await lecture_or_404(session, wanted, viewer)
+    elif not viewer.admin:
+        lecture_ids = list(
+            await session.scalars(select(Lecture.id).where(readable(Lecture, viewer)))
+        )
+    if lecture_ids is not None and not lecture_ids:
+        return SearchResults(query=q, mode=mode, hits=[])
     try:
         # The clients are synchronous (the workers share them), so run them off the event loop.
         hits = await run_in_threadpool(

@@ -3,7 +3,7 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 5 done but for the detector in the pipeline
+## Current state: Phase 6 under way (sign-in and quotas in the API)
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
@@ -11,7 +11,9 @@ pipeline stages; the results land in Postgres and the search index; the web app 
 step with the video, searches them and answers questions about them, for one lecture or across
 a course. The same stages also run on a local file without any of that (`lecture-process`,
 which stops before search). Eval suites score each part through the API, and the API and
-workers report traces, metrics and logs over OpenTelemetry.
+workers report traces, metrics and logs over OpenTelemetry. With sign-in on, the API checks
+Clerk's session tokens: visitors read and search the public lectures, and signed-in users ask
+and upload within quotas.
 
 ```
  client ── upload (presigned PUT) ──────────────────────────────► SeaweedFS
@@ -414,6 +416,37 @@ measures. The tables are in the README; what they decided is
   6 GB. Speech recognition stays at int8_float16, and the detector, once in the pipeline, would
   run as a TensorRT fp16 engine.
 
+### Sign-in and quotas (Phase 6)
+
+`lecture_api.auth`, `access` and `quotas`; the choices are
+[ADR 0009](adr/0009-clerk-sign-in-and-quotas.md).
+
+- **Tokens**: with `AUTH_ISSUER` set, a request may carry the issuer's session token as a
+  bearer token. The API checks its RS256 signature against the issuer's published keys
+  (`{issuer}/.well-known/jwks.json`, fetched once and cached), its expiry, its issuer, the
+  origin Clerk issued it for (`azp`, against `AUTH_AUTHORIZED_PARTIES`), and an audience for
+  issuers that set one. Its `sub` names the user, who gets a `users` row on their first request
+  (with email and name if the token carries them). No token: anonymous. A bad one: 401, so a
+  lapsed session is told to sign in again rather than quietly shown less.
+- **Who sees what**: lectures and courses have an owner and a visibility. Anonymous visitors read
+  and search the public ones; a signed-in user also their own; admins (`ADMIN_USERS`, by `sub`)
+  everything. Asking, uploading, processing and making courses need sign-in; changing a lecture
+  or course needs its owner or an admin, and only admins make things public. Search filters by
+  the lectures the caller may read, and so does a course's lecture list. Threads and ratings
+  are their user's. Unreadable things answer 404; readable but not yours, 403.
+- **Quotas**: counted per UTC day from rows that already exist: a user's questions (30 a day, 5 a
+  minute), their lectures (3 a day, each up to 1 GB, checked when the upload is confirmed), and
+  everyone's LLM spend: each answer's tokens at paid-tier prices plus each processing run's
+  recorded cost (free when its LLM stages all came from the cache). Past $2 a day, questions
+  and processing wait for the next day. Limits answer 429 with `Retry-After`; `GET /v1/me`
+  reports them.
+- **Off by default**: without an issuer, every request is one local user with no limits, and
+  what it makes is public: development, the tests and the eval gate run as before. The browser
+  sends the token with `fetch` (CORS allows `Authorization` and exposes `Retry-After`); the
+  progress stream moves off `EventSource`, which can't send it. Sign-in is checked before the
+  other dependencies, so an anonymous caller hears 401 rather than, say, 503 for a missing
+  language model.
+
 ### Known limitations
 
 - Slide detection assumes light slides on a dark hall, as in MIT OCW recordings. Two slides with the
@@ -430,8 +463,9 @@ measures. The tables are in the README; what they decided is
   previous slide, so its chunk leads with the wrong slide text, and search ranks the next
   segment (which shows the right slide) first. Chunking by sentences with some overlap, or
   indexing slides on their own, would help.
-- Until auth arrives in Phase 6, anyone who can reach the API can ask questions and spend the
-  LLM quota; Compose binds the API to 127.0.0.1. An answer the client disconnects from isn't
+- With sign-in off (the local default), anyone who can reach the API can ask questions and
+  spend the LLM budget, so Compose binds the API to 127.0.0.1. With it on, the quotas are soft:
+  two requests at the same moment can both pass. An answer the client disconnects from isn't
   saved.
 - A question is searched once, and the answer uses the top 6 segments. A two-part question
   across a course can get all six from one lecture: asked both how to check what code prints
@@ -453,8 +487,9 @@ measures. The tables are in the README; what they decided is
 
 ## Next: shipping (Phase 6), and a detector that routes as well as the rule
 
-Phase 6 puts it online: auth and quotas, then deployment (Terraform, Modal for the GPU work)
-and CD.
+Phase 6 goes on with the web app's sign-in (Clerk's Next.js pages, the token on every call,
+the progress stream read with `fetch`), then deployment (Terraform, Modal for the GPU work) and
+CD.
 
 The detector finds slides (AP 1.00) and people (0.99) on the held-out lectures, and a slide
 playing a video, which the brightness test misses; but trained on ten lectures it still routes

@@ -48,6 +48,31 @@ def _enum_values(enum_cls: type[StrEnum]) -> list[str]:
     return [member.value for member in enum_cls]
 
 
+class Visibility(StrEnum):
+    PUBLIC = "public"  # anyone can read and search it, signed in or not
+    PRIVATE = "private"  # its owner and admins only
+
+
+def _visibility() -> Enum:
+    return Enum(Visibility, native_enum=False, length=16, values_callable=_enum_values)
+
+
+class User(Base):
+    """Someone signed in through the issuer (docs/adr/0009), added on their first request."""
+
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    # The issuer's id for them: the token's `sub` (Clerk's user_...).
+    subject: Mapped[str] = mapped_column(String(255), unique=True)
+    email: Mapped[str | None] = mapped_column(String(320))
+    name: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Course(Base):
     """A group of lectures that search and Q&A can span."""
 
@@ -56,6 +81,13 @@ class Course(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(String(300))
     description: Mapped[str | None] = mapped_column(Text)
+    # No owner: made without sign-in (the local stack's demo courses).
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    visibility: Mapped[Visibility] = mapped_column(
+        _visibility(), server_default=Visibility.PRIVATE.value
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -70,6 +102,13 @@ class Lecture(Base):
     # A lecture belongs to at most one course. Deleting the course keeps the lecture.
     course_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("courses.id", ondelete="SET NULL"), index=True
+    )
+    # Who uploaded it; none for lectures added without sign-in (the demo lectures).
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    visibility: Mapped[Visibility] = mapped_column(
+        _visibility(), server_default=Visibility.PRIVATE.value
     )
     # Stored as VARCHAR rather than a native enum, so adding a status needs no ALTER TYPE.
     status: Mapped[LectureStatus] = mapped_column(
@@ -211,6 +250,10 @@ class QAThread(Base):
     )
     course_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("courses.id", ondelete="CASCADE"), index=True
+    )
+    # Who asked; none without sign-in. Threads are private to their user.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     # The first question, shortened.
     title: Mapped[str] = mapped_column(String(200))

@@ -6,7 +6,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, computed_field
 
-from lecture_core.models import LectureStatus, MessageRole, Rating, RunStatus
+from lecture_api.quotas import QuotaUsage
+from lecture_core.models import LectureStatus, MessageRole, Rating, RunStatus, Visibility
 from lecture_core.notes import StudyNotes
 from lecture_core.processing import Progress, StageInfo
 from lecture_llm.pricing import text_cost_usd
@@ -24,9 +25,11 @@ class LectureCreate(BaseModel):
 
 
 class LectureUpdate(BaseModel):
-    """Only the fields sent are changed. `course_id: null` takes a lecture out of its course."""
+    """Only the fields sent are changed. `course_id: null` takes a lecture out of its course.
+    Only admins change `visibility`."""
 
     course_id: uuid.UUID | None = None
+    visibility: Visibility | None = None
 
 
 class LectureOut(BaseModel):
@@ -44,6 +47,10 @@ class LectureOut(BaseModel):
     content_hash: str | None
     licence: str | None
     attribution: str | None
+    # `public`: anyone can read it; `private`: its owner and admins. No owner: added without
+    # sign-in (the demo lectures).
+    visibility: Visibility
+    owner_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 
@@ -51,6 +58,8 @@ class LectureOut(BaseModel):
 class CourseCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300, pattern=r"\S")
     description: str | None = Field(default=None, max_length=2000)
+    # Only admins make a public course; otherwise it's private to whoever made it.
+    visibility: Visibility | None = None
 
 
 class CourseOut(BaseModel):
@@ -59,6 +68,8 @@ class CourseOut(BaseModel):
     id: uuid.UUID
     title: str
     description: str | None
+    visibility: Visibility
+    owner_id: uuid.UUID | None
     lecture_count: int = 0
     created_at: datetime
     updated_at: datetime
@@ -320,3 +331,23 @@ class AskEvent(
     ]
 ):
     pass
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str | None
+    name: str | None
+
+
+class MeOut(BaseModel):
+    """Who the API takes the caller to be, and what they may still do today."""
+
+    # Whether the API checks sign-in. Without it, every caller is one local user with no limits.
+    auth: bool
+    signed_in: bool
+    user: UserOut | None
+    admin: bool
+    # A signed-in user's quotas; none for admins, the local user and anonymous visitors.
+    quotas: QuotaUsage | None

@@ -295,6 +295,16 @@
             "pattern": "\\S",
             "title": "Title",
             "type": "string"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Visibility"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -338,6 +348,18 @@
             "title": "Lectures",
             "type": "array"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -346,12 +368,17 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
           }
         },
         "required": [
           "id",
           "title",
           "description",
+          "visibility",
+          "owner_id",
           "created_at",
           "updated_at",
           "lectures"
@@ -387,6 +414,18 @@
             "title": "Lecture Count",
             "type": "integer"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -395,12 +434,17 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
           }
         },
         "required": [
           "id",
           "title",
           "description",
+          "visibility",
+          "owner_id",
           "created_at",
           "updated_at"
         ],
@@ -670,6 +714,18 @@
             ],
             "title": "Licence"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "size_bytes": {
             "anyOf": [
               {
@@ -696,6 +752,9 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
           }
         },
         "required": [
@@ -710,6 +769,8 @@
           "content_hash",
           "licence",
           "attribution",
+          "visibility",
+          "owner_id",
           "created_at",
           "updated_at"
         ],
@@ -728,7 +789,7 @@
         "type": "string"
       },
       "LectureUpdate": {
-        "description": "Only the fields sent are changed. `course_id: null` takes a lecture out of its course.",
+        "description": "Only the fields sent are changed. `course_id: null` takes a lecture out of its course.\nOnly admins change `visibility`.",
         "properties": {
           "course_id": {
             "anyOf": [
@@ -741,9 +802,65 @@
               }
             ],
             "title": "Course Id"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Visibility"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "LectureUpdate",
+        "type": "object"
+      },
+      "MeOut": {
+        "description": "Who the API takes the caller to be, and what they may still do today.",
+        "properties": {
+          "admin": {
+            "title": "Admin",
+            "type": "boolean"
+          },
+          "auth": {
+            "title": "Auth",
+            "type": "boolean"
+          },
+          "quotas": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuotaUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "signed_in": {
+            "title": "Signed In",
+            "type": "boolean"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "auth",
+          "signed_in",
+          "user",
+          "admin",
+          "quotas"
+        ],
+        "title": "MeOut",
         "type": "object"
       },
       "MediaOut": {
@@ -1061,6 +1178,56 @@
           "at_s"
         ],
         "title": "QuizQuestion",
+        "type": "object"
+      },
+      "QuotaUsage": {
+        "description": "A signed-in user's limits and what they've used today.",
+        "properties": {
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "questions_per_day": {
+            "title": "Questions Per Day",
+            "type": "integer"
+          },
+          "questions_per_minute": {
+            "title": "Questions Per Minute",
+            "type": "integer"
+          },
+          "questions_today": {
+            "title": "Questions Today",
+            "type": "integer"
+          },
+          "resets_at": {
+            "format": "date-time",
+            "title": "Resets At",
+            "type": "string"
+          },
+          "upload_bytes": {
+            "title": "Upload Bytes",
+            "type": "integer"
+          },
+          "uploads_per_day": {
+            "title": "Uploads Per Day",
+            "type": "integer"
+          },
+          "uploads_today": {
+            "title": "Uploads Today",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "questions_today",
+          "questions_per_day",
+          "questions_per_minute",
+          "uploads_today",
+          "uploads_per_day",
+          "upload_bytes",
+          "paused",
+          "resets_at"
+        ],
+        "title": "QuotaUsage",
         "type": "object"
       },
       "Rating": {
@@ -1751,6 +1918,44 @@
         "title": "UsageOut",
         "type": "object"
       },
+      "UserOut": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "name"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1790,6 +1995,14 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "Visibility": {
+        "enum": [
+          "public",
+          "private"
+        ],
+        "title": "Visibility",
+        "type": "string"
       }
     }
   },
@@ -1994,7 +2207,7 @@
     },
     "/v1/courses/{course_id}/ask": {
       "post": {
-        "description": "Answer a question from every processed lecture in the course. Citations name the\nlecture, like [L2 12:34]; each source's `lecture_label` says which lecture is L2.",
+        "description": "Answer a question from every processed lecture in the course the caller may read.\nCitations name the lecture, like [L2 12:34]; each source's `lecture_label` says which\nlecture is L2.",
         "operationId": "ask_course_v1_courses__course_id__ask_post",
         "parameters": [
           {
@@ -2048,6 +2261,7 @@
     },
     "/v1/courses/{course_id}/threads": {
       "get": {
+        "description": "The caller's conversations about the course.",
         "operationId": "list_course_threads_v1_courses__course_id__threads_get",
         "parameters": [
           {
@@ -2095,7 +2309,7 @@
     },
     "/v1/feedback": {
       "post": {
-        "description": "Rate an answer. Rating it again replaces the earlier rating.",
+        "description": "Rate one of the caller's answers. Rating it again replaces the earlier rating.",
         "operationId": "feedback_v1_feedback_post",
         "requestBody": {
           "content": {
@@ -2137,6 +2351,7 @@
     },
     "/v1/lectures": {
       "get": {
+        "description": "The lectures the caller may read: the public ones, and their own.",
         "operationId": "list_lectures_v1_lectures_get",
         "parameters": [
           {
@@ -2184,6 +2399,7 @@
         ]
       },
       "post": {
+        "description": "A signed-in user's lecture is private to them. Without sign-in (local), it's public.",
         "operationId": "create_lecture_v1_lectures_post",
         "requestBody": {
           "content": {
@@ -2266,7 +2482,7 @@
         ]
       },
       "patch": {
-        "description": "Change only the fields sent. So far that's the course.",
+        "description": "Change only the fields sent: the course (one of the caller's own), or, for admins, who\ncan see the lecture.",
         "operationId": "update_lecture_v1_lectures__lecture_id__patch",
         "parameters": [
           {
@@ -2320,7 +2536,7 @@
     },
     "/v1/lectures/{lecture_id}/ask": {
       "post": {
-        "description": "Answer a question from the lecture, citing it as [mm:ss]. The question and answer are\nsaved in a thread; send its `thread_id` to ask a follow-up. An answer the client\ndisconnects from isn't saved.",
+        "description": "Answer a question from the lecture, citing it as [mm:ss]. The question and answer are\nsaved in a thread; send its `thread_id` to ask a follow-up. An answer the client\ndisconnects from isn't saved. Needs sign-in, within the user's quota of questions.",
         "operationId": "ask_v1_lectures__lecture_id__ask_post",
         "parameters": [
           {
@@ -2549,7 +2765,7 @@
     },
     "/v1/lectures/{lecture_id}/process": {
       "post": {
-        "description": "Idempotent: while a run is in progress, asking again returns that run.",
+        "description": "Idempotent: while a run is in progress, asking again returns that run. Only the\nlecture's owner (or an admin) can start one.",
         "operationId": "process_v1_lectures__lecture_id__process_post",
         "parameters": [
           {
@@ -2688,6 +2904,7 @@
     },
     "/v1/lectures/{lecture_id}/threads": {
       "get": {
+        "description": "The caller's conversations about the lecture.",
         "operationId": "list_threads_v1_lectures__lecture_id__threads_get",
         "parameters": [
           {
@@ -2827,9 +3044,31 @@
         ]
       }
     },
+    "/v1/me": {
+      "get": {
+        "description": "With sign-in off (`auth: false`), the caller is the one local user: signed in, an admin,\nno quotas. Otherwise an anonymous caller gets `signed_in: false`.",
+        "operationId": "me_v1_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me",
+        "tags": [
+          "me"
+        ]
+      }
+    },
     "/v1/search": {
       "get": {
-        "description": "The passages that best match `q`, best first, each with its place in the video.",
+        "description": "The passages that best match `q`, best first, each with its place in the video. Only\nlectures the caller may read are searched: the public ones, and their own.",
         "operationId": "search_v1_search_get",
         "parameters": [
           {

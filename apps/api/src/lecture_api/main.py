@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-from lecture_api.routes import courses, health, lectures, processing, qa, results, search
+from lecture_api.auth import TokenVerifier
+from lecture_api.routes import courses, health, lectures, me, processing, qa, results, search
 from lecture_core import telemetry
 from lecture_core.db import create_engine, create_sessionmaker
 from lecture_core.settings import Settings
@@ -58,6 +59,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Lecture Summariser API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    # Sign-in is on when an issuer is configured (lecture_api.auth); off, one local user.
+    app.state.verifier = TokenVerifier(settings) if settings.auth_issuer else None
+    if app.state.verifier is None:
+        logger.warning("Sign-in is off (no AUTH_ISSUER): every request is the local user.")
     app.state.traced = observed.enabled
     if observed.enabled:
         # No spans for health checks, or for each chunk of a streamed response.
@@ -66,12 +71,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         HTTPXClientInstrumentor().instrument()
         instrument_agents()
-    # The web app calls the API straight from the browser, including the progress stream.
+    # The web app calls the API straight from the browser, including the progress stream, with
+    # the session token in Authorization. Retry-After says when a quota allows more.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization"],
+        expose_headers=["Retry-After"],
     )
     app.include_router(health.router)
     app.include_router(courses.router, prefix="/v1")
@@ -80,4 +87,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(results.router, prefix="/v1")
     app.include_router(search.router, prefix="/v1")
     app.include_router(qa.router, prefix="/v1")
+    app.include_router(me.router, prefix="/v1")
     return app

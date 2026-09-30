@@ -8,7 +8,9 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
-from lecture_api.deps import SessionDep, SettingsDep, StorageDep, lecture_or_404
+from lecture_api.access import lecture_or_404
+from lecture_api.auth import ViewerDep
+from lecture_api.deps import SessionDep, SettingsDep, StorageDep
 from lecture_api.schemas import (
     NotesOut,
     SlideOut,
@@ -23,8 +25,10 @@ router = APIRouter(prefix="/lectures", tags=["results"])
 
 
 @router.get("/{lecture_id}/transcript")
-async def transcript(lecture_id: uuid.UUID, session: SessionDep) -> list[TranscriptLineOut]:
-    await lecture_or_404(session, lecture_id)
+async def transcript(
+    lecture_id: uuid.UUID, session: SessionDep, viewer: ViewerDep
+) -> list[TranscriptLineOut]:
+    await lecture_or_404(session, lecture_id, viewer)
     rows = await session.scalars(
         select(TranscriptSegmentRow)
         .where(TranscriptSegmentRow.lecture_id == lecture_id)
@@ -35,10 +39,14 @@ async def transcript(lecture_id: uuid.UUID, session: SessionDep) -> list[Transcr
 
 @router.get("/{lecture_id}/slides")
 async def slides(
-    lecture_id: uuid.UUID, session: SessionDep, storage: StorageDep, settings: SettingsDep
+    lecture_id: uuid.UUID,
+    session: SessionDep,
+    storage: StorageDep,
+    settings: SettingsDep,
+    viewer: ViewerDep,
 ) -> list[SlideOut]:
     """Image URLs are presigned, so the browser loads slides straight from storage."""
-    await lecture_or_404(session, lecture_id)
+    await lecture_or_404(session, lecture_id, viewer)
     rows = await session.scalars(
         select(SlideRow).where(SlideRow.lecture_id == lecture_id).order_by(SlideRow.slide_id)
     )
@@ -60,8 +68,10 @@ async def slides(
 
 
 @router.get("/{lecture_id}/timeline")
-async def timeline(lecture_id: uuid.UUID, session: SessionDep) -> list[TimelineSegmentOut]:
-    await lecture_or_404(session, lecture_id)
+async def timeline(
+    lecture_id: uuid.UUID, session: SessionDep, viewer: ViewerDep
+) -> list[TimelineSegmentOut]:
+    await lecture_or_404(session, lecture_id, viewer)
     rows = await session.scalars(
         select(TimelineSegmentRow)
         .where(TimelineSegmentRow.lecture_id == lecture_id)
@@ -71,8 +81,8 @@ async def timeline(lecture_id: uuid.UUID, session: SessionDep) -> list[TimelineS
 
 
 @router.get("/{lecture_id}/notes")
-async def notes(lecture_id: uuid.UUID, session: SessionDep) -> NotesOut:
-    await lecture_or_404(session, lecture_id)
+async def notes(lecture_id: uuid.UUID, session: SessionDep, viewer: ViewerDep) -> NotesOut:
+    await lecture_or_404(session, lecture_id, viewer)
     row = await session.get(SummaryRow, (lecture_id, "study_notes"))
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No notes yet: process the lecture first.")

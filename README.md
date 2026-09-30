@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 to 4 of 6 done, Phase 5 done but for the detector in the pipeline (OCR routing, a trained frame detector, speed benchmarks): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions in CI, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 4 of 6 done, Phase 5 done but for the detector in the pipeline (OCR routing, a trained frame detector, speed benchmarks), Phase 6 under way (sign-in and quotas in the API): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions in CI, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -44,6 +44,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   model and the frame detector each way they could run (CPU or GPU; fp32, fp16 or int8;
   PyTorch, ONNX Runtime or TensorRT) and scores every variant, so lost accuracy shows. The
   embedding model is 150 times faster on the GPU, so Compose now runs it there when there is one.
+- Sign-in and quotas ([below](#sign-in-and-quotas)): the API checks Clerk session tokens.
+  Visitors read and search the public demo lectures; signed-in users ask questions and
+  upload private lectures within daily quotas, under a daily ceiling on LLM spend. Off
+  locally.
 - Observability ([below](#observability)): OpenTelemetry traces, metrics and logs from the API
   and workers into Grafana. One trace follows a request through the workflow's activities to
   each LLM call. A dashboard tracks the blueprint's targets, and every answer and pipeline run
@@ -246,6 +250,28 @@ A course answer names each lecture with a label and cites it as `[L2 12:34]`; ea
 shows one with its lectures, and `GET /v1/courses/{id}/threads` its conversations. Deleting a
 course keeps its lectures. Lectures processed before search existed need processing once more
 to be indexed; everything but the embedding and indexing is cached.
+
+## Sign-in and quotas
+
+Sign-in is off until the API has an issuer to trust: locally, every request is one user who can
+see and change everything, with no limits. Set `AUTH_ISSUER` to your Clerk instance's Frontend
+API URL (Clerk dashboard, API keys) and the API checks Clerk's session tokens against Clerk's
+published keys; it holds no Clerk secret ([ADR 0009](docs/adr/0009-clerk-sign-in-and-quotas.md)).
+
+| | Without an account | Signed in | Admin (`ADMIN_USERS`) |
+|---|---|---|---|
+| Read and search the public lectures (the demo) | yes | yes | yes |
+| Ask questions | no | 30 a day, 5 a minute | no limit |
+| Upload and process lectures, private to you | no | 3 a day, up to 1 GB each | no limit |
+| Make courses (private) | no | yes | yes, and public ones |
+| Make a lecture public | no | no | yes |
+
+On top of that, everyone together stops at $2 of LLM spend a day (at paid-tier prices): past it,
+questions and processing wait for 00:00 UTC. A limit answers 429 with `Retry-After`, and
+`GET /v1/me` says who the API takes the caller to be and what their quotas leave today.
+Conversations are private to whoever had them. The limits are settings (see `.env.example`).
+Lectures added before sign-in existed, or with it off, are public. The web app's Clerk sign-in
+comes next; until it's in, leave `AUTH_ISSUER` unset.
 
 ## Evals
 
@@ -682,6 +708,9 @@ from the blueprint in these places:
   enough for every push that could change a score, plus a weekly run. Without a GPU, speech
   recognition runs on the CPU and the reranker's bounds are left to `make eval` on a machine
   with one ([architecture](docs/architecture.md#eval-gate-in-ci-phase-4c)).
+- **The demo's Q&A needs an account.** The blueprint's public demo has live Q&A for
+  anyone; here visitors browse and search freely and sign in to ask, so every LLM call
+  belongs to a user with a quota ([ADR 0009](docs/adr/0009-clerk-sign-in-and-quotas.md)).
 - **No MLflow.** Eval runs are recorded in Postgres (`eval_runs`) and charted in Grafana;
   detector training runs and benchmark results are files under `data/` (RF-DETR's logs,
   `data/bench/*.json`), and the numbers that matter are in this README. MLflow would come in
@@ -736,7 +765,12 @@ from the blueprint in these places:
   - [x] 5c: speed benchmarks before and after (`make bench`): the embedding model moved to the
         GPU (150 times faster), speech recognition stays int8, and the detector would run as a
         TensorRT fp16 engine ([ADR 0008](docs/adr/0008-where-the-models-run.md))
-- [ ] **Phase 6, ship**: auth, quotas, Terraform and Modal deploy, results write-up
+- [ ] **Phase 6, ship**
+  - [x] 6a: sign-in in the API (Clerk tokens), public demo lectures and private uploads,
+        per-user quotas and a daily LLM budget
+  - [ ] 6b: sign-in in the web app
+  - [ ] 6c: Terraform and Modal deploy, CD
+  - [ ] 6d: results write-up, diagram and demo video
 
 ## Data and licensing
 

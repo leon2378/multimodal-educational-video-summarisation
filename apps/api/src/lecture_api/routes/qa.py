@@ -31,14 +31,16 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.concurrency import run_in_threadpool
 
-from lecture_api.deps import (
-    AnswererDep,
-    SearcherDep,
-    SessionDep,
-    SettingsDep,
+from lecture_api import quotas
+from lecture_api.access import (
     course_or_404,
     lecture_or_404,
+    own_threads,
+    readable,
+    thread_or_404,
 )
+from lecture_api.auth import SignedInDep, Viewer
+from lecture_api.deps import AnswererDep, SearcherDep, SessionDep, SettingsDep
 from lecture_api.schemas import (
     AskDelta,
     AskDone,
@@ -114,6 +116,7 @@ async def ask(
     lecture_id: uuid.UUID,
     body: AskRequest,
     request: Request,
+    viewer: SignedInDep,
     session: SessionDep,
     settings: SettingsDep,
     searcher: SearcherDep,
@@ -121,12 +124,13 @@ async def ask(
 ) -> StreamingResponse:
     """Answer a question from the lecture, citing it as [mm:ss]. The question and answer are
     saved in a thread; send its `thread_id` to ask a follow-up. An answer the client
-    disconnects from isn't saved."""
-    lecture = await lecture_or_404(session, lecture_id)
+    disconnects from isn't saved. Needs sign-in, within the user's quota of questions."""
+    lecture = await lecture_or_404(session, lecture_id, viewer)
     if lecture.status != LectureStatus.READY:
         raise HTTPException(status.HTTP_409_CONFLICT, "The lecture hasn't been processed yet.")
+    await quotas.check_question(session, viewer, settings)
     scope = _Scope(lecture_ids=[lecture_id], titles={lecture_id: lecture.title})
-    return await _ask(body, scope, request, session, settings, searcher, answerer)
+    return await _ask(body, scope, viewer, request, session, settings, searcher, answerer)
 
 
 @router.post("/courses/{course_id}/ask", response_class=StreamingResponse, responses=_ASK_RESPONSES)
@@ -134,18 +138,22 @@ async def ask_course(
     course_id: uuid.UUID,
     body: AskRequest,
     request: Request,
+    viewer: SignedInDep,
     session: SessionDep,
     settings: SettingsDep,
     searcher: SearcherDep,
     answerer: AnswererDep,
 ) -> StreamingResponse:
-    """Answer a question from every processed lecture in the course. Citations name the
-    lecture, like [L2 12:34]; each source's `lecture_label` says which lecture is L2."""
-    await course_or_404(session, course_id)
+    """Answer a question from every processed lecture in the course the caller may read.
+    Citations name the lecture, like [L2 12:34]; each source's `lecture_label` says which
+    lecture is L2."""
+    await course_or_404(session, course_id, viewer)
     lectures = (
         await session.scalars(
             select(Lecture).where(
-                Lecture.course_id == course_id, Lecture.status == LectureStatus.READY
+                Lecture.course_id == course_id,
+                Lecture.status == LectureStatus.READY,
+                readable(Lecture, viewer),
             )
         )
     ).all()
@@ -158,26 +166,33 @@ async def ask_course(
         titles={lecture.id: lecture.title for lecture in lectures},
         course_id=course_id,
     )
-    return await _ask(body, scope, request, session, settings, searcher, answerer)
+    await quotas.check_question(session, viewer, settings)
+    return await _ask(body, scope, viewer, request, session, settings, searcher, answerer)
 
 
 @router.get("/lectures/{lecture_id}/threads")
-async def list_threads(lecture_id: uuid.UUID, session: SessionDep) -> list[ThreadOut]:
-    await lecture_or_404(session, lecture_id)
-    return await _threads(session, QAThread.lecture_id == lecture_id)
+async def list_threads(
+    lecture_id: uuid.UUID, session: SessionDep, viewer: SignedInDep
+) -> list[ThreadOut]:
+    """The caller's conversations about the lecture."""
+    await lecture_or_404(session, lecture_id, viewer)
+    return await _threads(session, QAThread.lecture_id == lecture_id, own_threads(viewer))
 
 
 @router.get("/courses/{course_id}/threads")
-async def list_course_threads(course_id: uuid.UUID, session: SessionDep) -> list[ThreadOut]:
-    await course_or_404(session, course_id)
-    return await _threads(session, QAThread.course_id == course_id)
+async def list_course_threads(
+    course_id: uuid.UUID, session: SessionDep, viewer: SignedInDep
+) -> list[ThreadOut]:
+    """The caller's conversations about the course."""
+    await course_or_404(session, course_id, viewer)
+    return await _threads(session, QAThread.course_id == course_id, own_threads(viewer))
 
 
 @router.get("/threads/{thread_id}")
-async def get_thread(thread_id: uuid.UUID, session: SessionDep) -> ThreadDetail:
-    thread = await session.get(QAThread, thread_id)
-    if thread is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Thread not found.")
+async def get_thread(
+    thread_id: uuid.UUID, session: SessionDep, viewer: SignedInDep
+) -> ThreadDetail:
+    thread = await thread_or_404(session, thread_id, viewer)
     messages = (
         await session.scalars(
             select(QAMessage).where(QAMessage.thread_id == thread_id).order_by(QAMessage.created_at)
@@ -201,20 +216,18 @@ async def get_thread(thread_id: uuid.UUID, session: SessionDep) -> ThreadDetail:
 
 
 @router.delete("/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_thread(thread_id: uuid.UUID, session: SessionDep) -> None:
-    thread = await session.get(QAThread, thread_id)
-    if thread is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Thread not found.")
-    await session.delete(thread)
+async def delete_thread(thread_id: uuid.UUID, session: SessionDep, viewer: SignedInDep) -> None:
+    await session.delete(await thread_or_404(session, thread_id, viewer))
     await session.commit()
 
 
 @router.post("/feedback")
-async def feedback(body: FeedbackIn, session: SessionDep) -> FeedbackOut:
-    """Rate an answer. Rating it again replaces the earlier rating."""
+async def feedback(body: FeedbackIn, session: SessionDep, viewer: SignedInDep) -> FeedbackOut:
+    """Rate one of the caller's answers. Rating it again replaces the earlier rating."""
     message = await session.get(QAMessage, body.message_id)
     if message is None or message.role != MessageRole.ASSISTANT:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Answer not found.")
+    await thread_or_404(session, message.thread_id, viewer)
     upsert = (
         insert(Feedback)
         .values(message_id=body.message_id, rating=body.rating, reason=body.reason)
@@ -233,6 +246,7 @@ async def feedback(body: FeedbackIn, session: SessionDep) -> FeedbackOut:
 async def _ask(
     body: AskRequest,
     scope: _Scope,
+    viewer: Viewer,
     request: Request,
     session: AsyncSession,
     settings: Settings,
@@ -244,16 +258,16 @@ async def _ask(
     history: list[ChatTurn] = []
     if body.thread_id is None:
         thread = QAThread(
-            lecture_id=scope.lecture_id, course_id=scope.course_id, title=_title(body.question)
+            lecture_id=scope.lecture_id,
+            course_id=scope.course_id,
+            user_id=viewer.user_id,
+            title=_title(body.question),
         )
         session.add(thread)
         await session.flush()
     else:
-        found = await session.get(QAThread, body.thread_id)
-        if found is None or (found.lecture_id, found.course_id) != (
-            scope.lecture_id,
-            scope.course_id,
-        ):
+        found = await thread_or_404(session, body.thread_id, viewer)
+        if (found.lecture_id, found.course_id) != (scope.lecture_id, scope.course_id):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Thread not found.")
         thread = found
         thread.updated_at = datetime.now(UTC)
@@ -279,9 +293,9 @@ async def _ask(
     )
 
 
-async def _threads(session: AsyncSession, where: ColumnElement[bool]) -> list[ThreadOut]:
+async def _threads(session: AsyncSession, *where: ColumnElement[bool]) -> list[ThreadOut]:
     threads = await session.scalars(
-        select(QAThread).where(where).order_by(QAThread.updated_at.desc()).limit(50)
+        select(QAThread).where(*where).order_by(QAThread.updated_at.desc()).limit(50)
     )
     return [ThreadOut.model_validate(thread) for thread in threads]
 

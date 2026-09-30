@@ -11,6 +11,7 @@ dependencies = [
     "lecture-rag",
     "opentelemetry-instrumentation-fastapi>=0.51b0",
     "pydantic-ai-slim[google]>=2.51",
+    "pyjwt[crypto]>=2.10",
     "qdrant-client>=1.19.1",
     "temporalio>=1.33",
     "uvicorn[standard]>=0.54",

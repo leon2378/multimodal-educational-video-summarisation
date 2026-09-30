@@ -91,8 +91,9 @@ export interface paths {
         put?: never;
         /**
          * Ask Course
-         * @description Answer a question from every processed lecture in the course. Citations name the
-         *     lecture, like [L2 12:34]; each source's `lecture_label` says which lecture is L2.
+         * @description Answer a question from every processed lecture in the course the caller may read.
+         *     Citations name the lecture, like [L2 12:34]; each source's `lecture_label` says which
+         *     lecture is L2.
          */
         post: operations["ask_course_v1_courses__course_id__ask_post"];
         delete?: never;
@@ -108,7 +109,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Course Threads */
+        /**
+         * List Course Threads
+         * @description The caller's conversations about the course.
+         */
         get: operations["list_course_threads_v1_courses__course_id__threads_get"];
         put?: never;
         post?: never;
@@ -129,7 +133,7 @@ export interface paths {
         put?: never;
         /**
          * Feedback
-         * @description Rate an answer. Rating it again replaces the earlier rating.
+         * @description Rate one of the caller's answers. Rating it again replaces the earlier rating.
          */
         post: operations["feedback_v1_feedback_post"];
         delete?: never;
@@ -145,10 +149,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Lectures */
+        /**
+         * List Lectures
+         * @description The lectures the caller may read: the public ones, and their own.
+         */
         get: operations["list_lectures_v1_lectures_get"];
         put?: never;
-        /** Create Lecture */
+        /**
+         * Create Lecture
+         * @description A signed-in user's lecture is private to them. Without sign-in (local), it's public.
+         */
         post: operations["create_lecture_v1_lectures_post"];
         delete?: never;
         options?: never;
@@ -172,7 +182,8 @@ export interface paths {
         head?: never;
         /**
          * Update Lecture
-         * @description Change only the fields sent. So far that's the course.
+         * @description Change only the fields sent: the course (one of the caller's own), or, for admins, who
+         *     can see the lecture.
          */
         patch: operations["update_lecture_v1_lectures__lecture_id__patch"];
         trace?: never;
@@ -190,7 +201,7 @@ export interface paths {
          * Ask
          * @description Answer a question from the lecture, citing it as [mm:ss]. The question and answer are
          *     saved in a thread; send its `thread_id` to ask a follow-up. An answer the client
-         *     disconnects from isn't saved.
+         *     disconnects from isn't saved. Needs sign-in, within the user's quota of questions.
          */
         post: operations["ask_v1_lectures__lecture_id__ask_post"];
         delete?: never;
@@ -288,7 +299,8 @@ export interface paths {
         put?: never;
         /**
          * Process
-         * @description Idempotent: while a run is in progress, asking again returns that run.
+         * @description Idempotent: while a run is in progress, asking again returns that run. Only the
+         *     lecture's owner (or an admin) can start one.
          */
         post: operations["process_v1_lectures__lecture_id__process_post"];
         delete?: never;
@@ -341,7 +353,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Threads */
+        /**
+         * List Threads
+         * @description The caller's conversations about the lecture.
+         */
         get: operations["list_threads_v1_lectures__lecture_id__threads_get"];
         put?: never;
         post?: never;
@@ -385,6 +400,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Me
+         * @description With sign-in off (`auth: false`), the caller is the one local user: signed in, an admin,
+         *     no quotas. Otherwise an anonymous caller gets `signed_in: false`.
+         */
+        get: operations["me_v1_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/search": {
         parameters: {
             query?: never;
@@ -394,7 +430,8 @@ export interface paths {
         };
         /**
          * Search
-         * @description The passages that best match `q`, best first, each with its place in the video.
+         * @description The passages that best match `q`, best first, each with its place in the video. Only
+         *     lectures the caller may read are searched: the public ones, and their own.
          */
         get: operations["search_v1_search_get"];
         put?: never;
@@ -531,6 +568,7 @@ export interface components {
             description?: string | null;
             /** Title */
             title: string;
+            visibility?: components["schemas"]["Visibility"] | null;
         };
         /** CourseDetail */
         CourseDetail: {
@@ -553,6 +591,8 @@ export interface components {
             lecture_count: number;
             /** Lectures */
             lectures: components["schemas"]["LectureOut"][];
+            /** Owner Id */
+            owner_id: string | null;
             /** Title */
             title: string;
             /**
@@ -560,6 +600,7 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            visibility: components["schemas"]["Visibility"];
         };
         /** CourseOut */
         CourseOut: {
@@ -580,6 +621,8 @@ export interface components {
              * @default 0
              */
             lecture_count: number;
+            /** Owner Id */
+            owner_id: string | null;
             /** Title */
             title: string;
             /**
@@ -587,6 +630,7 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            visibility: components["schemas"]["Visibility"];
         };
         /** FeedbackIn */
         FeedbackIn: {
@@ -682,6 +726,8 @@ export interface components {
             id: string;
             /** Licence */
             licence: string | null;
+            /** Owner Id */
+            owner_id: string | null;
             /** Size Bytes */
             size_bytes: number | null;
             /** Source Filename */
@@ -694,6 +740,7 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            visibility: components["schemas"]["Visibility"];
         };
         /**
          * LectureStatus
@@ -703,10 +750,26 @@ export interface components {
         /**
          * LectureUpdate
          * @description Only the fields sent are changed. `course_id: null` takes a lecture out of its course.
+         *     Only admins change `visibility`.
          */
         LectureUpdate: {
             /** Course Id */
             course_id?: string | null;
+            visibility?: components["schemas"]["Visibility"] | null;
+        };
+        /**
+         * MeOut
+         * @description Who the API takes the caller to be, and what they may still do today.
+         */
+        MeOut: {
+            /** Admin */
+            admin: boolean;
+            /** Auth */
+            auth: boolean;
+            quotas: components["schemas"]["QuotaUsage"] | null;
+            /** Signed In */
+            signed_in: boolean;
+            user: components["schemas"]["UserOut"] | null;
         };
         /**
          * MediaOut
@@ -814,6 +877,31 @@ export interface components {
             at_s: number;
             /** Question */
             question: string;
+        };
+        /**
+         * QuotaUsage
+         * @description A signed-in user's limits and what they've used today.
+         */
+        QuotaUsage: {
+            /** Paused */
+            paused: boolean;
+            /** Questions Per Day */
+            questions_per_day: number;
+            /** Questions Per Minute */
+            questions_per_minute: number;
+            /** Questions Today */
+            questions_today: number;
+            /**
+             * Resets At
+             * Format: date-time
+             */
+            resets_at: string;
+            /** Upload Bytes */
+            upload_bytes: number;
+            /** Uploads Per Day */
+            uploads_per_day: number;
+            /** Uploads Today */
+            uploads_today: number;
         };
         /**
          * Rating
@@ -1090,6 +1178,18 @@ export interface components {
              */
             requests: number;
         };
+        /** UserOut */
+        UserOut: {
+            /** Email */
+            email: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1103,6 +1203,11 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * Visibility
+         * @enum {string}
+         */
+        Visibility: "public" | "private";
     };
     responses: never;
     parameters: never;
@@ -1839,6 +1944,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    me_v1_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
                 };
             };
         };

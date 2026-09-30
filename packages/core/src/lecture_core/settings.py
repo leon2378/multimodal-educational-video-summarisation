@@ -54,3 +54,26 @@ class Settings(BaseSettings):
     upload_url_ttl_s: int = 3600
     # A single presigned PUT tops out at 5 GiB on S3. Multipart uploads arrive with the web app.
     max_upload_bytes: int = 5 * 1024**3
+
+    # Sign-in (docs/adr/0009). With an issuer set, requests may carry its session token (Clerk's,
+    # or any OIDC issuer's JWT) as a bearer token: signed-in users ask questions and upload,
+    # within their quotas, and anonymous visitors read and search the public lectures. Unset,
+    # every request is one local user with no limits: development, tests and the eval gate.
+    auth_issuer: str | None = None
+    # Where the issuer publishes its signing keys; defaults to {issuer}/.well-known/jwks.json.
+    auth_jwks_url: str | None = None
+    # The token's `aud`, for issuers that set one (Clerk's session tokens don't).
+    auth_audience: str | None = None
+    # The web app's origins, checked against the token's `azp` (Clerk); empty skips the check.
+    auth_authorized_parties: list[str] = []
+    # Users (the token's `sub`) who see every lecture, can make lectures public, and have no
+    # quotas.
+    admin_users: list[str] = []
+
+    # Quotas for each signed-in user, per UTC day, and a ceiling on everyone's LLM spend: past
+    # it, questions and processing wait for the next day.
+    quota_questions_per_day: int = 30
+    quota_questions_per_minute: int = 5
+    quota_uploads_per_day: int = 3
+    quota_upload_bytes: int = 1024**3
+    daily_llm_budget_usd: float = 2.0

@@ -20,9 +20,12 @@ from temporalio.client import Client
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.service import RPCError
 
-from lecture_api.deps import SessionDep, TemporalDep, lecture_or_404
+from lecture_api import quotas
+from lecture_api.access import lecture_or_404, own_lecture
+from lecture_api.auth import SignedInDep, ViewerDep
+from lecture_api.deps import SessionDep, SettingsDep, TemporalDep
 from lecture_api.schemas import ProgressEvent, RunOut
-from lecture_core.models import LectureStatus, PipelineRun, RunStatus
+from lecture_core.models import Lecture, LectureStatus, PipelineRun, RunStatus
 from lecture_core.processing import (
     PROGRESS_QUERY,
     QUEUE_CPU,
@@ -39,11 +42,19 @@ _PROCESSABLE = {LectureStatus.UPLOADED, LectureStatus.READY, LectureStatus.FAILE
 
 
 @router.post("/{lecture_id}/process", status_code=status.HTTP_202_ACCEPTED)
-async def process(lecture_id: uuid.UUID, session: SessionDep, temporal: TemporalDep) -> RunOut:
-    """Idempotent: while a run is in progress, asking again returns that run."""
-    lecture = await lecture_or_404(session, lecture_id)
+async def process(
+    lecture_id: uuid.UUID,
+    viewer: SignedInDep,
+    session: SessionDep,
+    temporal: TemporalDep,
+    settings: SettingsDep,
+) -> RunOut:
+    """Idempotent: while a run is in progress, asking again returns that run. Only the
+    lecture's owner (or an admin) can start one."""
+    lecture = await own_lecture(session, lecture_id, viewer)
     if (running := await _running_run(session, lecture_id)) is not None:
         return RunOut.model_validate(running)
+    await quotas.check_processing(session, viewer, settings)
     if lecture.status not in _PROCESSABLE:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Lecture is {lecture.status}.")
 
@@ -81,8 +92,8 @@ async def process(lecture_id: uuid.UUID, session: SessionDep, temporal: Temporal
 
 
 @router.get("/{lecture_id}/runs")
-async def list_runs(lecture_id: uuid.UUID, session: SessionDep) -> list[RunOut]:
-    await lecture_or_404(session, lecture_id)
+async def list_runs(lecture_id: uuid.UUID, session: SessionDep, viewer: ViewerDep) -> list[RunOut]:
+    await lecture_or_404(session, lecture_id, viewer)
     runs = await session.scalars(
         select(PipelineRun)
         .where(PipelineRun.lecture_id == lecture_id)
@@ -103,10 +114,14 @@ async def list_runs(lecture_id: uuid.UUID, session: SessionDep) -> list[RunOut]:
     },
 )
 async def events(
-    lecture_id: uuid.UUID, request: Request, session: SessionDep, temporal: TemporalDep
+    lecture_id: uuid.UUID,
+    request: Request,
+    session: SessionDep,
+    temporal: TemporalDep,
+    viewer: ViewerDep,
 ) -> StreamingResponse:
     """Server-sent events: one JSON ProgressEvent per change, until the run finishes."""
-    await lecture_or_404(session, lecture_id)
+    await lecture_or_404(session, lecture_id, viewer)
     sessionmaker: async_sessionmaker[AsyncSession] = request.app.state.sessionmaker
 
     async def stream() -> AsyncIterator[str]:
@@ -144,7 +159,10 @@ async def _progress_event(
     ask_workflow: bool = True,
 ) -> ProgressEvent:
     async with sessionmaker() as session:
-        lecture = await lecture_or_404(session, lecture_id)
+        # Who may watch was checked when the stream opened.
+        lecture = await session.get(Lecture, lecture_id)
+        if lecture is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Lecture not found.")
         run = await session.scalar(
             select(PipelineRun)
             .where(PipelineRun.lecture_id == lecture_id)
