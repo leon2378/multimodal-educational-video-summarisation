@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import httpx
+from pydantic_ai.exceptions import AgentRunError
 
 from lecture_core.settings import Settings
 from lecture_evals import prepare
@@ -107,8 +108,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"\n## {suite}\n")
             try:
                 result, text = runners[suite](client)
-            except (httpx.HTTPError, LookupError, LLMConfigError) as error:
-                print(f"Couldn't run: {error}", file=sys.stderr)
+            except (httpx.HTTPError, LookupError, LLMConfigError, AgentRunError) as error:
+                # A suite that can't run (the API down, an LLM quota spent) fails the gate, and
+                # the other suites still run. On stdout, so CI's job summary shows it.
+                print(f"Couldn't run: {error}")
                 gate_failed = True
                 continue
             failed = failures(result, thresholds)

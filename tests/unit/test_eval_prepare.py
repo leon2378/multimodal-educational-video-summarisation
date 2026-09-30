@@ -8,11 +8,13 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic_ai.exceptions import ModelHTTPError
 
-from lecture_evals import prepare
+from lecture_evals import cli, prepare
 from lecture_evals.cli import _unmeasured
 from lecture_evals.golden import GoldenLecture
-from lecture_evals.runs import Bound
+from lecture_evals.runs import Bound, SuiteResult
+from lecture_evals.suites import answers, asr
 
 VIDEO = b"not really a video"
 LECTURE = GoldenLecture(
@@ -131,3 +133,34 @@ def test_bounds_for_search_modes_not_run_are_left_out_of_the_gate() -> None:
         "retrieval": {"hybrid.recall_at_5": Bound(min=0.9)},
         "asr": {"wer": Bound(max=0.05)},
     }
+
+
+def test_a_suite_that_cant_run_fails_the_gate_and_the_others_still_run(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ran = []
+
+    def spent(*args: Any) -> None:
+        raise ModelHTTPError(429, "gemini", {"error": "free-tier quota"})
+
+    def asr_run(*args: Any) -> tuple[SuiteResult, str]:
+        ran.append("asr")
+        metrics = {"wer": 0.03, "term_recall": 0.99}
+        result = SuiteResult(
+            suite="asr",
+            dataset="d",
+            dataset_sha256="x",
+            lecture_id=None,
+            config={},
+            metrics=metrics,
+        )
+        return result, "report"
+
+    monkeypatch.setattr(cli, "_judge", lambda model: None)
+    monkeypatch.setattr(answers, "run", spent)
+    monkeypatch.setattr(asr, "run", asr_run)
+    monkeypatch.setattr(asr, "to_markdown", lambda report: report)
+
+    assert cli.main(["--suites", "answers,asr", "--gate", "--no-save"]) == 1
+    assert ran == ["asr"]
+    assert "Couldn't run" in capsys.readouterr().out
