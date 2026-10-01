@@ -28,6 +28,10 @@ FROM node:24-slim AS runtime
 # Debian's security fixes reach the base image only when it's rebuilt; this takes any newer ones.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes \
     && rm -rf /var/lib/apt/lists/*
+# The server needs only node. npm, corepack and yarn come with the base image, and with
+# dependencies of their own to keep patched.
+RUN rm -rf /usr/local/lib/node_modules /opt/yarn-v* /usr/local/bin/npm /usr/local/bin/npx \
+    /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
