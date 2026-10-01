@@ -315,7 +315,8 @@ stays.
 - **Releases**: pushing a tag like `v0.6.0` builds the API, worker and web images, scans them for
   known vulnerabilities (the exceptions, with their reasons, are in `.grype.yaml`), and pushes
   them to GHCR. Run by hand from the Actions tab, the release workflow only builds and scans, to
-  check a commit before tagging it. A deploy runs a release's images.
+  check a commit before tagging it. A deploy runs a release's images: deploying another
+  release replaces the VM (at a new address), since the VM only reads its release at boot.
 - **From GitHub**: the *deploy* workflow (Actions, Run workflow) does what `make deploy` and
   `make destroy` do, signed in to Google Cloud without a stored key.
 

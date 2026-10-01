@@ -512,7 +512,9 @@ choices are [ADR 0010](adr/0010-on-demand-demo-on-google-cloud-and-modal.md).
   by hand, it only builds and scans. Each image's final stage runs `apt-get upgrade` and is never
   taken from the build cache, so a release has Debian's latest security fixes even before its
   base image is rebuilt. `deploy.yml` (run by hand) applies or destroys `demo`
-  and, on deploy, waits until `/v1/me` reports sign-in on. Destroying also deletes the
+  and, on deploy, waits until `/v1/me` reports sign-in on. Deploying another release replaces
+  the VM (`replace_triggered_by`), since its startup script reads the release only at boot; a
+  metadata change alone would leave the old images running. Destroying also deletes the
   session's uploads (`raw/`) from the bucket.
 
 ### Known limitations

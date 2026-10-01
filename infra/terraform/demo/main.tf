@@ -28,6 +28,12 @@ data "google_compute_subnetwork" "demo" {
   region = var.region
 }
 
+# The release the VM runs. The startup script reads it only at boot, so a new one replaces the
+# VM rather than changing its metadata under a stack that has already started.
+resource "terraform_data" "release" {
+  input = var.image_tag
+}
+
 resource "google_compute_instance" "demo" {
   name         = "lecture-demo"
   zone         = coalesce(var.zone, "${var.region}-a")
@@ -66,5 +72,9 @@ resource "google_compute_instance" "demo" {
     caddyfile      = file("${path.module}/../../caddy/Caddyfile")
     image-tag      = var.image_tag
     enable-oslogin = "TRUE"
+  }
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.release]
   }
 }
