@@ -22,6 +22,11 @@ cuda = [
     "nvidia-cublas-cu12>=12.9 ; sys_platform == 'linux'",
     "nvidia-cudnn-cu12>=9.26,<10 ; sys_platform == 'linux'",
 ]
+# Modal's client, for speech recognition on a GPU in Modal (infra/modal/asr.py) from a host
+# without one.
+modal = [
+    "modal>=1.5.5",
+]
 
 [tool.uv.sources]
 lecture-core = { workspace = true }

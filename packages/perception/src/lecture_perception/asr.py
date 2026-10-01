@@ -1,13 +1,14 @@
 """Speech recognition behind a Transcriber interface, so the model is a config choice.
 
 faster-whisper is an optional extra (`lecture-perception[asr]`), imported only when a model
-actually loads: the CPU worker and the tests never need it.
+actually loads: the CPU worker and the tests never need it. So is Modal's client
+(`lecture-perception[modal]`), for running the model on a GPU in Modal instead.
 """
 
 import gc
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, BinaryIO, Protocol
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, BinaryIO, Protocol, cast
 
 from lecture_core.timeline import Transcript, TranscriptSegment, Word
 
@@ -141,6 +142,70 @@ class FasterWhisperTranscriber:
     def close(self) -> None:
         self._model = None
         gc.collect()
+
+
+class RemoteTranscription(Protocol):
+    """The `transcribe` function deployed to Modal (infra/modal/asr.py), or a stand-in."""
+
+    def remote_gen(
+        self, audio: bytes, model_id: str, params: dict[str, Any]
+    ) -> Iterator[dict[str, Any]]: ...
+
+
+class ModalTranscriber:
+    """The same model on a GPU in Modal (infra/modal/asr.py), for a worker on a host without one.
+
+    It asks for what a local GPU worker runs (int8 weights with float16 compute) with the same
+    settings, so the stage cache key is the same and a transcript made by either is reused by
+    the other. Progress arrives as the transcription goes, so the activity's heartbeats go on.
+    """
+
+    def __init__(
+        self,
+        config: WhisperConfig,
+        app_name: str = "lecture-asr",
+        function: RemoteTranscription | None = None,
+    ) -> None:
+        compute_type = "int8_float16" if config.compute_type == "auto" else config.compute_type
+        self.config = replace(config, device="cuda", compute_type=compute_type)
+        self._app_name = app_name
+        self._function = function
+
+    @property
+    def model_id(self) -> str:
+        return self.config.model_id
+
+    @property
+    def device(self) -> str:
+        return "modal"
+
+    def cache_params(self) -> dict[str, Any]:
+        return self.config.cache_params()
+
+    def transcribe(
+        self, audio: BinaryIO, on_progress: Callable[[float], None] | None = None
+    ) -> Transcript:
+        function = self._function or self._lookup()
+        transcript: Transcript | None = None
+        for event in function.remote_gen(audio.read(), self.model_id, self.cache_params()):
+            if "transcript" in event:
+                transcript = Transcript.model_validate(event["transcript"])
+            elif on_progress is not None:
+                on_progress(float(event["progress"]))
+        if transcript is None:
+            raise RuntimeError("Modal's transcription ended without a transcript")
+        return transcript
+
+    def close(self) -> None:
+        """Nothing is held here: Modal stops the GPU once it's idle."""
+
+    def _lookup(self) -> RemoteTranscription:
+        import modal
+
+        self._function = cast(
+            RemoteTranscription, modal.Function.from_name(self._app_name, "transcribe")
+        )
+        return self._function
 
 
 def _cuda_available() -> bool:

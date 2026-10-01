@@ -6,7 +6,7 @@ FastEmbed: they're token statistics, and Qdrant applies the IDF weighting.
 """
 
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -67,10 +67,18 @@ class Reranker(Protocol):
 
 
 class TEIEmbedder:
-    """Qwen3-Embedding-0.6B served by TEI (infra/compose.yaml).
+    """Qwen3-Embedding-0.6B served by TEI (infra/compose.yaml, or infra/modal/embeddings.py).
 
     On a laptop CPU, TEI embeds about 95 tokens a second, so a batch of 8 chunks takes around
     30 seconds; the timeout leaves room for a busy server.
+
+    Requests go one at a time, though the API's request threads share an embedder: TEI's CPU
+    server returned wrong vectors for requests sent while others were in flight (ADR 0008).
+    `headers` go with every request, e.g. Modal's proxy auth.
+
+    A passage longer than the server takes (its --max-batch-tokens) is refused rather than cut
+    short: the stage cache keys embeddings by model, not by server, so a truncated vector would
+    be reused as if whole. A question is cut short instead.
     """
 
     def __init__(
@@ -79,10 +87,14 @@ class TEIEmbedder:
         batch_size: int = 8,
         timeout_s: float = 300,
         transport: httpx.BaseTransport | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         self._batch_size = batch_size
-        self._http = httpx.Client(base_url=url, timeout=timeout_s, transport=transport)
+        self._http = httpx.Client(
+            base_url=url, timeout=timeout_s, transport=transport, headers=headers
+        )
         self._model_id: str | None = None
+        self._lock = threading.Lock()
 
     @property
     def model_id(self) -> str:
@@ -98,19 +110,20 @@ class TEIEmbedder:
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self._batch_size):
-            vectors += self._embed(texts[start : start + self._batch_size])
+            vectors += self._embed(texts[start : start + self._batch_size], truncate=False)
         return vectors
 
     def embed_query(self, text: str) -> list[float]:
-        return self._embed([QUERY_INSTRUCTION + text])[0]
+        return self._embed([QUERY_INSTRUCTION + text], truncate=True)[0]
 
     def close(self) -> None:
         self._http.close()
 
-    def _embed(self, texts: Sequence[str]) -> list[list[float]]:
-        response = self._http.post(
-            "/embed", json={"inputs": list(texts), "normalize": True, "truncate": True}
-        )
+    def _embed(self, texts: Sequence[str], truncate: bool) -> list[list[float]]:
+        with self._lock:
+            response = self._http.post(
+                "/embed", json={"inputs": list(texts), "normalize": True, "truncate": truncate}
+            )
         response.raise_for_status()
         vectors: list[list[float]] = response.json()
         return vectors

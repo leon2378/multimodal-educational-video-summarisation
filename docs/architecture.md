@@ -3,7 +3,7 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 6 under way (sign-in and quotas done, deployment next)
+## Current state: Phase 6 under way (the on-demand cloud demo built, its first run next)
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
@@ -13,7 +13,8 @@ a course. The same stages also run on a local file without any of that (`lecture
 which stops before search). Eval suites score each part through the API, and the API and
 workers report traces, metrics and logs over OpenTelemetry. With sign-in on, the API checks
 Clerk's session tokens: visitors read and search the public lectures, and signed-in users ask
-and upload within quotas.
+and upload within quotas. A demo of it all runs on a Google Cloud VM made for a session and
+deleted after, with uploads transcribed on GPUs in Modal.
 
 ```
  client ── upload (presigned PUT) ──────────────────────────────► SeaweedFS
@@ -455,6 +456,51 @@ measures. The tables are in the README; what they decided is
   other dependencies, so an anonymous caller hears 401 rather than, say, 503 for a missing
   language model.
 
+### The demo in the cloud (Phase 6c)
+
+`infra/terraform/`, `infra/compose.cloud.yaml`, `infra/modal/` and `lecture_api.demo`; the
+choices are [ADR 0010](adr/0010-on-demand-demo-on-google-cloud-and-modal.md).
+
+```
+ browser ── https://<ip>.sslip.io ──► Caddy ─┬─ /v1, /healthz, /readyz ──► API ──► Postgres, Qdrant,
+                                             │                                    CPU embeddings (questions)
+                                             └─ everything else ─────────► web app
+ browser ── presigned PUT / GET ──────────────────────────────────────────► Cloud Storage
+ worker (cpu, llm, gpu queues) ──► Gemini · Modal: speech recognition, embeddings (indexing)
+```
+
+- **One VM per session**: Terraform's `demo` part is a single e2-standard-2 VM; `base`, applied
+  once, has what outlasts it: the bucket, the VM's service account and its two secrets, a
+  network open on 80 and 443 (and to SSH only through Google's IAP proxy), and the Workload
+  Identity Federation that lets the deploy workflow in. At boot the startup script installs
+  Docker, writes the Compose file and Caddyfile from the instance's metadata, builds the
+  stack's `.env` from the VM's IP (`SITE_ADDRESS`), the release tag and Secret Manager, and
+  starts it.
+- **One origin**: Caddy gets a Let's Encrypt certificate for `<ip with dashes>.sslip.io` and
+  sends the API's paths to the API and the rest to the web app, which is built with an empty
+  API URL so it calls its own origin; server-sent events go through unbuffered. Media skip it:
+  presigned URLs go straight to the bucket, which allows any origin to use them.
+- **The demo lectures**: `lecture-demo export` (on a dev machine, against the local stack)
+  writes the public, processed lectures and their course to `demo/` (videos and a manifest) and
+  the stage cache to `artifacts/`, as laid out in the bucket. On the VM's first boot, with
+  sign-in off, `lecture-demo load` makes each course and lecture through the API, has the
+  bucket copy the video to where the API expects the upload, confirms it and processes it:
+  every stage is a cache hit, so the four lectures take about 20 seconds. Then the API
+  restarts with sign-in on, and only then does Caddy start, so nothing outside reaches the API
+  while sign-in is off. Rehearsed on a dev machine (the same images and Compose file, local
+  storage for the bucket, the GPU embedding server for Modal's), the stack answered 140 s after
+  starting, most of it the CPU embedding server warming up on two cores.
+- **Modal**: the worker runs every queue. Its gpu-queue transcriber is a `ModalTranscriber`,
+  which streams the audio to a Modal function on an L4 running the GPU worker's code and model,
+  and relays the progress it sends back as heartbeats. Indexing embeds through
+  `EMBEDDINGS_URL`, the embedding server's GPU image as a Modal web endpoint behind proxy auth
+  (`EMBEDDINGS_HEADERS`); the API embeds questions on the VM's CPU server, one at a time, with
+  small batches so its warm-up fits next to the stack.
+- **Releases and deploys**: `release.yml` builds the three images on a version tag, scans them
+  with Grype, and pushes them to GHCR; `deploy.yml` (run by hand) applies or destroys `demo`
+  and, on deploy, waits until `/v1/me` reports sign-in on. Destroying also deletes the
+  session's uploads (`raw/`) from the bucket.
+
 ### Known limitations
 
 - Slide detection assumes light slides on a dark hall, as in MIT OCW recordings. Two slides with the
@@ -495,8 +541,9 @@ measures. The tables are in the README; what they decided is
 
 ## Next: shipping (Phase 6), and a detector that routes as well as the rule
 
-Phase 6 goes on with deployment (Terraform, Modal for the GPU work) and CD, now that the API
-and the web app both have sign-in.
+Phase 6c's code is built and rehearsed locally; the first deploy to Google Cloud and Modal
+comes next, which also settles whether Clerk's development instance accepts an sslip.io origin.
+Then 6d: the results write-up, a diagram and screenshots.
 
 The detector finds slides (AP 1.00) and people (0.99) on the held-out lectures, and a slide
 playing a video, which the brightness test misses; but trained on ten lectures it still routes

@@ -5,9 +5,15 @@ GPU ?= $(shell nvidia-smi -L >/dev/null 2>&1 && echo 1)
 # .env also fills in the Compose file's ${...} values (the web app's Clerk keys).
 COMPOSE := docker compose $(if $(wildcard .env),--env-file .env) -f infra/compose.yaml $(if $(GPU),-f infra/compose.gpu.yaml)
 ALEMBIC := uv run alembic -c packages/core/alembic.ini
+# The cloud demo (ADR 0010): its project and region, from infra/terraform/cloud.tfvars.
+TFVARS := infra/terraform/cloud.tfvars
+PROJECT = $(shell sed -n 's/^project_id *= *"\(.*\)"/\1/p' $(TFVARS))
+REGION = $(shell sed -n 's/^region *= *"\(.*\)"/\1/p' $(TFVARS))
+TERRAFORM = terraform -chdir=infra/terraform/$(1)
+TF_INIT = $(call TERRAFORM,$(1)) init -input=false -backend-config=bucket=$(PROJECT)-tfstate
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app observability gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval detector-data detector-train bench test test-unit lint fmt typecheck audit check
+.PHONY: help install up app observability gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval detector-data detector-train bench modal-model modal cloud-base cloud-secrets cloud-seed deploy destroy test test-unit lint fmt typecheck audit check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-15s %s\n", $$1, $$2}'
@@ -80,6 +86,40 @@ bench: ## Benchmark embeddings, speech recognition and the detector, before and 
 	uv run lecture-bench embeddings
 	uv run lecture-bench asr
 	uv run lecture-bench detector
+
+modal-model: ## Once, for the cloud demo: the speech model into a Modal Volume (needs `modal token new`)
+	uv sync --inexact --package lecture-pipeline --extra modal
+	uv run modal run infra/modal/asr.py::download_model
+
+modal: ## Deploy speech recognition and the embedding model to GPUs in Modal (ADR 0010)
+	uv sync --inexact --package lecture-pipeline --extra modal
+	uv run modal deploy infra/modal/asr.py
+	uv run modal deploy infra/modal/embeddings.py
+
+cloud-base: ## Once: the demo's bucket, secrets, network and deploy access in Google Cloud
+	gcloud storage buckets describe gs://$(PROJECT)-tfstate --project $(PROJECT) > /dev/null 2>&1 || \
+		gcloud storage buckets create gs://$(PROJECT)-tfstate --project $(PROJECT) --location $(REGION) \
+			--uniform-bucket-level-access --public-access-prevention
+	gcloud storage buckets update gs://$(PROJECT)-tfstate --versioning
+	$(call TF_INIT,base)
+	$(call TERRAFORM,base) apply -var-file=../cloud.tfvars -var state_bucket=$(PROJECT)-tfstate
+
+cloud-secrets: ## Store infra/cloud.env (Gemini, Clerk and Modal keys) for the demo's VM
+	gcloud secrets versions add lecture-demo-env --project $(PROJECT) --data-file=infra/cloud.env
+
+cloud-seed: ## Copy the local stack's public lectures and stage cache to the demo's bucket
+	uv run lecture-demo export data/demo-export
+	gcloud storage rsync --recursive data/demo-export gs://$(PROJECT)-lectures
+
+deploy: ## Make the demo's VM for a release (tag=v0.6.0); it's up about 10 minutes later
+	@test -n "$(tag)" || (echo 'usage: make deploy tag=v0.6.0' && exit 1)
+	$(call TF_INIT,demo)
+	$(call TERRAFORM,demo) apply -var-file=../cloud.tfvars -var image_tag=$(tag)
+
+destroy: ## Delete the demo's VM, and the session's uploads with it
+	$(call TF_INIT,demo)
+	$(call TERRAFORM,demo) destroy -var-file=../cloud.tfvars -var image_tag=none
+	gcloud storage rm --recursive "gs://$(PROJECT)-lectures/raw/**" || true
 
 test: ## Run all tests (integration tests need Docker)
 	uv run pytest

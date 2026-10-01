@@ -27,7 +27,13 @@ class SearchServices:
         qdrant = QdrantClient(url=settings.qdrant_url, check_compatibility=False)
         return cls(
             index=SearchIndex(qdrant, settings.qdrant_collection),
-            dense=TEIEmbedder(settings.embeddings_url),
+            dense=TEIEmbedder(
+                settings.embeddings_url,
+                headers={
+                    name: value.get_secret_value()
+                    for name, value in settings.embeddings_headers.items()
+                },
+            ),
             sparse=BM25Encoder(),
             reranker=TEIReranker(settings.reranker_url),
         )

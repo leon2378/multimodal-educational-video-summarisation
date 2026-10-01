@@ -33,7 +33,7 @@ from lecture_llm.agents import LectureLLM, Prompts
 from lecture_llm.models import make_model
 from lecture_llm.settings import LLMSettings
 from lecture_llm.telemetry import instrument_agents
-from lecture_perception.asr import FasterWhisperTranscriber, WhisperConfig
+from lecture_perception.asr import FasterWhisperTranscriber, ModalTranscriber, WhisperConfig
 from lecture_pipeline.settings import PipelineSettings
 from lecture_pipeline.temporal.activities import PipelineActivities, Resources, SearchResources
 from lecture_pipeline.temporal.workflow import ProcessLecture
@@ -72,14 +72,17 @@ def build_resources(queues: Sequence[str], traced: bool = False) -> Resources:
         )
     if QUEUE_GPU in queues:
         pipeline = PipelineSettings()
-        resources.transcriber = FasterWhisperTranscriber(
-            WhisperConfig(
-                model_path=pipeline.whisper_model_path,
-                model_id=pipeline.whisper_model_id,
-                device=pipeline.whisper_device,
-                compute_type=pipeline.whisper_compute_type,
-                language=pipeline.whisper_language,
-            )
+        config = WhisperConfig(
+            model_path=pipeline.whisper_model_path,
+            model_id=pipeline.whisper_model_id,
+            device=pipeline.whisper_device,
+            compute_type=pipeline.whisper_compute_type,
+            language=pipeline.whisper_language,
+        )
+        resources.transcriber = (
+            ModalTranscriber(config, pipeline.modal_asr_app)
+            if pipeline.transcriber == "modal"
+            else FasterWhisperTranscriber(config)
         )
     return resources
 

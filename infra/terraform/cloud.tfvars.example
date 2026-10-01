@@ -1,0 +1,4 @@
+# Copy to cloud.tfvars (git-ignored). Both Terraform roots and the Makefile's cloud targets
+# read it.
+project_id = "your-project-id"
+region     = "us-central1"

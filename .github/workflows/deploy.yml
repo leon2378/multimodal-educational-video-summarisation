@@ -1,0 +1,78 @@
+name: deploy
+
+# Makes or deletes the demo's VM (ADR 0010) from the Actions tab, as `make deploy` and
+# `make destroy` do locally. It signs in to Google Cloud through Workload Identity Federation
+# (infra/terraform/base), so no key is stored. Repository variables: GCP_PROJECT_ID, GCP_REGION,
+# GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_DEPLOYER (the base's outputs).
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Make the VM, or delete it
+        type: choice
+        options: [deploy, destroy]
+        default: deploy
+      tag:
+        description: For deploy, the release whose images to run (e.g. v0.6.0)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+# One deploy or destroy at a time; a second waits rather than cancelling the first.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+# Every action is pinned to a full commit SHA, as in ci.yml.
+
+jobs:
+  terraform:
+    name: ${{ inputs.action }}
+    runs-on: ubuntu-24.04
+    env:
+      ACTION: ${{ inputs.action }}
+      TAG: ${{ inputs.tag }}
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ vars.GCP_REGION }}
+    steps:
+      - name: Check the tag
+        if: inputs.action == 'deploy'
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::A release tag like v0.6.0 is needed"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+      - run: terraform -chdir=infra/terraform/demo init -input=false -backend-config="bucket=${TF_VAR_project_id}-tfstate"
+      - name: Deploy
+        if: inputs.action == 'deploy'
+        run: |
+          terraform -chdir=infra/terraform/demo apply -input=false -auto-approve -var image_tag="$TAG"
+          url=$(terraform -chdir=infra/terraform/demo output -raw url)
+          echo "Waiting for $url: the VM loads the demo lectures, then turns sign-in on"
+          for _ in $(seq 120); do
+            if curl -fsS --max-time 10 "$url/v1/me" | grep -q '"auth":true'; then
+              echo "The demo is up at $url" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::$url wasn't up after 30 minutes: see the VM's journalctl -u google-startup-scripts"
+          exit 1
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: |
+          terraform -chdir=infra/terraform/demo destroy -input=false -auto-approve -var image_tag=none
+          # The session's uploads; the demo's lectures and the stage cache stay.
+          gcloud storage rm --recursive "gs://${TF_VAR_project_id}-lectures/raw/**" || true
+          echo "The demo's VM is deleted" >> "$GITHUB_STEP_SUMMARY"

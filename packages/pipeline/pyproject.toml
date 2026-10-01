@@ -20,6 +20,8 @@ gpu = [
     "lecture-perception[asr,cuda]",
     "nvidia-ml-py>=12",
 ]
+# Speech recognition on a GPU in Modal (the cloud worker image).
+modal = ["lecture-perception[modal]"]
 
 [project.scripts]
 lecture-process = "lecture_pipeline.cli:main"

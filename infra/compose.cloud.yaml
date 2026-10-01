@@ -1,0 +1,163 @@
+# The on-demand demo (ADR 0010): the whole stack on one VM, behind Caddy at one HTTPS origin.
+# The deploy puts this file, caddy/ and a .env (see cloud.env.example) on the VM and runs
+#   docker compose -f compose.cloud.yaml up -d --wait
+# Images come from GHCR, built by CI for the tag in IMAGE_TAG. Media and the stage cache live in
+# object storage off the VM; speech recognition and indexing embeddings run on GPUs in Modal.
+# Each service gets only the settings it uses, not the whole .env.
+name: lecture-demo
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://lecture:${POSTGRES_PASSWORD:?}@postgres:5432/lecture
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?}
+  S3_REGION: ${S3_REGION:-auto}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?}
+  S3_BUCKET: ${S3_BUCKET:?}
+  TEMPORAL_ADDRESS: temporal:7233
+  QDRANT_URL: http://qdrant:6333
+  # No reranker here: it needs a GPU on every question (ADR 0010).
+  SEARCH_MODE: hybrid
+  GEMINI_API_KEY: ${GEMINI_API_KEY:?}
+
+services:
+  # HTTPS for SITE_ADDRESS (e.g. 203-0-113-7.sslip.io), from Let's Encrypt.
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lecture
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: lecture
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lecture -d lecture"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  temporal:
+    image: temporalio/temporal:1.9.1
+    restart: unless-stopped
+    command: server start-dev --ip 0.0.0.0 --db-filename /home/temporal/temporal.db --headless
+    volumes:
+      - temporal-home:/home/temporal
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "namespace", "describe", "--namespace", "default", "--address", "127.0.0.1:7233"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # Embeds questions on the CPU (about half a second each); indexing uses the GPU server in
+  # Modal. The API sends one request at a time, which this server needs (ADR 0008). Smaller
+  # batches than infra/compose.yaml's 4096 tokens, whose warm-up took 4.8 GB, more than this VM
+  # can spare (memory grows with the square of the batch), but still above the longest chunk
+  # (about 550 tokens), so this server would embed a passage whole too.
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
+    restart: unless-stopped
+    command: ["--model-id", "Qwen/Qwen3-Embedding-0.6B", "--revision", "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3", "--max-batch-tokens", "2048"]
+    volumes:
+      - tei-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:80/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 120
+
+  migrate:
+    image: ${IMAGE_REGISTRY:-ghcr.io/leon2378}/lecture-summariser-api:${IMAGE_TAG:?}
+    command: ["alembic", "-c", "packages/core/alembic.ini", "upgrade", "head"]
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: ${IMAGE_REGISTRY:-ghcr.io/leon2378}/lecture-summariser-api:${IMAGE_TAG:?}
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      EMBEDDINGS_URL: http://embeddings:80
+      # Empty while the demo lectures are loaded, so they're public (ADR 0009), then set.
+      AUTH_ISSUER: ${AUTH_ISSUER:-}
+      AUTH_AUTHORIZED_PARTIES: '["https://${SITE_ADDRESS:?}"]'
+      ADMIN_USERS: ${ADMIN_USERS:-[]}
+      CORS_ORIGINS: '["https://${SITE_ADDRESS:?}"]'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Every queue: the CPU stages here, the LLM calls to Gemini, speech recognition on Modal.
+  worker:
+    image: ${IMAGE_REGISTRY:-ghcr.io/leon2378}/lecture-summariser-worker:${IMAGE_TAG:?}
+    restart: unless-stopped
+    command: ["lecture-worker", "--queues", "cpu,llm,gpu"]
+    environment:
+      <<: *app-env
+      TRANSCRIBER: modal
+      MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:?}
+      MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:?}
+      # The embedding model on a GPU in Modal (infra/modal/embeddings.py), behind proxy auth.
+      EMBEDDINGS_URL: ${MODAL_EMBEDDINGS_URL:?}
+      EMBEDDINGS_HEADERS: '{"Modal-Key": "${MODAL_PROXY_KEY:?}", "Modal-Secret": "${MODAL_PROXY_SECRET:?}"}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  # Built by CI with an empty API URL, so it calls its own origin, and the Clerk publishable key.
+  web:
+    image: ${IMAGE_REGISTRY:-ghcr.io/leon2378}/lecture-summariser-web:${IMAGE_TAG:?}
+    restart: unless-stopped
+    environment:
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+
+volumes:
+  caddy-data:
+  postgres-data:
+  temporal-home:
+  qdrant-data:
+  tei-data:

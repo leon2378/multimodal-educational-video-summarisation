@@ -1,15 +1,17 @@
-"""Object storage: S3-compatible (SeaweedFS locally, S3 or R2 in the cloud), or a local
-directory for running the pipeline without the stack.
+"""Object storage: S3-compatible (SeaweedFS locally, Google Cloud Storage for the demo), or a
+local directory for running the pipeline without the stack.
 
 Key layout:
     raw/{lecture}/source.{ext}             uploaded original
     artifacts/{stage}/{cache_key}.json     stage cache entries (ADR 0001)
     artifacts/{stage}/{cache_key}/...      files a stage writes: audio, slide images
     media/{lecture}/hls/...                playback renditions (later)
+    demo/lectures.json, demo/videos/...    the demo's lectures, loaded on each deploy (ADR 0010)
 """
 
 import re
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -94,6 +96,19 @@ class ObjectStorage:
         self, key: str, data: bytes, content_type: str = "application/octet-stream"
     ) -> None:
         self._client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
+
+    def copy(self, source: str, destination: str) -> None:
+        """Within the bucket, done by the store itself: nothing is downloaded."""
+        self._client.copy_object(
+            Bucket=self.bucket, Key=destination, CopySource={"Bucket": self.bucket, "Key": source}
+        )
+
+    def list_keys(self, prefix: str) -> Iterator[str]:
+        for page in self._client.get_paginator("list_objects_v2").paginate(
+            Bucket=self.bucket, Prefix=prefix
+        ):
+            for item in page.get("Contents", []):
+                yield item["Key"]
 
     def delete(self, key: str) -> None:
         self._client.delete_object(Bucket=self.bucket, Key=key)

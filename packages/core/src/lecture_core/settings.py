@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "segments"
     embeddings_url: str = "http://localhost:8081"
+    # Headers for the embedding server, as JSON: Modal's proxy auth for the one on a GPU in
+    # Modal (infra/modal/embeddings.py), {"Modal-Key": "...", "Modal-Secret": "..."}.
+    embeddings_headers: dict[str, SecretStr] = {}
     reranker_url: str = "http://localhost:8082"
     # The search mode when a request doesn't name one. "rerank" ranks best but needs the
     # reranker on a GPU (Compose sets it); on a laptop CPU it takes over a minute a query.

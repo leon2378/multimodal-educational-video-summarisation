@@ -19,6 +19,11 @@ class PipelineSettings(BaseSettings):
     whisper_device: str = "auto"
     whisper_compute_type: str = "auto"
     whisper_language: str | None = None
+    # Where speech recognition runs: "local" loads the model in the worker (on the device above);
+    # "modal" calls a GPU in Modal (infra/modal/asr.py, ADR 0010), for a host without one.
+    # Modal's client reads MODAL_TOKEN_ID and MODAL_TOKEN_SECRET.
+    transcriber: Literal["local", "modal"] = "local"
+    modal_asr_app: str = "lecture-asr"
 
     # Who reads the slides (lecture_pipeline.stages.read_slides): "routed" sends only slides with
     # figures, annotations or doubtful OCR to the vision LLM; "vlm" sends every slide; "ocr" none.

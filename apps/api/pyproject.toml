@@ -17,6 +17,10 @@ dependencies = [
     "uvicorn[standard]>=0.54",
 ]
 
+[project.scripts]
+# The demo's lectures: exported from a local stack, loaded on each deploy (ADR 0010).
+lecture-demo = "lecture_api.demo:main"
+
 [tool.uv.sources]
 lecture-core = { workspace = true }
 lecture-llm = { workspace = true }

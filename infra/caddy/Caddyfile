@@ -1,0 +1,12 @@
+# The demo's one origin (infra/compose.cloud.yaml): the API's routes to the API, the rest to the
+# web app. Caddy gets the certificate for SITE_ADDRESS from Let's Encrypt, and passes
+# server-sent events (progress, answers) straight through without buffering them.
+{$SITE_ADDRESS} {
+	@api path /v1/* /healthz /readyz
+	handle @api {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

@@ -13,6 +13,13 @@ dist/
 .env
 .env.*
 !.env.example
+# The cloud demo's secrets and project (ADR 0010), and Terraform's working files.
+infra/cloud.env
+infra/terraform/cloud.tfvars
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
 
 # Lecture media never goes in git. Datasets are tracked with DVC from Phase 4.
 data/

@@ -15,6 +15,7 @@ old one "Superseded by NNNN" instead of editing it.
 | [0007](0007-rf-detr-for-the-frame-detector.md) | RF-DETR (Apache-2.0) for the frame detector, YOLO26 as the fallback | Accepted |
 | [0008](0008-where-the-models-run.md) | The embedding model on the GPU, speech recognition in int8, the detector in TensorRT fp16 | Accepted |
 | [0009](0009-clerk-sign-in-and-quotas.md) | Clerk for sign-in, public demo lectures, and quotas counted in Postgres | Accepted |
+| [0010](0010-on-demand-demo-on-google-cloud-and-modal.md) | The demo on an on-demand Google Cloud VM, GPU work on Modal | Accepted |
 
 ## Still to write
 

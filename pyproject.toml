@@ -98,7 +98,7 @@ explicit_package_bases = true
 
 [[tool.mypy.overrides]]
 # Optional extras, not installed in the dev environment or CI, or without type information.
-module = ["ctranslate2.*", "docker.*", "faster_whisper.*", "pynvml", "pypdfium2", "pypdfium2.*", "rfdetr.*", "supervision.*", "tensorrt_bindings", "tensorrt_bindings.*", "onnx", "onnx.*", "onnxruntime", "onnxruntime.*", "pycocotools.*", "testcontainers.*", "torch", "torch.*"]
+module = ["ctranslate2.*", "docker.*", "faster_whisper.*", "modal", "modal.*", "pynvml", "pypdfium2", "pypdfium2.*", "rfdetr.*", "supervision.*", "tensorrt_bindings", "tensorrt_bindings.*", "onnx", "onnx.*", "onnxruntime", "onnxruntime.*", "pycocotools.*", "testcontainers.*", "torch", "torch.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

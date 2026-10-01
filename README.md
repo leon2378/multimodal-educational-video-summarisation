@@ -3,7 +3,7 @@
 Turns lecture videos into timestamp-grounded study notes and a Q&A chat whose answers cite the
 moment in the lecture they come from.
 
-**Status: Phases 1 to 4 of 6 done, Phase 5 done but for the detector in the pipeline (OCR routing, a trained frame detector, speed benchmarks), Phase 6 under way (sign-in and quotas done, deployment next): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions in CI, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
+**Status: Phases 1 to 4 of 6 done, Phase 5 done but for the detector in the pipeline (OCR routing, a trained frame detector, speed benchmarks), Phase 6 under way (sign-in and quotas done; the on-demand cloud demo built, its first cloud run next): upload a lecture in the browser, watch it process, then study it with a synced transcript, slides, chapters and notes, search it, and ask questions whose answers cite the moments they come from, about one lecture or a whole course. Eval suites score each part and gate regressions in CI, and traces, metrics and logs show where the time and money go.** The full design is in [docs/blueprint.md](docs/blueprint.md).
 What exists today is described in [docs/architecture.md](docs/architecture.md).
 
 ## What works now
@@ -48,6 +48,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   session tokens the API checks. Visitors read and search the public demo lectures; signed-in
   users ask questions and upload private lectures within daily quotas, under a daily ceiling on
   LLM spend. Off until configured.
+- An on-demand demo ([below](#deploying-the-demo)): Terraform makes a Google Cloud VM that runs
+  the whole stack behind HTTPS for a session, loads the public lectures from the stage cache,
+  and is deleted after; uploads are transcribed on GPUs in Modal. Rehearsed locally; not yet
+  run in the cloud.
 - Observability ([below](#observability)): OpenTelemetry traces, metrics and logs from the API
   and workers into Grafana. One trace follows a request through the workflow's activities to
   each LLM call. A dashboard tracks the blueprint's targets, and every answer and pipeline run
@@ -61,7 +65,8 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - Unit tests, plus integration tests that start real Postgres, SeaweedFS, Temporal and Qdrant
   with testcontainers and drive the whole flow through the API.
 - CI: lint, type-check, tests, the web app's checks and build, dependency audits (Python and
-  npm), image builds, and the eval gate on the whole stack. Actions are pinned to commit SHAs.
+  npm), image builds, and the eval gate on the whole stack. On a version tag, the images are
+  scanned and pushed to GHCR. Actions are pinned to commit SHAs.
 
 ## Getting started
 
@@ -289,6 +294,47 @@ To turn it on, create a Clerk application and put in `.env`:
 - `ADMIN_USERS`: your own Clerk user id (`user_...`), to see everything and publish lectures.
 
 Then `make app` rebuilds the API and the web app and applies the migration.
+
+## Deploying the demo
+
+The demo runs on Google Cloud only while it's needed
+([ADR 0010](docs/adr/0010-on-demand-demo-on-google-cloud-and-modal.md)). `make deploy` makes one
+VM that runs the whole stack behind HTTPS and loads the public MIT lectures from the stage cache,
+so nothing is transcribed or sent to an LLM again. About ten minutes later it answers at
+`https://<its IP, with dashes>.sslip.io`, which needs no domain. `make destroy` deletes it. The
+VM costs about $0.07 an hour while it exists; the bucket with the videos and the stage cache
+stays.
+
+- **Visitors** browse, search and play the demo lectures; signed-in users ask questions and
+  upload their own, within the quotas ([above](#sign-in-and-quotas)).
+- **Uploads** are transcribed on a GPU in Modal and indexed with the embedding model on another
+  (`infra/modal/`). Questions use hybrid search on the VM's CPU, without the reranker.
+- **Releases**: pushing a tag like `v0.6.0` builds the API, worker and web images, scans them for
+  known vulnerabilities, and pushes them to GHCR. A deploy runs a release's images.
+- **From GitHub**: the *deploy* workflow (Actions, Run workflow) does what `make deploy` and
+  `make destroy` do, signed in to Google Cloud without a stored key.
+
+Setting it up the first time (needs the Google Cloud CLI, Terraform and a Modal account):
+
+1. `gcloud auth login` and `gcloud auth application-default login`, then copy
+   `infra/terraform/cloud.tfvars.example` to `cloud.tfvars` and name your project in it. Set a
+   budget alert on the project's billing account.
+2. `make cloud-base`: Terraform's state bucket, then the bucket, secrets, network and deploy
+   access.
+3. Modal: `uv run modal token new`, then `make modal-model` once and `make modal`. Make a proxy
+   auth token for the embedding server in Modal's dashboard.
+4. Copy `infra/cloud.env.example` to `infra/cloud.env`, fill it in (Gemini, Clerk, Modal) and run
+   `make cloud-secrets`.
+5. With the local stack running, `make cloud-seed` copies its public lectures and the stage
+   cache to the bucket. The cache is copied as it is: if the pipeline changed since the
+   lectures were processed, process them again locally first (only the changed stages run),
+   or the VM recomputes those stages, with Gemini and Modal calls, on its first boot.
+6. On GitHub, add the repository variables `CLERK_PUBLISHABLE_KEY` and, from `make cloud-base`'s
+   outputs, `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOYER`.
+   Push a tag (`git tag v0.6.0`, `git push origin v0.6.0`); once the release workflow has run,
+   make the three `lecture-summariser-*` packages public in their GitHub settings, so the VM can
+   pull them.
+7. `make deploy tag=v0.6.0`, or the deploy workflow.
 
 ## Evals
 
@@ -649,6 +695,9 @@ PyTorch at the same accuracy.
 | `make detector-data` | Label frames for the frame detector from the lectures' videos and slide PDFs (installs PyTorch, 2 GB, the first time) |
 | `make detector-train` | Fine-tune the frame detector on the GPU and score the held-out lecture |
 | `make bench` | Benchmark speech recognition, the embedding model and the frame detector, before and after (needs the stack with the GPU services, Lecture 10 processed and the detector trained; installs TensorRT, 2.3 GB, the first time) |
+| `make modal-model` / `make modal` | Once, the speech model into Modal / deploy speech recognition and the embedding model to GPUs in Modal |
+| `make cloud-base` / `make cloud-secrets` / `make cloud-seed` | Set up the demo in Google Cloud: its bucket, network and deploy access / its secrets / its lectures and the stage cache ([above](#deploying-the-demo)) |
+| `make deploy tag=v0.6.0` / `make destroy` | Make the demo's VM for a release, or delete it |
 | `make migrate` | Apply migrations |
 | `make revision m="add chapters"` | Generate a migration after changing `packages/core/src/lecture_core/models.py` |
 | `make test` / `make test-unit` | All tests / unit tests only |
@@ -677,6 +726,9 @@ infra/compose.yaml         local stack (`app` profile adds the API, web app and 
 infra/compose.gpu.yaml     the embedding server on the GPU, added by the Makefile when there is one
 infra/grafana/             Grafana datasource and dashboard (JSON), loaded by `make observability`
 infra/docker/              Dockerfiles: API, worker (CPU and GPU variants)
+infra/compose.cloud.yaml   the demo's stack on one VM, behind Caddy (infra/caddy/)
+infra/modal/               speech recognition and the embedding model on GPUs in Modal
+infra/terraform/           the demo in Google Cloud: base (once) and demo (the VM, per session)
 infra/seaweedfs/s3.json    dev-only S3 credentials
 docs/                      blueprint, architecture, ADRs
 ```
@@ -725,6 +777,10 @@ from the blueprint in these places:
   enough for every push that could change a score, plus a weekly run. Without a GPU, speech
   recognition runs on the CPU and the reranker's bounds are left to `make eval` on a machine
   with one ([architecture](docs/architecture.md#eval-gate-in-ci-phase-4c)).
+- **No Vercel, and no permanent demo.** The web app runs on the demo's VM, next to the API at
+  one HTTPS address, and the VM exists only while it's needed: Terraform makes it for a
+  session and deletes it after, so a session costs cents
+  ([ADR 0010](docs/adr/0010-on-demand-demo-on-google-cloud-and-modal.md)).
 - **The demo's Q&A needs an account.** The blueprint's public demo has live Q&A for
   anyone; here visitors browse and search freely and sign in to ask, so every LLM call
   belongs to a user with a quota ([ADR 0009](docs/adr/0009-clerk-sign-in-and-quotas.md)).
@@ -787,8 +843,11 @@ from the blueprint in these places:
         per-user quotas and a daily LLM budget
   - [x] 6b: sign-in in the web app (Clerk's sign-in windows, the token on every call, quotas
         shown)
-  - [ ] 6c: Terraform and Modal deploy, CD
-  - [ ] 6d: results write-up, diagram and demo video
+  - [ ] 6c: the demo on an on-demand Google Cloud VM (Terraform), uploads transcribed on GPUs
+        in Modal, release images scanned and pushed on a tag, deploys from Actions
+        ([ADR 0010](docs/adr/0010-on-demand-demo-on-google-cloud-and-modal.md)): built and
+        rehearsed locally; the first cloud deploy is next
+  - [ ] 6d: results write-up, diagram and screenshots
 
 ## Data and licensing
 

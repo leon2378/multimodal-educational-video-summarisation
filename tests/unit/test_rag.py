@@ -1,8 +1,11 @@
 """Search: chunking, the Qdrant index (in-memory mode) and hybrid search, with fake encoders."""
 
 import json
+import threading
+import time
 import uuid
 from collections.abc import Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import httpx
@@ -215,10 +218,37 @@ def test_tei_embedder_batches_documents_and_instructs_queries() -> None:
 
     assert embedder.embed_documents(["a", "bb", "ccc"]) == [[1.0], [2.0], [3.0]]
     assert [r["inputs"] for r in requests] == [["a", "bb"], ["ccc"]]
-    assert requests[0]["truncate"] is True
+    # A passage too long for the server is refused, not cut short and cached as if whole.
+    assert requests[0]["truncate"] is False
     embedder.embed_query("why?")
     assert requests[-1]["inputs"] == [QUERY_INSTRUCTION + "why?"]
+    assert requests[-1]["truncate"] is True
     assert embedder.model_id == "Qwen/Q@abcdef1"
+
+
+def test_tei_embedder_sends_its_headers_and_one_request_at_a_time() -> None:
+    in_flight, most_in_flight, headers = 0, 0, []
+    lock = threading.Lock()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight, most_in_flight
+        with lock:
+            in_flight += 1
+            most_in_flight = max(most_in_flight, in_flight)
+            headers.append(request.headers.get("Modal-Key"))
+        time.sleep(0.02)
+        with lock:
+            in_flight -= 1
+        return httpx.Response(200, json=[[1.0]])
+
+    embedder = TEIEmbedder(
+        "http://tei", transport=httpx.MockTransport(respond), headers={"Modal-Key": "k"}
+    )
+    with ThreadPoolExecutor(4) as pool:
+        list(pool.map(embedder.embed_query, ["a", "b", "c", "d"]))
+
+    assert most_in_flight == 1
+    assert headers == ["k"] * 4
 
 
 def test_tei_reranker_returns_scores_in_input_order() -> None:
