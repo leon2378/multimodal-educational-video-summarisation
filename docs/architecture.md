@@ -311,6 +311,12 @@ so a second run only redoes stages whose inputs, version, model, params or promp
   the model is a setting (`LLM_MODEL`, `WHISPER_*`).
 - **Untrusted content**: transcripts and slide text go into HTML-escaped, delimited blocks, and every
   prompt says they are content, not instructions.
+- **Untrusted files**: FFmpeg reads hundreds of formats, and its vulnerabilities tend to be in the
+  ones nobody needs. `media` has it open only MP4/MOV, Matroska and WebM files
+  (`format_whitelist`) and start only the decoders lectures use while it probes a file
+  (`codec_whitelist`: H.264, HEVC, VP8/9, AV1, MPEG-4; AAC, MP3, Opus, Vorbis, FLAC, ALAC, AC-3,
+  PCM), and decodes a stream only if its decoder is one of those. Anything else fails the probe
+  stage with a reason.
 - **Output**: `data/pipeline-runs/<video>/<time>/` holds `notes.md` and `result.json` (stage timings,
   cache hits, LLM usage, notes). The notes use the same `StudyNotes` format as the Gemini baseline,
   so the two can be compared directly.

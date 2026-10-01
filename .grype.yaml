@@ -10,3 +10,27 @@ ignore:
       name: python
       version: 3.12.14
       type: binary
+
+  # The worker's FFmpeg, in PyAV's wheel: CVE-2026-70632 (the CineForm decoder) and
+  # CVE-2026-70628 (the DVB subtitle parser, through a WTV file) are fixed in FFmpeg 9. PyAV 19
+  # bundles it, but faster-whisper 1.2.1 passes av.open an argument PyAV 19 removed. Neither is
+  # reachable from an upload: lecture_perception.media has FFmpeg open only MP4/MOV, Matroska and
+  # WebM files and start only the decoders lectures use (tests/unit/test_perception.py). Scoped
+  # to FFmpeg 8.1.2: move to PyAV 19 with faster-whisper's next release, and delete these.
+  - vulnerability: CVE-2026-70632
+    package:
+      name: ffmpeg
+      version: 8.1.2
+      location: "/app/.venv/lib/python3.12/site-packages/av.libs/**"
+  - vulnerability: CVE-2026-70628
+    package:
+      name: ffmpeg
+      version: 8.1.2
+      location: "/app/.venv/lib/python3.12/site-packages/av.libs/**"
+
+  # The FFmpeg in OpenCV's wheel, which is there for cv2.VideoCapture. Nothing calls it: videos
+  # are decoded with PyAV, and RapidOCR uses OpenCV only on images. Delete this if anything
+  # starts reading video through OpenCV.
+  - package:
+      name: ffmpeg
+      location: "/app/.venv/lib/python3.12/site-packages/opencv_python_headless.libs/**"

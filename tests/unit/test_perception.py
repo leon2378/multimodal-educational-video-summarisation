@@ -1,4 +1,6 @@
 import io
+from collections.abc import Callable
+from fractions import Fraction
 from pathlib import Path
 
 import av
@@ -86,6 +88,37 @@ def test_probe_rejects_a_file_that_isnt_video(tmp_path: Path) -> None:
     not_video.write_text("hello")
     with pytest.raises(MediaError, match="isn't a readable video"):
         probe(not_video)
+
+
+def test_only_lecture_containers_are_opened(tmp_path: Path) -> None:
+    # The synthetic lecture's video and audio, in an AVI file instead of an MP4.
+    avi = synthetic.write_video(tmp_path / "lecture.avi")
+    readers: list[Callable[[Path], object]] = [
+        probe,
+        extract_audio,
+        lambda path: next(sample_frames(path)),
+    ]
+    for read in readers:
+        with pytest.raises(MediaError, match="isn't a readable video"):
+            read(avi)
+
+
+def test_only_lecture_codecs_are_decoded(tmp_path: Path) -> None:
+    # GoPro CineForm in a MOV file: FFmpeg can read it, but lectures don't come that way.
+    path = tmp_path / "cineform.mov"
+    with av.open(str(path), mode="w") as container:
+        stream = container.add_stream("cfhd", rate=5)
+        stream.width, stream.height, stream.pix_fmt = 64, 64, "yuv422p10"
+        for i in range(3):
+            frame = av.VideoFrame.from_image(synthetic.slide("a"))  # type: ignore[no-untyped-call]
+            frame = frame.reformat(width=64, height=64, format="yuv422p10")
+            frame.pts, frame.time_base = i, Fraction(1, 5)
+            container.mux(stream.encode(frame))
+        container.mux(stream.encode(None))
+    with pytest.raises(MediaError, match="video in cfhd"):
+        probe(path)
+    with pytest.raises(MediaError, match="video in cfhd"):
+        next(sample_frames(path))
 
 
 def test_extract_audio_gives_16k_mono_flac(video: Path) -> None:

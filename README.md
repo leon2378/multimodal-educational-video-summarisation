@@ -59,7 +59,8 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - A single-call Gemini baseline that summarises a lecture video and records tokens, cost and
   timings ([below](#gemini-baseline)).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
-  uploads the file to storage, and the API confirms it.
+  uploads the file to storage, and the API confirms it. The worker reads MP4, MOV, Matroska and
+  WebM files, and only the codecs lectures use, since anyone signed in can upload one.
 - Postgres with Alembic migrations, SeaweedFS as local S3, Temporal, Qdrant, and Text Embeddings
   Inference servers for the embedding model and reranker, all in Docker Compose.
 - Unit tests, plus integration tests that start real Postgres, SeaweedFS, Temporal and Qdrant
