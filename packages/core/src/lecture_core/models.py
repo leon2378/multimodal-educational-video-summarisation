@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -318,6 +319,35 @@ class Feedback(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+# Quotas
+
+
+class UsageKind(StrEnum):
+    UPLOAD = "upload"  # a lecture added
+    QUESTION = "question"  # a question asked
+    LLM = "llm"  # what an answer or a processing run cost in LLM calls
+
+
+class UsageEvent(Base):
+    """What the quotas count (docs/adr/0009-clerk-sign-in-and-quotas.md), recorded when it
+    happens. Deleting a lecture or a conversation leaves these alone, so it doesn't give back
+    the day's allowance or budget."""
+
+    __tablename__ = "usage_events"
+    __table_args__ = (Index("ix_usage_events_kind_created", "kind", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    # Whose it was: None for the local user, and for lectures loaded with sign-in off.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    kind: Mapped[UsageKind] = mapped_column(
+        Enum(UsageKind, native_enum=False, length=16, values_callable=_enum_values)
+    )
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class EvalRun(Base):

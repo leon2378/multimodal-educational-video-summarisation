@@ -90,6 +90,12 @@ class SearchIndex:
         )
         self.client.delete(self.collection, models.FilterSelector(filter=stale), wait=True)
 
+    def delete_lecture(self, lecture_id: uuid.UUID) -> None:
+        """Remove the lecture's points. Deleting a lecture with none is fine."""
+        if self.client.collection_exists(self.collection):
+            only = models.Filter(must=[_lecture_is([lecture_id])])
+            self.client.delete(self.collection, models.FilterSelector(filter=only), wait=True)
+
     def _ensure_collection(self, dense_size: int) -> None:
         if not self.client.collection_exists(self.collection):
             try:

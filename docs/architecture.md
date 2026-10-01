@@ -53,6 +53,13 @@ deleted after, with uploads transcribed on GPUs in Modal.
 Lecture status: `awaiting_upload → uploaded → processing → ready`, or `failed` when a run
 fails. A ready or failed lecture can be processed again.
 
+`DELETE /v1/lectures/{id}` (its owner or an admin, and not while it's processing) removes the
+lecture's points from the search index, its video from storage, then its row, which takes its
+results, processing history and conversations with it (the foreign keys cascade). The external
+steps come first and are safe to repeat, so after a failure the lecture is still there to
+delete again. The stage cache stays: it's keyed by content, so another upload of the same video
+shares it, and it's the only copy of what processing paid for.
+
 ### Web app (Phase 2c)
 
 `apps/web`, Next.js 16 with TanStack Query, Tailwind and shadcn/ui (Radix primitives, copied
@@ -454,12 +461,14 @@ measures. The tables are in the README; what they decided is
   or course needs its owner or an admin, and only admins make things public. Search filters by
   the lectures the caller may read, and so does a course's lecture list. Threads and ratings
   are their user's. Unreadable things answer 404; readable but not yours, 403.
-- **Quotas**: counted per UTC day from rows that already exist: a user's questions (30 a day, 5 a
-  minute), their lectures (3 a day, each up to 1 GB, checked when the upload is confirmed), and
-  everyone's LLM spend: each answer's tokens at paid-tier prices plus each processing run's
-  recorded cost (free when its LLM stages all came from the cache). Past $2 a day, questions
-  and processing wait for the next day. Limits answer 429 with `Retry-After`; `GET /v1/me`
-  reports them.
+- **Quotas**: counted per UTC day from a usage ledger (`usage_events`), written as things
+  happen: a user's questions (30 a day, 5 a minute), their lectures (3 a day, each up to 1 GB,
+  checked when the upload is confirmed), and everyone's LLM spend: each answer's tokens at
+  paid-tier prices, plus what each processing run spent on the LLM stages it didn't take from
+  the cache (recorded by the worker). Deleting a lecture or a conversation leaves the ledger
+  alone, so it gives nothing back; counting the rows themselves, as at first, let a user upload,
+  delete and upload again. Past $2 a day, questions and processing wait for the next day.
+  Limits answer 429 with `Retry-After`; `GET /v1/me` reports them.
 - **Off by default**: without an issuer, every request is one local user with no limits, and
   what it makes is public: development, the tests and the eval gate run as before. The browser
   sends the token with `fetch` (CORS allows `Authorization` and exposes `Retry-After`),

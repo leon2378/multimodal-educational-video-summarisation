@@ -1,8 +1,10 @@
 """What each signed-in user may spend, and everyone together.
 
-Counted from what the database already records, per UTC day: a user's questions and lectures,
-and the day's LLM spend, from each answer's tokens (priced by lecture_llm.pricing) and each
-processing run's recorded cost. A limit answers 429 with Retry-After. The checks are soft: two
+Counted per UTC day from the usage ledger (`usage_events`), which records each lecture added,
+question asked and LLM bill as it happens: a user's questions and lectures, and the day's LLM
+spend, from each answer's tokens (priced by lecture_llm.pricing) and each processing run's
+recorded cost (written by the worker). Deleting a lecture or a conversation leaves the ledger
+alone, so it gives nothing back. A limit answers 429 with Retry-After. The checks are soft: two
 requests at the same moment can both pass. Admins and the local user have no limits
 (docs/adr/0009-clerk-sign-in-and-quotas.md).
 """
@@ -18,12 +20,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lecture_api.auth import Viewer
-from lecture_core.models import Lecture, MessageRole, PipelineRun, QAMessage, QAThread
+from lecture_core.models import UsageEvent, UsageKind
 from lecture_core.settings import Settings
 from lecture_llm.pricing import text_cost_usd
-
-# Processing stages that call the LLM: a run whose LLM stages were all cached cost nothing.
-_LLM_STAGES = {"read_slides", "chapters", "draft_notes"}
 
 
 class QuotaUsage(BaseModel):
@@ -110,24 +109,29 @@ async def usage(
     )
 
 
+def record(
+    session: AsyncSession, kind: UsageKind, user_id: uuid.UUID | None, cost_usd: float = 0.0
+) -> None:
+    """Add to the ledger, in the caller's transaction."""
+    session.add(UsageEvent(user_id=user_id, kind=kind, cost_usd=cost_usd))
+
+
+def answer_cost(model: str | None, used: dict[str, Any] | None) -> float:
+    """What an answer's LLM calls cost, at paid-tier prices."""
+    if not model or not used:
+        return 0.0
+    cost = text_cost_usd(model, used.get("input_tokens", 0), used.get("output_tokens", 0))
+    return cost or 0.0
+
+
 async def spend_since(session: AsyncSession, since: datetime) -> float:
-    """The LLM spend of every answer and processing run since `since`, at paid-tier prices."""
-    answers = await session.execute(
-        select(QAMessage.model, QAMessage.usage).where(
-            QAMessage.role == MessageRole.ASSISTANT, QAMessage.created_at >= since
+    """The LLM spend of every answer and processing run since `since`."""
+    spent = await session.scalar(
+        select(func.coalesce(func.sum(UsageEvent.cost_usd), 0.0)).where(
+            UsageEvent.kind == UsageKind.LLM, UsageEvent.created_at >= since
         )
     )
-    spent = sum(_answer_cost(model, used) for model, used in answers)
-    runs = await session.execute(
-        select(PipelineRun.stages, PipelineRun.llm_usage).where(PipelineRun.started_at >= since)
-    )
-    for stages, used in runs:
-        ran_llm = any(
-            stage.get("stage") in _LLM_STAGES and not stage.get("cached") for stage in stages
-        )
-        if ran_llm and used:
-            spent += float(used.get("cost_usd") or 0.0)
-    return spent
+    return float(spent or 0.0)
 
 
 async def _check_budget(session: AsyncSession, settings: Settings, now: datetime) -> None:
@@ -140,32 +144,22 @@ async def _check_budget(session: AsyncSession, settings: Settings, now: datetime
 
 
 async def _questions_since(session: AsyncSession, user_id: uuid.UUID, since: datetime) -> int:
-    count = await session.scalar(
-        select(func.count(QAMessage.id))
-        .join(QAThread, QAThread.id == QAMessage.thread_id)
-        .where(
-            QAThread.user_id == user_id,
-            QAMessage.role == MessageRole.USER,
-            QAMessage.created_at >= since,
-        )
-    )
-    return count or 0
+    return await _count_since(session, UsageKind.QUESTION, user_id, since)
 
 
 async def _uploads_since(session: AsyncSession, user_id: uuid.UUID, since: datetime) -> int:
+    return await _count_since(session, UsageKind.UPLOAD, user_id, since)
+
+
+async def _count_since(
+    session: AsyncSession, kind: UsageKind, user_id: uuid.UUID, since: datetime
+) -> int:
     count = await session.scalar(
-        select(func.count(Lecture.id)).where(
-            Lecture.owner_id == user_id, Lecture.created_at >= since
+        select(func.count(UsageEvent.id)).where(
+            UsageEvent.kind == kind, UsageEvent.user_id == user_id, UsageEvent.created_at >= since
         )
     )
     return count or 0
-
-
-def _answer_cost(model: str | None, used: dict[str, Any] | None) -> float:
-    if not model or not used:
-        return 0.0
-    cost = text_cost_usd(model, used.get("input_tokens", 0), used.get("output_tokens", 0))
-    return cost or 0.0
 
 
 def _day_start(now: datetime) -> datetime:

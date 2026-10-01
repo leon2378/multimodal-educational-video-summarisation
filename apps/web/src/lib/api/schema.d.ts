@@ -177,7 +177,15 @@ export interface paths {
         get: operations["get_lecture_v1_lectures__lecture_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Lecture
+         * @description Delete the lecture everywhere: its video, its passages in the search index, its results,
+         *     processing history and conversations. What processing computed stays in the stage cache,
+         *     where another upload of the same video finds it (docs/adr/0001-stage-cache.md). Its owner or
+         *     an admin only, and not while it's processing. What it used still counts towards today's
+         *     quotas.
+         */
+        delete: operations["delete_lecture_v1_lectures__lecture_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -1556,6 +1564,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["LectureOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_lecture_v1_lectures__lecture_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lecture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

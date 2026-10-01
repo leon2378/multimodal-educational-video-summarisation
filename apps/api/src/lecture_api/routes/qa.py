@@ -69,6 +69,7 @@ from lecture_core.models import (
     SlideRow,
     SummaryRow,
     TranscriptSegmentRow,
+    UsageKind,
 )
 from lecture_core.notes import StudyNotes
 from lecture_core.qa import ChatTurn, Outline, Passage, Sentence, find_citations, label_lectures
@@ -278,6 +279,7 @@ async def _ask(
         history = await _history(session, thread.id, settings.qa_history_turns)
     question = QAMessage(thread_id=thread.id, role=MessageRole.USER, content=body.question)
     session.add(question)
+    quotas.record(session, UsageKind.QUESTION, viewer.user_id)
     await session.commit()
     await session.refresh(question)
 
@@ -390,6 +392,8 @@ async def _answer(
         thread = await session.get(QAThread, question.thread_id)
         if thread is not None:
             thread.updated_at = datetime.now(UTC)
+        if cost := quotas.answer_cost(answer.model, answer.usage):
+            quotas.record(session, UsageKind.LLM, thread.user_id if thread else None, cost)
         await session.flush()
         await session.refresh(answer)
     saved = MessageOut.model_validate(answer)

@@ -1,4 +1,5 @@
-"""Phase 2b end to end: upload through the API, process with Temporal workers, read results.
+"""Phase 2b end to end: upload through the API, process with Temporal workers, read results,
+then delete the lecture.
 
 The workers run in this process with the fake speech model and LLM (tests/unit/fakes.py), so
 this exercises the workflow, activities, stage cache in object storage, persistence and the
@@ -6,13 +7,17 @@ search index.
 """
 
 import json
+import uuid
 from pathlib import Path
 
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
+from qdrant_client import QdrantClient, models
 
-from tests.integration.helpers import upload_lecture, wait_for
+from lecture_core.settings import Settings
+from lecture_core.storage import ObjectStorage, source_key
+from tests.integration.helpers import ask, upload_lecture, wait_for
 
 pytestmark = pytest.mark.integration
 
@@ -105,3 +110,35 @@ def test_processing_needs_an_upload(processing_client: TestClient) -> None:
     ).json()
     response = processing_client.post(f"/v1/lectures/{created['lecture']['id']}/process")
     assert response.status_code == 409
+
+
+def test_deleting_a_lecture_removes_it_everywhere(
+    processing_client: TestClient, processed_lecture: str, processing_settings: Settings
+) -> None:
+    client = processing_client
+    lecture_id = processed_lecture
+    filename = client.get(f"/v1/lectures/{lecture_id}").json()["source_filename"]
+    thread_id = ask(client, f"/v1/lectures/{lecture_id}/ask", "What is memoisation?")[0][
+        "thread_id"
+    ]
+    storage = ObjectStorage(processing_settings)
+    video = source_key(uuid.UUID(lecture_id), filename)
+    qdrant = QdrantClient(url=processing_settings.qdrant_url)
+    its_points = models.Filter(
+        must=[models.FieldCondition(key="lecture_id", match=models.MatchValue(value=lecture_id))]
+    )
+
+    def points() -> int:
+        return qdrant.count(processing_settings.qdrant_collection, count_filter=its_points).count
+
+    assert storage.head(video) is not None
+    assert points() > 0
+
+    assert client.delete(f"/v1/lectures/{lecture_id}").status_code == 204
+
+    assert client.get(f"/v1/lectures/{lecture_id}").status_code == 404
+    assert client.get(f"/v1/threads/{thread_id}").status_code == 404
+    assert storage.head(video) is None
+    assert points() == 0
+    assert client.delete(f"/v1/lectures/{lecture_id}").status_code == 404
+    qdrant.close()

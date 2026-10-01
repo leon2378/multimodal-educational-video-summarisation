@@ -54,6 +54,11 @@ out of the free one.
 - The limits are soft: two requests at the same moment can both pass a check. A processing run's
   cost is known only when it finishes, and runs whose LLM stages all came from the cache count
   as free. That is enough for a demo; a counter store would make them exact.
+- Update (2026-10-02): the quotas first counted the rows they describe (lectures, questions,
+  answers, runs). Once lectures could be deleted, that let a user upload, delete and upload
+  again, and deleting a conversation already gave back its questions and its share of the
+  budget. They now count `usage_events`, a ledger the API and the worker add to as things
+  happen, which deleting leaves alone. Still in Postgres, still per UTC day.
 - Lectures and courses made before this are public (the demo), and so are ones made with
   sign-in off. Threads from before have no user and only admins see them.
 - Tests fake the issuer (a token names its user) for the access rules and quotas, and check real

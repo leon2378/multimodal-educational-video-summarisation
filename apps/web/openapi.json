@@ -2440,6 +2440,41 @@
       }
     },
     "/v1/lectures/{lecture_id}": {
+      "delete": {
+        "description": "Delete the lecture everywhere: its video, its passages in the search index, its results,\nprocessing history and conversations. What processing computed stays in the stage cache,\nwhere another upload of the same video finds it (docs/adr/0001-stage-cache.md). Its owner or\nan admin only, and not while it's processing. What it used still counts towards today's\nquotas.",
+        "operationId": "delete_lecture_v1_lectures__lecture_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Lecture",
+        "tags": [
+          "lectures"
+        ]
+      },
       "get": {
         "operationId": "get_lecture_v1_lectures__lecture_id__get",
         "parameters": [

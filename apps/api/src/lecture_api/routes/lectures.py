@@ -1,5 +1,5 @@
-"""Lecture lifecycle: create, direct upload, confirm, and move between courses. Processing is in
-routes/processing.py.
+"""Lecture lifecycle: create, direct upload, confirm, move between courses, and delete.
+Processing is in routes/processing.py.
 
 Upload flow:
     1. POST /v1/lectures                         -> lecture row + presigned PUT URL
@@ -10,15 +10,17 @@ Upload flow:
 import uuid
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lecture_api import quotas
 from lecture_api.access import can_change, can_read, lecture_or_404, own_lecture, readable
 from lecture_api.auth import SignedInDep, Viewer, ViewerDep
-from lecture_api.deps import SessionDep, SettingsDep, StorageDep
+from lecture_api.deps import SearcherDep, SessionDep, SettingsDep, StorageDep
 from lecture_api.schemas import (
     LectureCreate,
     LectureCreated,
@@ -27,7 +29,7 @@ from lecture_api.schemas import (
     MediaOut,
     UploadTarget,
 )
-from lecture_core.models import Course, Lecture, LectureStatus, Visibility
+from lecture_core.models import Course, Lecture, LectureStatus, UsageKind, Visibility
 from lecture_core.storage import source_key
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
@@ -59,6 +61,7 @@ async def create_lecture(
         attribution=body.attribution,
     )
     session.add(lecture)
+    quotas.record(session, UsageKind.UPLOAD, viewer.user_id)
     await session.commit()
     await session.refresh(lecture)
 
@@ -164,6 +167,37 @@ async def media(
         content_type=lecture.content_type,
         expires_in_s=settings.upload_url_ttl_s,
     )
+
+
+@router.delete("/{lecture_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_lecture(
+    lecture_id: uuid.UUID,
+    session: SessionDep,
+    storage: StorageDep,
+    searcher: SearcherDep,
+    viewer: SignedInDep,
+) -> None:
+    """Delete the lecture everywhere: its video, its passages in the search index, its results,
+    processing history and conversations. What processing computed stays in the stage cache,
+    where another upload of the same video finds it (docs/adr/0001-stage-cache.md). Its owner or
+    an admin only, and not while it's processing. What it used still counts towards today's
+    quotas."""
+    lecture = await own_lecture(session, lecture_id, viewer)
+    if lecture.status == LectureStatus.PROCESSING:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "The lecture is being processed. Delete it once that's done."
+        )
+    # The search index and storage first: each step is safe to repeat, so after a failure the
+    # lecture is still there to delete again.
+    try:
+        await run_in_threadpool(searcher.index.delete_lecture, lecture.id)
+    except (httpx.HTTPError, ResponseHandlingException, UnexpectedResponse) as error:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Search is unavailable right now. Try again soon."
+        ) from error
+    await run_in_threadpool(storage.delete, lecture.source_key)
+    await session.delete(lecture)
+    await session.commit()
 
 
 async def _joinable(session: AsyncSession, course_id: uuid.UUID, viewer: Viewer) -> None:

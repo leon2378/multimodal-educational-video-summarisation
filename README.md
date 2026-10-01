@@ -280,12 +280,16 @@ published keys; it holds no Clerk secret ([ADR 0009](docs/adr/0009-clerk-sign-in
 | Upload and process lectures, private to you | no | 3 a day, up to 1 GB each | no limit |
 | Make courses (private) | no | yes | yes, and public ones |
 | Make a lecture public | no | no | yes |
+| Delete a lecture (`DELETE /v1/lectures/{id}`) | no | their own | any |
 
 On top of that, everyone together stops at $2 of LLM spend a day (at paid-tier prices): past it,
 questions and processing wait for 00:00 UTC. A limit answers 429 with `Retry-After`, and
-`GET /v1/me` says who the API takes the caller to be and what their quotas leave today.
-Conversations are private to whoever had them. The limits are settings (see `.env.example`).
-Lectures added before sign-in existed, or with it off, are public.
+`GET /v1/me` says who the API takes the caller to be and what their quotas leave today. The
+quotas count a ledger written as things happen, so deleting a lecture or a conversation
+doesn't give any of the day's allowance back. Deleting a lecture removes its video, results,
+conversations and search entries; the stage cache keeps what processing computed, for another
+upload of the same video. Conversations are private to whoever had them. The limits are
+settings (see `.env.example`). Lectures added before sign-in existed, or with it off, are public.
 
 To turn it on, create a Clerk application and put in `.env`:
 

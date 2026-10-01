@@ -9,7 +9,7 @@ import asyncio
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,11 +30,13 @@ from lecture_core.models import (
     SummaryRow,
     TimelineSegmentRow,
     TranscriptSegmentRow,
+    UsageEvent,
+    UsageKind,
 )
 from lecture_core.processing import ProcessInput, StageInfo
 from lecture_core.storage import ObjectStorage
 from lecture_core.timeline import SlideDeck, Timeline, Transcript
-from lecture_llm.agents import LectureLLM
+from lecture_llm.agents import LectureLLM, Usage
 from lecture_llm.pricing import text_cost_usd
 from lecture_perception.asr import Transcriber
 from lecture_perception.media import MediaError, MediaInfo
@@ -171,6 +173,12 @@ class PipelineActivities:
                 run.finished_at = datetime.now(UTC)
                 run.stages = [info.model_dump() for info in request.stages]
                 run.llm_usage = loaded.usage
+            if loaded.spent_usd:
+                # The quotas' ledger, which deleting the lecture leaves alone.
+                owner = lecture.owner_id if lecture is not None else None
+                session.add(
+                    UsageEvent(user_id=owner, kind=UsageKind.LLM, cost_usd=loaded.spent_usd)
+                )
 
     @activity.defn(name="mark_failed")
     async def mark_failed(self, request: FailInput) -> None:
@@ -274,6 +282,11 @@ class PipelineActivities:
         draft = self._load(request.draft, stages.NotesDraft).output
         usage = readings.usage + plan.usage + draft.usage
         cost = text_cost_usd(draft.model, usage.input_tokens, usage.output_tokens)
+        by_stage = {
+            "read_slides": readings.usage,
+            "chapters": plan.usage,
+            "draft_notes": draft.usage,
+        }
         return _Loaded(
             info=self._load(request.probe, MediaInfo).output,
             transcript=self._load(request.transcript, Transcript).output,
@@ -283,7 +296,19 @@ class PipelineActivities:
             notes=self._load(request.notes, stages.NotesResult).output,
             # What the LLM calls cost at paid-tier prices, cached ones included.
             usage={"model": draft.model, **usage.model_dump(), "cost_usd": cost},
+            spent_usd=spent_usd(draft.model, by_stage, request.stages),
         )
+
+
+def spent_usd(model: str, by_stage: Mapping[str, Usage], infos: Sequence[StageInfo]) -> float:
+    """What a run's own LLM calls cost at paid-tier prices: those of the LLM stages it computed,
+    not the ones it took from the cache (whose usage the cache entries also carry)."""
+    cached = {info.stage: info.cached for info in infos}
+    spent = Usage()
+    for stage, used in by_stage.items():
+        if not cached.get(stage, True):
+            spent = spent + used
+    return text_cost_usd(model, spent.input_tokens, spent.output_tokens) or 0.0
 
 
 @dataclass(frozen=True)
@@ -295,6 +320,8 @@ class _Loaded:
     timeline: Timeline
     notes: stages.NotesResult
     usage: dict[str, object]
+    # What this run's own LLM calls cost: the LLM stages it didn't take from the cache.
+    spent_usd: float
 
 
 def _result_rows(

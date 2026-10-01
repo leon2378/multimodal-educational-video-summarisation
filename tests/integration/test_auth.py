@@ -7,20 +7,21 @@ tests/unit/test_auth.py). Subjects are unique to each test, so quotas start from
 import asyncio
 import uuid
 from collections.abc import Iterator
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import jwt
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from lecture_api import quotas
 from lecture_api.auth import Viewer, get_verifier
-from lecture_api.deps import get_temporal
+from lecture_api.deps import get_searcher, get_temporal
 from lecture_api.main import create_app
 from lecture_core.db import create_engine, create_sessionmaker
-from lecture_core.models import Lecture, MessageRole, QAMessage, QAThread, User
+from lecture_core.models import Lecture, LectureStatus, QAThread, UsageKind, User
 from lecture_core.settings import Settings
 
 pytestmark = pytest.mark.integration
@@ -161,6 +162,57 @@ def test_uploads_are_limited_per_day_except_for_admins(api: TestClient) -> None:
         new_lecture(api, "admin")
 
 
+class _Index:
+    """Stands in for the search index, which isn't running here: records what's dropped."""
+
+    def __init__(self) -> None:
+        self.deleted: list[uuid.UUID] = []
+
+    def delete_lecture(self, lecture_id: uuid.UUID) -> None:
+        self.deleted.append(lecture_id)
+
+
+def _without_search(api: TestClient) -> _Index:
+    index = _Index()
+    app = cast(FastAPI, api.app)
+    app.dependency_overrides[get_searcher] = lambda: SimpleNamespace(index=index)
+    return index
+
+
+def test_its_owner_deletes_a_lecture_and_gets_no_upload_back(api: TestClient) -> None:
+    index = _without_search(api)
+    alice, bob = who("alice"), who("bob")
+    first, second = new_lecture(api, alice), new_lecture(api, alice)
+    path = f"/v1/lectures/{first['id']}"
+
+    assert api.delete(path).status_code == 401
+    assert api.delete(path, headers=as_(bob)).status_code == 404  # private, so not even seen
+    assert api.delete(path, headers=as_(alice)).status_code == 204
+    assert api.get(path, headers=as_(alice)).status_code == 404
+    assert index.deleted == [uuid.UUID(first["id"])]
+    # The day's two uploads still count: deleting one doesn't make room for another.
+    again = api.post(
+        "/v1/lectures",
+        json={"title": "x", "filename": "x.mp4", "content_type": "video/mp4"},
+        headers=as_(alice),
+    )
+    assert again.status_code == 429
+    assert api.get("/v1/me", headers=as_(alice)).json()["quotas"]["uploads_today"] == 2
+    assert api.delete(f"/v1/lectures/{second['id']}", headers=as_("admin")).status_code == 204
+
+
+def test_a_lecture_isnt_deleted_while_it_processes(api: TestClient, signed: Settings) -> None:
+    _without_search(api)
+    alice = who("alice")
+    lecture = new_lecture(api, alice)
+    asyncio.run(_set_status(signed, uuid.UUID(lecture["id"]), LectureStatus.PROCESSING))
+
+    response = api.delete(f"/v1/lectures/{lecture['id']}", headers=as_(alice))
+
+    assert response.status_code == 409
+    assert "being processed" in response.json()["detail"]
+
+
 def test_bad_tokens_are_refused(api: TestClient) -> None:
     assert api.get("/v1/lectures", headers={"Authorization": "Bearer nonsense"}).status_code == 401
     assert api.get("/v1/lectures", headers={"Authorization": "Basic abc"}).status_code == 401
@@ -189,28 +241,16 @@ def test_questions_are_limited_and_the_daily_budget_pauses_everyone(signed: Sett
         try:
             async with create_sessionmaker(engine)() as session:
                 alice = User(subject=who("alice"))
-                lecture = Lecture(
-                    title="t", source_key="k", source_filename="l.mp4", content_type="video/mp4"
-                )
-                session.add_all([alice, lecture])
+                session.add(alice)
                 await session.flush()
-                thread = QAThread(title="q", user_id=alice.id, lecture_id=lecture.id)
-                session.add(thread)
-                await session.flush()
-                session.add_all(
-                    QAMessage(thread_id=thread.id, role=MessageRole.USER, content=question)
-                    for question in ("One?", "Two?")
-                )
+                # Two questions just now, as the ledger records them when they're asked.
+                quotas.record(session, UsageKind.QUESTION, alice.id)
+                quotas.record(session, UsageKind.QUESTION, alice.id)
                 # An answer that cost $0.30: a million input tokens at $0.30 a million.
-                session.add(
-                    QAMessage(
-                        thread_id=thread.id,
-                        role=MessageRole.ASSISTANT,
-                        content="...",
-                        model="google:gemini-3.5-flash-lite",
-                        usage={"requests": 1, "input_tokens": 1_000_000, "output_tokens": 0},
-                    )
-                )
+                used = {"requests": 1, "input_tokens": 1_000_000, "output_tokens": 0}
+                cost = quotas.answer_cost("google:gemini-3.5-flash-lite", used)
+                assert cost == pytest.approx(0.30)
+                quotas.record(session, UsageKind.LLM, alice.id, cost)
                 await session.commit()
 
                 two_a_minute = signed.model_copy(update={"quota_questions_per_minute": 2})
@@ -249,5 +289,16 @@ async def _threads(
                 made[subject] = thread.id
             await session.commit()
             return made
+    finally:
+        await engine.dispose()
+
+
+async def _set_status(settings: Settings, lecture_id: uuid.UUID, status: LectureStatus) -> None:
+    engine = create_engine(settings)
+    try:
+        async with create_sessionmaker(engine)() as session, session.begin():
+            lecture = await session.get(Lecture, lecture_id)
+            assert lecture is not None
+            lecture.status = status
     finally:
         await engine.dispose()
