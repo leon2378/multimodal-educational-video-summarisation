@@ -6,6 +6,7 @@ activity, or a re-run with one prompt changed, reuses everything already compute
 """
 
 import asyncio
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -74,7 +75,8 @@ class Resources:
     storage: ObjectStorage
     media_dir: Path
     sessionmaker: async_sessionmaker[AsyncSession] | None = None
-    llm: LectureLLM | None = None
+    # Called once per activity thread (see PipelineActivities._llm).
+    make_llm: Callable[[], LectureLLM] | None = None
     transcriber: Transcriber | None = None
     search: SearchResources | None = None
     # Cheap to create: the OCR models load on first use.
@@ -86,6 +88,7 @@ class PipelineActivities:
     def __init__(self, resources: Resources) -> None:
         self.resources = resources
         self.ctx = stages.Context(StageCache(resources.storage), resources.storage)
+        self._local = threading.local()
 
     # CPU queue
 
@@ -245,9 +248,15 @@ class PipelineActivities:
         return self.ctx.cache.load(ref.stage, ref.key, output_type)
 
     def _llm(self) -> LectureLLM:
-        if self.resources.llm is None:
+        """One per activity thread. Each thread drives its own event loop for the agents' calls,
+        and a client's pooled connections belong to the loop that opened them: shared between
+        threads, a reused connection fails with "bound to a different event loop"."""
+        if self.resources.make_llm is None:
             raise ApplicationError("this worker has no LLM configured", non_retryable=True)
-        return self.resources.llm
+        llm: LectureLLM | None = getattr(self._local, "llm", None)
+        if llm is None:
+            llm = self._local.llm = self.resources.make_llm()
+        return llm
 
     def _search(self) -> SearchResources:
         if self.resources.search is None:

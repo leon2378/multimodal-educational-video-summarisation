@@ -66,10 +66,9 @@ def build_resources(queues: Sequence[str], traced: bool = False) -> Resources:
     if QUEUE_LLM in queues:
         resources.slide_reader = PipelineSettings().slide_reader
         llm_settings = LLMSettings()
-        resources.llm = LectureLLM(
-            make_model(llm_settings),
-            Prompts.load(llm_settings.prompts_dir),
-            llm_settings.slides_per_request,
+        prompts = Prompts.load(llm_settings.prompts_dir)
+        resources.make_llm = lambda: LectureLLM(
+            make_model(llm_settings), prompts, llm_settings.slides_per_request
         )
     if QUEUE_GPU in queues:
         pipeline = PipelineSettings()

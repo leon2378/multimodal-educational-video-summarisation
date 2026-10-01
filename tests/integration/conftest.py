@@ -195,7 +195,9 @@ class InProcessWorkers:
                 storage=ObjectStorage(self.settings),
                 media_dir=self.media_dir,
                 sessionmaker=create_sessionmaker(engine),
-                llm=LectureLLM(FakeLLM().model, Prompts.load(REPO_ROOT / "prompts" / "pipeline")),
+                make_llm=lambda: LectureLLM(
+                    FakeLLM().model, Prompts.load(REPO_ROOT / "prompts" / "pipeline")
+                ),
                 transcriber=FakeTranscriber(),
                 search=SearchResources(_search_index(self.settings), FakeDense(), FakeSparse()),
             )
