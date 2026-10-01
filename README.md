@@ -319,8 +319,8 @@ Setting it up the first time (needs the Google Cloud CLI, Terraform and a Modal 
 1. `gcloud auth login` and `gcloud auth application-default login`, then copy
    `infra/terraform/cloud.tfvars.example` to `cloud.tfvars` and name your project in it. Set a
    budget alert on the project's billing account.
-2. `make cloud-base`: Terraform's state bucket, then the bucket, secrets, network and deploy
-   access.
+2. `make cloud-base`: switches on the APIs Terraform needs, makes Terraform's state bucket,
+   then the bucket, secrets, network and deploy access.
 3. Modal: `uv run modal token new`, then `make modal-model` once and `make modal`. Make a proxy
    auth token for the embedding server in Modal's dashboard.
 4. Copy `infra/cloud.env.example` to `infra/cloud.env`, fill it in (Gemini, Clerk, Modal) and run

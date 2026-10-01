@@ -97,6 +97,11 @@ modal: ## Deploy speech recognition and the embedding model to GPUs in Modal (AD
 	uv run modal deploy infra/modal/embeddings.py
 
 cloud-base: ## Once: the demo's bucket, secrets, network and deploy access in Google Cloud
+	@# What Terraform and the state bucket need first; Terraform switches on the rest. A project
+	@# made by AI Studio for a Gemini key starts with only Gemini's API on.
+	gcloud services enable serviceusage.googleapis.com cloudresourcemanager.googleapis.com \
+		storage.googleapis.com --project $(PROJECT)
+	gcloud auth application-default set-quota-project $(PROJECT)
 	gcloud storage buckets describe gs://$(PROJECT)-tfstate --project $(PROJECT) > /dev/null 2>&1 || \
 		gcloud storage buckets create gs://$(PROJECT)-tfstate --project $(PROJECT) --location $(REGION) \
 			--uniform-bucket-level-access --public-access-prevention
