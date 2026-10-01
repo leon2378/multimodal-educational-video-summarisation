@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
+from lecture_core.timeline import SlideReading
 from lecture_evals.captions import count, normalise, occurrences, parse_srt, timed_words
 from lecture_evals.golden import GoldenLecture, GoldenQuestion
 from lecture_evals.runs import Bound, SuiteResult, failures, load_thresholds
@@ -282,19 +283,25 @@ def test_citations_on_target_need_to_be_near_the_answer() -> None:
 
 
 def test_evidence_is_rebuilt_from_sources_and_escaped() -> None:
-    sources = [{"start_s": 60.0, "end_s": 90.0, "slide_title": "Loops"}]
+    sources = [{"segment_id": "s004", "start_s": 60.0, "end_s": 90.0, "slide_title": "Loops"}]
     transcript = [
         {"start_s": 50.0, "text": "Before."},
         {"start_s": 60.2, "text": "A <b>loop</b>."},
         {"start_s": 95.0, "text": "After."},
     ]
+    # The answer model saw the slide too, so a claim read off it is supported.
+    slide = SlideReading(
+        slide_id=3, title="Loops", text="for <i> in range", figure_description="", latex=[], code=""
+    )
 
-    evidence = answers.render_evidence(sources, transcript)
+    evidence = answers.render_evidence(sources, transcript, {"s004": slide})
 
     assert '<passage time="01:00-01:30" slide="Loops">' in evidence
+    assert "<slide>\nTitle: Loops\nText: for &lt;i&gt; in range\n</slide>" in evidence
     assert "[01:00] A &lt;b&gt;loop&lt;/b&gt;." in evidence
     assert "Before" not in evidence
     assert "After" not in evidence
+    assert "<slide>" not in answers.render_evidence(sources, transcript)
 
 
 def test_the_gate() -> None:

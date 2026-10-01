@@ -7,7 +7,15 @@ from pathlib import Path
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 
-from lecture_core.qa import ChatTurn, Passage, Sentence, find_citations, label_lectures
+from lecture_core.notes import Chapter
+from lecture_core.qa import (
+    ChatTurn,
+    Outline,
+    Passage,
+    Sentence,
+    find_citations,
+    label_lectures,
+)
 from lecture_core.timeline import SlideReading
 from lecture_llm.agents import Usage
 from lecture_llm.qa import AnswerLLM, QAPrompts, render_conversation, render_passages
@@ -49,6 +57,15 @@ PASSAGES = [
 ]
 
 
+OUTLINE = Outline(
+    lecture_id=LECTURE,
+    chapters=[
+        Chapter(title="Why efficiency matters", start_s=0.37, end_s=418.8, summary=""),
+        Chapter(title="Linear & <quadratic> examples", start_s=2365.75, end_s=3085.7, summary=""),
+    ],
+)
+
+
 def _answerer(fake: FakeQA) -> AnswerLLM:
     return AnswerLLM(fake.model, QAPrompts.load(REPO_ROOT / "prompts" / "qa"))
 
@@ -81,6 +98,22 @@ def test_things_that_arent_timestamps_are_ignored() -> None:
     assert find_citations("A list [1, 2] and [99:99] and [ab:cd].", PASSAGES) == []
 
 
+def test_a_chapter_start_from_the_outline_is_grounded() -> None:
+    # Search can't find "the last topic", so the answer cites where the last chapter starts.
+    answer = "It ends on examples [39:25], not [39:40]."
+
+    citations = find_citations(answer, PASSAGES, OUTLINE)
+
+    assert [(c.label, c.lecture_id, c.segment_id, c.valid) for c in citations] == [
+        ("[39:25]", LECTURE, None, True),
+        ("[39:40]", None, None, False),
+    ]
+    # Without the outline, the chapter's start isn't grounded in anything.
+    assert not find_citations(answer, PASSAGES)[0].valid
+    # Across a course, a labelled time is checked against the passages alone.
+    assert not find_citations("[L1 39:25]", label_lectures(PASSAGES, {}), OUTLINE)[0].valid
+
+
 def test_passages_are_escaped_and_timestamped() -> None:
     rendered = render_passages(PASSAGES)
 
@@ -111,6 +144,23 @@ def test_answer_streams_and_counts_tokens() -> None:
     assert usage.requests == 1
     assert "<question>What is memoisation?</question>" in fake.prompts[-1]
     assert "<conversation>" not in fake.prompts[-1]
+    assert "<outline>" not in fake.prompts[-1]
+
+
+def test_an_answer_about_one_lecture_gets_its_outline() -> None:
+    fake = FakeQA()
+
+    async def collect() -> None:
+        stream = _answerer(fake).stream_answer("Last topic?", PASSAGES, [], Usage(), OUTLINE)
+        async for _ in stream:
+            pass
+
+    asyncio.run(collect())
+
+    prompt = fake.prompts[-1]
+    outline = "[00:00] Why efficiency matters\n[39:25] Linear &amp; &lt;quadratic&gt; examples"
+    assert f"<outline>\n{outline}\n</outline>" in prompt
+    assert prompt.index("</passages>") < prompt.index("<outline>") < prompt.index("<question>")
 
 
 def test_a_failing_model_raises() -> None:

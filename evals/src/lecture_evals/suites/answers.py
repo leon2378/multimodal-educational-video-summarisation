@@ -1,9 +1,10 @@
 """Answer eval: ask the golden questions through the API, then score the answers.
 
-- Correctness and faithfulness: an LLM judge (prompts/evals/judge-answer.v1.md) compares each
-  answer with the reference answer, and checks its claims against the passages it was written
-  from. The judge isn't calibrated against hand grades yet (the blueprint wants about 50), so
-  read its scores as a trend rather than the truth.
+- Correctness and faithfulness: an LLM judge (prompts/evals/judge-answer.v2.md) compares each
+  answer with the reference answer, and checks its claims against what it was written from: the
+  passages, with their slides, and the lecture's outline. The judge isn't calibrated against
+  hand grades yet (the blueprint wants about 50), so read its scores as a trend rather than the
+  truth.
 - Citations: the share inside the retrieved passages (checked by the API), and the share of
   answers citing within 10 s of where the golden set says the answer is.
 - Declining: a question the lecture doesn't answer should be declined, citing nothing; one it
@@ -20,7 +21,7 @@ import math
 import statistics
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -30,11 +31,14 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
-from lecture_core.notes import format_timestamp
+from lecture_core.notes import StudyNotes, format_timestamp
+from lecture_core.qa import Outline
+from lecture_core.timeline import SlideReading
 from lecture_evals.client import ask, delete_thread, find_lecture, get
 from lecture_evals.golden import GoldenQuestion, GoldenSet
 from lecture_evals.runs import SuiteResult, file_sha256
-from lecture_llm.agents import Prompt, Usage, attr
+from lecture_llm.agents import Prompt, Usage, attr, render_slide
+from lecture_llm.qa import render_outline
 
 DEFAULT_DATASET = Path("evals/datasets/golden-qa/mit-6.0001-lecture-10.json")
 JUDGE_PROMPTS = Path("prompts/evals")
@@ -85,7 +89,7 @@ class AnswersReport(BaseModel):
 class Judge:
     def __init__(self, model: Model, prompts_dir: Path = JUDGE_PROMPTS) -> None:
         self.model_name = f"{model.system}:{model.model_name}"
-        self.prompt = Prompt.load(prompts_dir, "judge-answer.v1")
+        self.prompt = Prompt.load(prompts_dir, "judge-answer.v2")
         self._agent = Agent(model, output_type=Judgement, instructions=self.prompt.text)
 
     def grade(
@@ -105,18 +109,28 @@ class Judge:
         return result.output, usage
 
 
-def render_evidence(sources: Sequence[dict[str, Any]], transcript: Sequence[dict[str, Any]]) -> str:
-    """The passages an answer was given, rebuilt from its sources and the lecture's transcript."""
+def render_evidence(
+    sources: Sequence[dict[str, Any]],
+    transcript: Sequence[dict[str, Any]],
+    slides: Mapping[str, SlideReading] | None = None,
+) -> str:
+    """The passages an answer was given, rebuilt from its sources, the lecture's transcript and
+    the slide on screen in each segment (`slides`, by segment id), as the answer model saw
+    them. Without the slides, a claim read off a slide looks unsupported."""
     blocks = []
     for source in sources:
         span = f"{format_timestamp(source['start_s'])}-{format_timestamp(source['end_s'])}"
         slide = f" slide={attr(source['slide_title'])}" if source.get("slide_title") else ""
-        lines = [
+        lines = [f'<passage time="{span}"{slide}>']
+        reading = (slides or {}).get(source.get("segment_id", ""))
+        if reading is not None and (rendered := render_slide(reading)):
+            lines.append(f"<slide>\n{rendered}\n</slide>")
+        lines += [
             f"[{format_timestamp(line['start_s'])}] {html.escape(line['text'])}"
             for line in transcript
             if source["start_s"] - 0.5 <= line["start_s"] < source["end_s"]
         ]
-        blocks.append(f'<passage time="{span}"{slide}>\n' + "\n".join(lines) + "\n</passage>")
+        blocks.append("\n".join([*lines, "</passage>"]))
     return "<passages>\n" + "\n".join(blocks) + "\n</passages>"
 
 
@@ -139,6 +153,26 @@ def evaluate(
     started_at = datetime.now(UTC)
     lecture_id = lecture_id or find_lecture(client, golden.lecture)
     transcript: list[dict[str, Any]] = get(client, f"/v1/lectures/{lecture_id}/transcript")
+    # What the API gives the answer model besides the speech, rendered the same way: each
+    # segment's slide, and the lecture's outline.
+    readings = {
+        s["slide_id"]: SlideReading(
+            slide_id=s["slide_id"],
+            title=s["title"],
+            text=s["text"],
+            figure_description=s["figure_description"],
+            latex=s["latex"],
+            code=s["code"],
+        )
+        for s in get(client, f"/v1/lectures/{lecture_id}/slides")
+    }
+    slides = {
+        segment["segment_id"]: readings[segment["slide_id"]]
+        for segment in get(client, f"/v1/lectures/{lecture_id}/timeline")
+        if segment["slide_id"] in readings
+    }
+    notes = StudyNotes.model_validate(get(client, f"/v1/lectures/{lecture_id}/notes")["notes"])
+    outline = render_outline(Outline(lecture_id=lecture_id, chapters=notes.chapters))
     results = []
     answer_model = None
     for question in golden.questions:
@@ -153,7 +187,8 @@ def evaluate(
         error = last.get("detail") if last["type"] == "error" else None
         judgement = None
         if error is None:
-            evidence = render_evidence(answer.get("sources") or [], transcript)
+            evidence = render_evidence(answer.get("sources") or [], transcript, slides)
+            evidence += "\n\n" + outline
             judgement, _ = judge.grade(
                 question.question, question.answer, evidence, answer["content"]
             )

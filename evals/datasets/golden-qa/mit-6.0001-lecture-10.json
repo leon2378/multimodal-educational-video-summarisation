@@ -262,6 +262,20 @@
       "question": "What is a hash collision?",
       "answer": null,
       "spans": []
+    },
+    {
+      "id": "s01",
+      "kind": "structure",
+      "question": "What was the last topic in this lecture?",
+      "answer": "Examples of the common complexity classes: linear complexity (searching a list, unsorted and sorted), then quadratic complexity with nested loops, which the lecture ends on.",
+      "spans": [["39:25", "51:25"]]
+    },
+    {
+      "id": "s02",
+      "kind": "structure",
+      "question": "What does the lecture move on to right after explaining Big O notation?",
+      "answer": "Analysing a program's complexity from its parts: the law of addition for code that runs one part after another and the law of multiplication for nested loops, then the main complexity classes.",
+      "spans": [["32:40", "39:25"]]
     }
   ]
 }

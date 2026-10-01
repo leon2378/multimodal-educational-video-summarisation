@@ -25,11 +25,17 @@ def ask(
     return ask_at(client, f"/v1/lectures/{lecture_id}/ask", question, thread_id)
 
 
-def test_ask_follow_up_and_rate(processing_client: TestClient, processed_lecture: str) -> None:
+def test_ask_follow_up_and_rate(
+    processing_client: TestClient, processed_lecture: str, fake_qa: FakeQA
+) -> None:
     lecture_id = processed_lecture
     client = processing_client
 
     events = ask(client, lecture_id, "What does memoisation store?")
+
+    # The model also saw the lecture's outline, from its notes' chapters.
+    outline = fake_qa.prompts[-1].split("<outline>\n")[1].split("\n</outline>")[0]
+    assert [line.split("] ", 1)[1] for line in outline.splitlines()] == ["Memoisation", "Growth"]
 
     assert [e["type"] for e in events[:2]] == ["start", "sources"]
     assert events[-1]["type"] == "done"

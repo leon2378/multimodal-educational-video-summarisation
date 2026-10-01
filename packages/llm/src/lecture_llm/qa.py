@@ -15,7 +15,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
 from lecture_core.notes import format_timestamp
-from lecture_core.qa import ChatTurn, Passage
+from lecture_core.qa import ChatTurn, Outline, Passage
 from lecture_llm.agents import Prompt, Usage, attr, render_slide
 
 # Earlier answers are shortened in prompts: they're context for the question, not evidence.
@@ -31,7 +31,7 @@ class QAPrompts:
     @classmethod
     def load(cls, prompts_dir: Path) -> "QAPrompts":
         return cls(
-            answer=Prompt.load(prompts_dir, "answer.v1"),
+            answer=Prompt.load(prompts_dir, "answer.v2"),
             course_answer=Prompt.load(prompts_dir, "course-answer.v1"),
             rewrite=Prompt.load(prompts_dir, "rewrite.v1"),
         )
@@ -62,11 +62,16 @@ class AnswerLLM:
         passages: Sequence[Passage],
         history: Sequence[ChatTurn],
         usage: Usage,
+        outline: Outline | None = None,
     ) -> AsyncIterator[str]:
         """The answer as it's generated. `usage` is filled in once the stream ends. Labelled
-        passages (lecture_core.qa.label_lectures) make it an answer across a course."""
+        passages (lecture_core.qa.label_lectures) make it an answer across a course; an answer
+        about one lecture also gets its outline."""
         parts = [render_conversation(history)] if history else []
-        parts += [render_passages(passages), f"<question>{html.escape(question)}</question>"]
+        parts.append(render_passages(passages))
+        if outline is not None and outline.chapters:
+            parts.append(render_outline(outline))
+        parts.append(f"<question>{html.escape(question)}</question>")
         agent = self._course_answer if any(p.label for p in passages) else self._answer
         async with agent.run_stream("\n\n".join(parts)) as result:
             async for delta in result.stream_text(delta=True, debounce_by=None):
@@ -94,6 +99,11 @@ def render_passages(passages: Sequence[Passage]) -> str:
         lines += ["</speech>", "</passage>"]
         blocks.append("\n".join(lines))
     return "<passages>\n" + "\n".join(blocks) + "\n</passages>"
+
+
+def render_outline(outline: Outline) -> str:
+    lines = [f"[{format_timestamp(c.start_s)}] {html.escape(c.title)}" for c in outline.chapters]
+    return "<outline>\n" + "\n".join(lines) + "\n</outline>"
 
 
 def render_conversation(history: Sequence[ChatTurn]) -> str:

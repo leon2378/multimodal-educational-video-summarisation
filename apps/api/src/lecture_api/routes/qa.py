@@ -9,7 +9,9 @@ DELETE /v1/threads/{id}         delete a conversation, with its answers and rati
 POST /v1/feedback               thumbs up or down on an answer, with an optional reason
 
 A follow-up question is first rewritten to stand on its own, then searched; the answer is
-generated from the top segments only, and each citation is checked against them.
+generated from the top segments only, and each citation is checked against them. An answer
+about one lecture also gets the lecture's outline, for questions about its order (search can't
+find "the last topic"), and may cite a chapter's start.
 """
 
 import logging
@@ -65,9 +67,11 @@ from lecture_core.models import (
     QAMessage,
     QAThread,
     SlideRow,
+    SummaryRow,
     TranscriptSegmentRow,
 )
-from lecture_core.qa import ChatTurn, Passage, Sentence, find_citations, label_lectures
+from lecture_core.notes import StudyNotes
+from lecture_core.qa import ChatTurn, Outline, Passage, Sentence, find_citations, label_lectures
 from lecture_core.settings import Settings
 from lecture_core.timeline import SlideReading
 from lecture_llm.agents import Usage
@@ -323,6 +327,7 @@ async def _answer(
     usage = Usage()
     parts: list[str] = []
     passages: list[Passage] = []
+    outline: Outline | None = None
     failure: str | None = None
     try:
         query, used = await answerer.rewrite(question.content, history)
@@ -337,6 +342,8 @@ async def _answer(
         )
         async with sessionmaker() as session:
             passages = await _passages(session, hits)
+            if scope.lecture_id is not None:
+                outline = await _outline(session, scope.lecture_id)
         if scope.course_id is not None:
             passages = label_lectures(passages, scope.titles)
         labels = {passage.lecture_id: passage.label for passage in passages}
@@ -347,7 +354,7 @@ async def _answer(
         answer.sources = [source.model_dump(mode="json") for source in sources]
         yield _sse(AskSources(search_query=query, sources=sources))
         deltas = (
-            answerer.stream_answer(question.content, passages, history, usage)
+            answerer.stream_answer(question.content, passages, history, usage, outline)
             if passages
             else _just(scope.nothing_found)
         )
@@ -364,7 +371,9 @@ async def _answer(
         failure = _model_failure(error)
     answer.error = failure
     answer.content = "".join(parts)
-    answer.citations = [c.model_dump(mode="json") for c in find_citations(answer.content, passages)]
+    answer.citations = [
+        c.model_dump(mode="json") for c in find_citations(answer.content, passages, outline)
+    ]
     answer.usage = usage.model_dump()
     answer.total_ms = _ms_since(started)
     record_usage(usage, answerer.model_name, "qa")
@@ -453,6 +462,14 @@ async def _passages(session: AsyncSession, hits: Sequence[Hit]) -> list[Passage]
             )
         )
     return passages
+
+
+async def _outline(session: AsyncSession, lecture_id: uuid.UUID) -> Outline | None:
+    """The lecture's chapters, from its study notes."""
+    row = await session.get(SummaryRow, (lecture_id, "study_notes"))
+    if row is None:
+        return None
+    return Outline(lecture_id=lecture_id, chapters=StudyNotes.model_validate(row.content).chapters)
 
 
 async def _history(session: AsyncSession, thread_id: uuid.UUID, turns: int) -> list[ChatTurn]:

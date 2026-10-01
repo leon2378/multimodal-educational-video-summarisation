@@ -121,7 +121,8 @@ def evaluate(
     ]
     if not segments:
         raise LookupError(f"lecture {lecture_id} has no timeline yet")
-    questions = [q for q in golden.questions if q.answerable]
+    # A question about the lecture's order is answered from its outline, not by search.
+    questions = [q for q in golden.questions if q.answerable and q.kind != "structure"]
     results: list[QuestionResult] = []
     for mode in modes:
         # A first query loads anything lazy (the BM25 model, connection pools) outside the timings.

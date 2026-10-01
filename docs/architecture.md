@@ -146,10 +146,15 @@ Code in `apps/api/src/lecture_api/routes/qa.py`, `packages/llm` (`qa`) and `pack
    transcript rows and their slides from its slide readings, so the model sees each sentence with
    its `[mm:ss]`.
 4. The answer model gets the passages in delimited, HTML-escaped blocks, with the conversation
-   for context. It is told to use only the passages, to cite by copying a sentence's time, and to
-   say when the lecture doesn't cover the question. The answer streams out as it's written.
-5. Every `[mm:ss]` in the answer is checked: valid if it falls inside a retrieved segment. The
-   web app makes valid ones play the video and strikes the others through.
+   for context, and the lecture's outline: its chapters with their start times, from the study
+   notes. Search finds passages by meaning, so it can't find "the last topic": for that question
+   it returned the introduction, which previews the whole lecture, and the answer cited its
+   first seconds. The model is told to use only the passages and outline, to cite by copying a
+   sentence's time (or, for a question about the lecture's order, the chapter's start), and to
+   say when the lecture doesn't cover the question (`prompts/qa/answer.v2.md`). The answer
+   streams out as it's written.
+5. Every `[mm:ss]` in the answer is checked: valid if it falls inside a retrieved segment or on a
+   chapter's start. The web app makes valid ones play the video and strikes the others through.
 6. The answer is saved with its sources, citations, model, tokens, time to first token and total
    time. If search or the model fails, the answer is saved with the reason, and the stream ends
    with an error event instead of done.
@@ -195,7 +200,7 @@ opens that lecture at 1:04. A big-O question was answered from Lecture 10 with c
 | Suite | Measures | Ground truth |
 |---|---|---|
 | retrieval | Recall@5, MRR@10, nDCG@10 per search mode | golden questions with answer spans |
-| answers | correctness and faithfulness (LLM judge, `prompts/evals/judge-answer.v1.md`), citations inside the passages and near the answer span, declining uncovered questions, latency, tokens | the same golden set |
+| answers | correctness and faithfulness (LLM judge, `prompts/evals/judge-answer.v2.md`, given what the answer model saw: the passages with their slides, and the outline), citations inside the passages and near the answer span, declining uncovered questions, latency, tokens | the same golden set, with two questions about the lecture's order that the retrieval suite leaves out |
 | asr | WER against the captions (`jiwer`), technical-term recall, real-time factor | the lecture's captions |
 | notes | concept citations against where the captions say the term; structural checks | the lecture's captions |
 

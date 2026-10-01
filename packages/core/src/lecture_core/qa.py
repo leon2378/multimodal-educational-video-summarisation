@@ -5,6 +5,12 @@ An answer cites the lecture as [mm:ss], copying the time of the sentence it draw
 passages it was given. Across a course, each lecture gets a label and citations name it:
 [L2 12:34]. Every citation is then checked against the passages: one that points outside them
 wasn't grounded in anything retrieved.
+
+Search finds passages by meaning, so it can't answer a question about a lecture's order, like
+its last topic: "last" has no meaning to match, and the passages it finds tend to be the
+introduction, which previews everything. So an answer about one lecture also gets the
+lecture's outline, its chapters with their start times, and a citation of a chapter's start is
+grounded too.
 """
 
 import re
@@ -13,7 +19,7 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel
 
-from lecture_core.notes import parse_timestamp
+from lecture_core.notes import Chapter, parse_timestamp
 from lecture_core.timeline import SlideReading
 
 # [mm:ss] or [h:mm:ss], as format_timestamp writes them, optionally after a lecture label, or
@@ -47,10 +53,18 @@ class Passage(BaseModel):
     label: str | None = None
 
 
+class Outline(BaseModel):
+    """A lecture's chapters, in order, from its study notes."""
+
+    lecture_id: uuid.UUID
+    chapters: list[Chapter]
+
+
 class Citation(BaseModel):
     label: str
     at_s: float
-    # The passage it points into; None when it points outside every passage.
+    # The passage it points into. A citation of a chapter's start in the outline has the
+    # lecture but no segment; one that points at neither has neither and isn't valid.
     lecture_id: uuid.UUID | None
     segment_id: str | None
     valid: bool
@@ -74,8 +88,11 @@ def label_lectures(passages: Sequence[Passage], titles: dict[uuid.UUID, str]) ->
     ]
 
 
-def find_citations(answer: str, passages: Sequence[Passage]) -> list[Citation]:
-    """Each distinct citation in the answer, in order, checked against the passages."""
+def find_citations(
+    answer: str, passages: Sequence[Passage], outline: Outline | None = None
+) -> list[Citation]:
+    """Each distinct citation in the answer, in order, checked against the passages and the
+    starts of the outline's chapters."""
     citations: dict[str, Citation] = {}
     for match in _CITATION.finditer(answer):
         lecture: str | None = None
@@ -101,11 +118,20 @@ def find_citations(answer: str, passages: Sequence[Passage]) -> list[Citation]:
                 ),
                 None,
             )
+            lecture_id: uuid.UUID | None = None
+            if passage is not None:
+                lecture_id = passage.lecture_id
+            elif (
+                lecture is None
+                and outline is not None
+                and any(abs(c.start_s - at_s) <= _TOLERANCE_S for c in outline.chapters)
+            ):
+                lecture_id = outline.lecture_id
             citations[label] = Citation(
                 label=label,
                 at_s=at_s,
-                lecture_id=passage.lecture_id if passage else None,
+                lecture_id=lecture_id,
                 segment_id=passage.segment_id if passage else None,
-                valid=passage is not None,
+                valid=lecture_id is not None,
             )
     return list(citations.values())
