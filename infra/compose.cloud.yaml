@@ -140,6 +140,10 @@ services:
       # The embedding model on a GPU in Modal (infra/modal/embeddings.py), behind proxy auth.
       EMBEDDINGS_URL: ${MODAL_EMBEDDINGS_URL:?}
       EMBEDDINGS_HEADERS: '{"Modal-Key": "${MODAL_PROXY_KEY:?}", "Modal-Secret": "${MODAL_PROXY_SECRET:?}"}'
+      # Optional, for YouTube links, which YouTube often refuses from a cloud server
+      # (docs/adr/0011-lectures-from-any-link.md). Empty unless set in cloud.env.
+      YOUTUBE_COOKIES_B64: ${YOUTUBE_COOKIES_B64:-}
+      YOUTUBE_PROXY: ${YOUTUBE_PROXY:-}
     depends_on:
       postgres:
         condition: service_healthy

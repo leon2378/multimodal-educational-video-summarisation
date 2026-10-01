@@ -24,6 +24,18 @@ class LectureCreate(BaseModel):
     course_id: uuid.UUID | None = None
 
 
+class LectureFromUrl(BaseModel):
+    url: str = Field(
+        min_length=1, max_length=2048, examples=["https://www.youtube.com/watch?v=..."]
+    )
+    # Without one, the video's own title, once it's downloaded.
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    # Without these, what the site says, if it says (YouTube gives a video's licence).
+    licence: str | None = Field(default=None, max_length=100, examples=["CC BY-NC-SA 4.0"])
+    attribution: str | None = Field(default=None, max_length=2000)
+    course_id: uuid.UUID | None = None
+
+
 class LectureUpdate(BaseModel):
     """Only the fields sent are changed. `course_id: null` takes a lecture out of its course.
     Only admins change `visibility`."""
@@ -40,6 +52,8 @@ class LectureOut(BaseModel):
     course_id: uuid.UUID | None
     status: LectureStatus
     source_filename: str
+    # The link it was downloaded from, for a lecture given as one.
+    source_url: str | None
     content_type: str
     size_bytes: int | None
     duration_s: float | None

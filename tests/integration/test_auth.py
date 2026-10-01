@@ -22,6 +22,7 @@ from lecture_api.deps import get_searcher, get_temporal
 from lecture_api.main import create_app
 from lecture_core.db import create_engine, create_sessionmaker
 from lecture_core.models import Lecture, LectureStatus, QAThread, UsageKind, User
+from lecture_core.processing import ProcessInput
 from lecture_core.settings import Settings
 
 pytestmark = pytest.mark.integration
@@ -302,3 +303,37 @@ async def _set_status(settings: Settings, lecture_id: uuid.UUID, status: Lecture
             lecture.status = status
     finally:
         await engine.dispose()
+
+
+class _Temporal:
+    """Stands in for Temporal: records the workflows started."""
+
+    def __init__(self) -> None:
+        self.started: list[ProcessInput] = []
+
+    async def start_workflow(self, workflow: str, request: ProcessInput, **_: object) -> None:
+        self.started.append(request)
+
+
+def test_a_lecture_from_a_link_counts_as_an_upload(api: TestClient, signed: Settings) -> None:
+    temporal = _Temporal()
+    # The client the API connects to on first use (lecture_api.deps.get_temporal).
+    cast(FastAPI, api.app).state.temporal = temporal
+    alice = who("alice")
+    link = {"url": "https://example.com/talks/recursion.mp4"}
+
+    for _ in range(2):
+        created = api.post("/v1/lectures/from-url", json=link, headers=as_(alice))
+        assert created.status_code == 201, created.text
+    third = api.post("/v1/lectures/from-url", json=link, headers=as_(alice))
+
+    assert third.status_code == 429
+    lecture = created.json()
+    assert (lecture["title"], lecture["source_filename"]) == (
+        "Video from example.com",
+        "recursion.mp4",
+    )
+    assert (lecture["status"], lecture["visibility"]) == ("processing", "private")
+    started = temporal.started[-1]
+    assert (started.source_url, started.title_from_source) == (link["url"], True)
+    assert started.max_bytes == min(signed.quota_upload_bytes, signed.max_upload_bytes)

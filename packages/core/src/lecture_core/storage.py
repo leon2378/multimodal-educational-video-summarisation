@@ -74,6 +74,12 @@ class ObjectStorage:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._client.download_file(self.bucket, key, str(path))
 
+    def upload_file(self, path: Path, key: str, content_type: str) -> None:
+        """A file from disk, in parts when it's big (a lecture fetched from a link)."""
+        self._client.upload_file(
+            str(path), self.bucket, key, ExtraArgs={"ContentType": content_type}
+        )
+
     def head(self, key: str) -> ObjectInfo | None:
         try:
             response = self._client.head_object(Bucket=self.bucket, Key=key)

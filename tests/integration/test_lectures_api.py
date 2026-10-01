@@ -102,3 +102,15 @@ def test_oversized_upload_is_rejected_and_deleted(settings: Settings) -> None:
 
 def test_unknown_lecture_is_404(client: TestClient) -> None:
     assert client.get(f"/v1/lectures/{uuid.uuid4()}").status_code == 404
+
+
+def test_a_link_off_the_public_internet_is_refused(client: TestClient) -> None:
+    before = len(client.get("/v1/lectures").json())
+
+    response = client.post(
+        "/v1/lectures/from-url", json={"url": "http://169.254.169.254/computeMetadata/v1/"}
+    )
+
+    assert response.status_code == 422
+    assert "isn't on the public internet" in response.json()["detail"]
+    assert len(client.get("/v1/lectures").json()) == before

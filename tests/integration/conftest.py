@@ -27,7 +27,12 @@ from lecture_core.settings import Settings
 from lecture_core.storage import ObjectStorage
 from lecture_llm.agents import LectureLLM, Prompts
 from lecture_llm.qa import AnswerLLM, QAPrompts
-from lecture_pipeline.temporal.activities import PipelineActivities, Resources, SearchResources
+from lecture_pipeline.temporal.activities import (
+    FetchSettings,
+    PipelineActivities,
+    Resources,
+    SearchResources,
+)
 from lecture_pipeline.temporal.worker import build_workers, connect
 from lecture_rag.index import SearchIndex
 from lecture_rag.search import Searcher
@@ -115,8 +120,13 @@ def qdrant_url() -> Iterator[str]:
 
 @pytest.fixture(scope="session")
 def processing_settings(settings: Settings, temporal_address: str, qdrant_url: str) -> Settings:
+    # Lectures from a link come from a web server on this machine (test_processing.py).
     return settings.model_copy(
-        update={"temporal_address": temporal_address, "qdrant_url": qdrant_url}
+        update={
+            "temporal_address": temporal_address,
+            "qdrant_url": qdrant_url,
+            "allow_private_links": True,
+        }
     )
 
 
@@ -200,6 +210,8 @@ class InProcessWorkers:
                 ),
                 transcriber=FakeTranscriber(),
                 search=SearchResources(_search_index(self.settings), FakeDense(), FakeSparse()),
+                # Lectures from a link come from a web server on this machine.
+                fetch=FetchSettings(allow_private=True),
             )
             queues = [QUEUE_CPU, QUEUE_GPU, QUEUE_LLM]
             async with contextlib.AsyncExitStack() as stack:

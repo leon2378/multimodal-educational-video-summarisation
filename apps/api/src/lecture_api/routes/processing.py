@@ -71,10 +71,37 @@ async def process(
             return RunOut.model_validate(running)
         raise
 
+    max_bytes = quotas.upload_limit(viewer, settings)
+    await start_workflow(session, temporal, lecture, run, previous_status, max_bytes=max_bytes)
+    await session.refresh(run)
+    return RunOut.model_validate(run)
+
+
+async def start_workflow(
+    session: AsyncSession,
+    temporal: Client,
+    lecture: Lecture,
+    run: PipelineRun,
+    status_before: LectureStatus,
+    *,
+    max_bytes: int,
+    title_from_source: bool = False,
+) -> None:
+    """Start the workflow for a run already saved, the lecture marked processing. A lecture
+    given as a link is downloaded first, up to `max_bytes`. If Temporal can't be reached, the
+    run fails, the lecture goes back to `status_before`, and the caller hears 503."""
+    request = ProcessInput(
+        lecture_id=lecture.id,
+        run_id=run.id,
+        source_key=lecture.source_key,
+        source_url=lecture.source_url,
+        max_bytes=max_bytes,
+        title_from_source=title_from_source,
+    )
     try:
         await temporal.start_workflow(
             WORKFLOW,
-            ProcessInput(lecture_id=lecture_id, run_id=run.id, source_key=lecture.source_key),
+            request,
             id=run.workflow_id,
             task_queue=QUEUE_CPU,
             id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
@@ -82,13 +109,11 @@ async def process(
         )
     except RPCError as error:
         run.status, run.error = RunStatus.FAILED, f"couldn't start processing: {error}"
-        lecture.status = previous_status
+        lecture.status = status_before
         await session.commit()
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Processing is unavailable right now."
         ) from error
-    await session.refresh(run)
-    return RunOut.model_validate(run)
 
 
 @router.get("/{lecture_id}/runs")

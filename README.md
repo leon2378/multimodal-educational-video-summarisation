@@ -63,6 +63,13 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
   uploads the file to storage, and the API confirms it. The worker reads MP4, MOV, Matroska and
   WebM files, and only the codecs lectures use, since anyone signed in can upload one.
+- Lectures from a link (`POST /v1/lectures/from-url`): a direct link to a video, or a page on
+  YouTube, Vimeo, a Zoom share and the many other sites yt-dlp knows. The worker downloads it
+  first, in a process of its own that can't reach anything but the public internet
+  ([ADR 0011](docs/adr/0011-lectures-from-any-link.md)). Downloading from YouTube goes against
+  its terms, and copyright stays with the owner, which is on whoever gives the link. YouTube
+  also often refuses servers: a refused link fails with a reason, and the optional
+  `YOUTUBE_COOKIES_B64` and `YOUTUBE_PROXY` settings get round some of that.
 - Postgres with Alembic migrations, SeaweedFS as local S3, Temporal, Qdrant, and Text Embeddings
   Inference servers for the embedding model and reranker, all in Docker Compose.
 - Unit tests, plus integration tests that start real Postgres, SeaweedFS, Temporal and Qdrant
@@ -277,7 +284,7 @@ published keys; it holds no Clerk secret ([ADR 0009](docs/adr/0009-clerk-sign-in
 |---|---|---|---|
 | Read and search the public lectures (the demo) | yes | yes | yes |
 | Ask questions | no | 30 a day, 5 a minute | no limit |
-| Upload and process lectures, private to you | no | 3 a day, up to 1 GB each | no limit |
+| Upload and process lectures (a file or a link), private to you | no | 3 a day, up to 1 GB each | no limit |
 | Make courses (private) | no | yes | yes, and public ones |
 | Make a lecture public | no | no | yes |
 | Delete a lecture (`DELETE /v1/lectures/{id}`) | no | their own | any |

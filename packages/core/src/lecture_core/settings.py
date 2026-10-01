@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     upload_url_ttl_s: int = 3600
     # A single presigned PUT tops out at 5 GiB on S3. Multipart uploads arrive with the web app.
     max_upload_bytes: int = 5 * 1024**3
+    # Tests only: lets links to this machine through the API's check (lecture_core.links), for
+    # the integration tests' web server. The worker checks every connection regardless.
+    allow_private_links: bool = False
 
     # Sign-in (docs/adr/0009). With an issuer set, requests may carry its session token (Clerk's,
     # or any OIDC issuer's JWT) as a bearer token: signed-in users ask questions and upload,

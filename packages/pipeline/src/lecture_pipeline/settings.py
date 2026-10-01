@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,3 +29,13 @@ class PipelineSettings(BaseSettings):
     # Who reads the slides (lecture_pipeline.stages.read_slides): "routed" sends only slides with
     # figures, annotations or doubtful OCR to the vision LLM; "vlm" sends every slide; "ocr" none.
     slide_reader: Literal["vlm", "routed", "ocr"] = "routed"
+    # Lectures from a link (lecture_perception.fetch, docs/adr/0011-lectures-from-any-link.md):
+    # the longest video to download, and how long a download may take.
+    fetch_max_duration_s: int = 3 * 3600
+    fetch_timeout_s: int = 3600
+    # Optional, for YouTube, which often refuses cloud servers. Both are secrets, and both are
+    # used for YouTube links only. A Netscape cookies.txt from a signed-in account, base64
+    # encoded to fit on one line of .env (`base64 -w0 cookies.txt`; a spare account: Google may
+    # flag one used this way), and a proxy for YouTube's traffic, http://user:password@host:port.
+    youtube_cookies_b64: SecretStr | None = None
+    youtube_proxy: SecretStr | None = None

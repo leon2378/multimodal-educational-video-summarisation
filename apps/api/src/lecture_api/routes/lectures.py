@@ -1,17 +1,21 @@
-"""Lecture lifecycle: create, direct upload, confirm, move between courses, and delete.
-Processing is in routes/processing.py.
+"""Lecture lifecycle: create, direct upload or a link, confirm, move between courses, and
+delete. Processing is in routes/processing.py.
 
 Upload flow:
     1. POST /v1/lectures                         -> lecture row + presigned PUT URL
     2. client PUTs the file straight to storage  (the API never sees the bytes)
     3. POST /v1/lectures/{id}/complete-upload    -> API checks the object exists and its size
+
+Or POST /v1/lectures/from-url: processing starts at once and downloads the video first.
 """
 
 import uuid
+from pathlib import PurePosixPath
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 from sqlalchemy import select
@@ -20,16 +24,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from lecture_api import quotas
 from lecture_api.access import can_change, can_read, lecture_or_404, own_lecture, readable
 from lecture_api.auth import SignedInDep, Viewer, ViewerDep
-from lecture_api.deps import SearcherDep, SessionDep, SettingsDep, StorageDep
+from lecture_api.deps import SearcherDep, SessionDep, SettingsDep, StorageDep, get_temporal
+from lecture_api.routes.processing import start_workflow
 from lecture_api.schemas import (
     LectureCreate,
     LectureCreated,
+    LectureFromUrl,
     LectureOut,
     LectureUpdate,
     MediaOut,
     UploadTarget,
 )
-from lecture_core.models import Course, Lecture, LectureStatus, UsageKind, Visibility
+from lecture_core.links import LinkError, check_url
+from lecture_core.models import (
+    Course,
+    Lecture,
+    LectureStatus,
+    PipelineRun,
+    UsageKind,
+    Visibility,
+)
+from lecture_core.processing import workflow_id
 from lecture_core.storage import source_key
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
@@ -75,6 +90,65 @@ async def create_lecture(
             expires_in_s=settings.upload_url_ttl_s,
         ),
     )
+
+
+@router.post("/from-url", status_code=status.HTTP_201_CREATED)
+async def create_lecture_from_url(
+    body: LectureFromUrl,
+    request: Request,
+    session: SessionDep,
+    settings: SettingsDep,
+    viewer: SignedInDep,
+) -> LectureOut:
+    """A lecture from a link instead of an upload: a direct link to a video file, or a page on
+    a site yt-dlp knows (YouTube, Vimeo, Zoom share links and many more). Processing starts at
+    once and downloads it first, so follow its progress as for an upload. It counts as one of
+    the day's uploads, with the same size limit. Links to addresses off the public internet are
+    refused (docs/adr/0011-lectures-from-any-link.md). Downloading from YouTube goes against its
+    terms, and copyright stays with the video's owner: both are on whoever gives the link."""
+    try:
+        url = check_url(body.url, settings.allow_private_links)
+    except LinkError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    await quotas.check_upload(session, viewer, settings)
+    if body.course_id is not None:
+        await _joinable(session, body.course_id, viewer)
+    # Connected only now, so a bad link or a spent quota is answered even while Temporal is
+    # down, and no lecture is made if it is.
+    temporal = await get_temporal(request)
+    lecture_id = uuid.uuid4()
+    lecture = Lecture(
+        id=lecture_id,
+        title=body.title or _title_from(url),
+        course_id=body.course_id,
+        owner_id=viewer.user_id,
+        visibility=Visibility.PUBLIC if viewer.local else Visibility.PRIVATE,
+        status=LectureStatus.PROCESSING,
+        source_key=source_key(lecture_id, "video"),
+        source_url=url,
+        source_filename=_filename_from(url),
+        # Until the download says what it is.
+        content_type="video/mp4",
+        licence=body.licence,
+        attribution=body.attribution,
+    )
+    session.add(lecture)
+    await session.flush()
+    run = PipelineRun(lecture_id=lecture_id, workflow_id=workflow_id(lecture_id), stages=[])
+    session.add(run)
+    quotas.record(session, UsageKind.UPLOAD, viewer.user_id)
+    await session.commit()
+    await start_workflow(
+        session,
+        temporal,
+        lecture,
+        run,
+        LectureStatus.FAILED,
+        max_bytes=quotas.upload_limit(viewer, settings),
+        title_from_source=body.title is None,
+    )
+    await session.refresh(lecture)
+    return LectureOut.model_validate(lecture)
 
 
 @router.get("")
@@ -198,6 +272,18 @@ async def delete_lecture(
     await run_in_threadpool(storage.delete, lecture.source_key)
     await session.delete(lecture)
     await session.commit()
+
+
+def _title_from(url: str) -> str:
+    """A lecture's title until the video's own arrives: where it's from."""
+    host = (urlsplit(url).hostname or "the web").removeprefix("www.")
+    return f"Video from {host}"
+
+
+def _filename_from(url: str) -> str:
+    """The file the link names, if it names one; the download names it properly later."""
+    name = PurePosixPath(urlsplit(url).path).name
+    return name[:255] if "." in name else "video"
 
 
 async def _joinable(session: AsyncSession, course_id: uuid.UUID, viewer: Viewer) -> None:

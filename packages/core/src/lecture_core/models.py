@@ -117,6 +117,8 @@ class Lecture(Base):
         default=LectureStatus.AWAITING_UPLOAD,
     )
     source_key: Mapped[str] = mapped_column(String(512))
+    # A lecture given as a link: processing downloads it to source_key first.
+    source_url: Mapped[str | None] = mapped_column(String(2048))
     source_filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)

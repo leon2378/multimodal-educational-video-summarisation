@@ -166,6 +166,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/lectures/from-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Lecture From Url
+         * @description A lecture from a link instead of an upload: a direct link to a video file, or a page on
+         *     a site yt-dlp knows (YouTube, Vimeo, Zoom share links and many more). Processing starts at
+         *     once and downloads it first, so follow its progress as for an upload. It counts as one of
+         *     the day's uploads, with the same size limit. Links to addresses off the public internet are
+         *     refused (docs/adr/0011-lectures-from-any-link.md). Downloading from YouTube goes against its
+         *     terms, and copyright stays with the video's owner: both are on whoever gives the link.
+         */
+        post: operations["create_lecture_from_url_v1_lectures_from_url_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/lectures/{lecture_id}": {
         parameters: {
             query?: never;
@@ -710,6 +735,25 @@ export interface components {
             lecture: components["schemas"]["LectureOut"];
             upload: components["schemas"]["UploadTarget"];
         };
+        /** LectureFromUrl */
+        LectureFromUrl: {
+            /** Attribution */
+            attribution?: string | null;
+            /** Course Id */
+            course_id?: string | null;
+            /**
+             * Licence
+             * @example CC BY-NC-SA 4.0
+             */
+            licence?: string | null;
+            /** Title */
+            title?: string | null;
+            /**
+             * Url
+             * @example https://www.youtube.com/watch?v=...
+             */
+            url: string;
+        };
         /** LectureOut */
         LectureOut: {
             /** Attribution */
@@ -740,6 +784,8 @@ export interface components {
             size_bytes: number | null;
             /** Source Filename */
             source_filename: string;
+            /** Source Url */
+            source_url: string | null;
             status: components["schemas"]["LectureStatus"];
             /** Title */
             title: string;
@@ -1532,6 +1578,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LectureCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_lecture_from_url_v1_lectures_from_url_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LectureFromUrl"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LectureOut"];
                 };
             };
             /** @description Validation Error */

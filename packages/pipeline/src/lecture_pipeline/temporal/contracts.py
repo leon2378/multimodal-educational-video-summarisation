@@ -16,6 +16,14 @@ class StageRef(BaseModel):
     key: str
 
 
+class FetchInput(BaseModel):
+    lecture_id: uuid.UUID
+    url: str
+    source_key: str
+    max_bytes: int
+    title_from_source: bool
+
+
 class StageOutcome(BaseModel):
     ref: StageRef
     info: StageInfo

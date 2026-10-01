@@ -29,6 +29,7 @@ with workflow.unsafe.imports_passed_through():
         AssembleInput,
         DraftInput,
         FailInput,
+        FetchInput,
         IndexInput,
         IngestOutcome,
         PersistInput,
@@ -39,8 +40,9 @@ with workflow.unsafe.imports_passed_through():
         TimelineInput,
     )
 
-# Bad input (not a video, no audio) fails the run at once instead of retrying.
-NON_RETRYABLE = ["MediaError"]
+# Bad input (not a video, no audio, a link that can't be downloaded) fails the run at once
+# instead of retrying.
+NON_RETRYABLE = ["MediaError", "FetchError"]
 
 
 @workflow.defn(name=WORKFLOW)
@@ -76,6 +78,25 @@ class ProcessLecture:
         return self._progress
 
     async def _pipeline(self, request: ProcessInput) -> None:
+        if request.source_url is not None:
+            # A lecture given as a link: into storage first, as if it had been uploaded.
+            self._progress.done.append(
+                await self._step(
+                    ["fetch"],
+                    "fetch_source",
+                    FetchInput(
+                        lecture_id=request.lecture_id,
+                        url=request.source_url,
+                        source_key=request.source_key,
+                        max_bytes=request.max_bytes or 0,
+                        title_from_source=request.title_from_source,
+                    ),
+                    StageInfo,
+                    QUEUE_CPU,
+                    minutes=70,
+                    heartbeat_minutes=5,
+                )
+            )
         ingest = await self._step(
             ["probe", "audio"], "ingest", request, IngestOutcome, QUEUE_CPU, minutes=30
         )

@@ -6,6 +6,8 @@ Each queue a process serves gets its own Worker. The GPU queue runs one activity
 
 import argparse
 import asyncio
+import base64
+import binascii
 import contextlib
 import logging
 import sys
@@ -35,7 +37,12 @@ from lecture_llm.settings import LLMSettings
 from lecture_llm.telemetry import instrument_agents
 from lecture_perception.asr import FasterWhisperTranscriber, ModalTranscriber, WhisperConfig
 from lecture_pipeline.settings import PipelineSettings
-from lecture_pipeline.temporal.activities import PipelineActivities, Resources, SearchResources
+from lecture_pipeline.temporal.activities import (
+    FetchSettings,
+    PipelineActivities,
+    Resources,
+    SearchResources,
+)
 from lecture_pipeline.temporal.workflow import ProcessLecture
 from lecture_rag.services import SearchServices
 
@@ -63,6 +70,14 @@ def build_resources(queues: Sequence[str], traced: bool = False) -> Resources:
         resources.sessionmaker = create_sessionmaker(engine)
         search = SearchServices.from_settings(settings)
         resources.search = SearchResources(search.index, search.dense, search.sparse)
+        pipeline = PipelineSettings()
+        cookies, proxy = pipeline.youtube_cookies_b64, pipeline.youtube_proxy
+        resources.fetch = FetchSettings(
+            max_duration_s=pipeline.fetch_max_duration_s,
+            timeout_s=pipeline.fetch_timeout_s,
+            youtube_cookies=_decoded(cookies.get_secret_value()) if cookies else None,
+            youtube_proxy=proxy.get_secret_value() or None if proxy else None,
+        )
     if QUEUE_LLM in queues:
         resources.slide_reader = PipelineSettings().slide_reader
         llm_settings = LLMSettings()
@@ -87,6 +102,20 @@ def build_resources(queues: Sequence[str], traced: bool = False) -> Resources:
     return resources
 
 
+def _decoded(cookies_b64: str) -> str | None:
+    """YOUTUBE_COOKIES_B64's cookies.txt. Unreadable, it's left out with a warning: YouTube
+    links still work as far as YouTube lets them without cookies."""
+    if not cookies_b64:
+        return None
+    try:
+        return base64.b64decode(cookies_b64, validate=True).decode()
+    except (binascii.Error, UnicodeDecodeError):
+        logging.getLogger(__name__).warning(
+            "YOUTUBE_COOKIES_B64 isn't base64 of a cookies.txt (base64 -w0 cookies.txt): unused"
+        )
+        return None
+
+
 def build_workers(
     client: Client, activities: PipelineActivities, queues: Sequence[str]
 ) -> list[Worker]:
@@ -99,6 +128,7 @@ def build_workers(
                 task_queue=QUEUE_CPU,
                 workflows=[ProcessLecture],
                 activities=[
+                    activities.fetch_source,
                     activities.ingest,
                     activities.detect_slides,
                     activities.ocr_slides,

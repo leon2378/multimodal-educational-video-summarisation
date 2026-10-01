@@ -642,6 +642,76 @@
         "title": "LectureCreated",
         "type": "object"
       },
+      "LectureFromUrl": {
+        "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "course_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Id"
+          },
+          "licence": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "CC BY-NC-SA 4.0"
+            ],
+            "title": "Licence"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "examples": [
+              "https://www.youtube.com/watch?v=..."
+            ],
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "LectureFromUrl",
+        "type": "object"
+      },
       "LectureOut": {
         "properties": {
           "attribution": {
@@ -741,6 +811,17 @@
             "title": "Source Filename",
             "type": "string"
           },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
           "status": {
             "$ref": "#/components/schemas/LectureStatus"
           },
@@ -763,6 +844,7 @@
           "course_id",
           "status",
           "source_filename",
+          "source_url",
           "content_type",
           "size_bytes",
           "duration_s",
@@ -2434,6 +2516,48 @@
           }
         },
         "summary": "Create Lecture",
+        "tags": [
+          "lectures"
+        ]
+      }
+    },
+    "/v1/lectures/from-url": {
+      "post": {
+        "description": "A lecture from a link instead of an upload: a direct link to a video file, or a page on\na site yt-dlp knows (YouTube, Vimeo, Zoom share links and many more). Processing starts at\nonce and downloads it first, so follow its progress as for an upload. It counts as one of\nthe day's uploads, with the same size limit. Links to addresses off the public internet are\nrefused (docs/adr/0011-lectures-from-any-link.md). Downloading from YouTube goes against its\nterms, and copyright stays with the video's owner: both are on whoever gives the link.",
+        "operationId": "create_lecture_from_url_v1_lectures_from_url_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LectureFromUrl"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LectureOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Lecture From Url",
         "tags": [
           "lectures"
         ]

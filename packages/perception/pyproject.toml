@@ -11,6 +11,10 @@ dependencies = [
     "opencv-python-headless>=5.0",
     "pillow>=12.3",
     "rapidocr>=3.9.2",
+    # Lectures from a link (lecture_perception.fetch): direct video links and the sites yt-dlp
+    # supports. YouTube needs yt-dlp-ejs (in "default") and a JavaScript runtime ("deno").
+    # Not "curl-cffi": its own networking would bypass the check on every connection.
+    "yt-dlp[default,deno]>=2026.8.19",
 ]
 
 [project.optional-dependencies]

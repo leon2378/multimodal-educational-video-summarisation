@@ -6,6 +6,7 @@ activity, or a re-run with one prompt changed, reuses everything already compute
 """
 
 import asyncio
+import tempfile
 import threading
 import time
 import uuid
@@ -21,6 +22,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from lecture_core import metrics
+from lecture_core.links import is_youtube
 from lecture_core.models import (
     Lecture,
     LectureStatus,
@@ -38,6 +40,7 @@ from lecture_core.storage import ObjectStorage
 from lecture_core.timeline import SlideDeck, Timeline, Transcript
 from lecture_llm.agents import LectureLLM, Usage
 from lecture_llm.pricing import text_cost_usd
+from lecture_perception import fetch, media
 from lecture_perception.asr import Transcriber
 from lecture_perception.media import MediaError, MediaInfo
 from lecture_perception.ocr import DeckOcr, SlideOCR
@@ -49,6 +52,7 @@ from lecture_pipeline.temporal.contracts import (
     AssembleInput,
     DraftInput,
     FailInput,
+    FetchInput,
     IndexInput,
     IngestOutcome,
     PersistInput,
@@ -69,6 +73,18 @@ class SearchResources:
     sparse: SparseEncoder
 
 
+@dataclass(frozen=True)
+class FetchSettings:
+    """Lectures from a link (lecture_pipeline.settings has what each means)."""
+
+    max_duration_s: float = 3 * 3600
+    timeout_s: float = 3600
+    youtube_cookies: str | None = None
+    youtube_proxy: str | None = None
+    # Tests only: lets a download reach this machine, where their web server is.
+    allow_private: bool = False
+
+
 @dataclass
 class Resources:
     """What a worker needs. A worker only builds the parts its queues use: the GPU worker has
@@ -84,6 +100,17 @@ class Resources:
     # Cheap to create: the OCR models load on first use.
     ocr: SlideOCR = field(default_factory=SlideOCR)
     slide_reader: stages.SlideReaderMode = "routed"
+    fetch: FetchSettings = field(default_factory=FetchSettings)
+
+
+# What a fetched video is stored as, by the extension yt-dlp gave it.
+_CONTENT_TYPES = {
+    "mp4": "video/mp4",
+    "m4v": "video/mp4",
+    "mov": "video/quicktime",
+    "webm": "video/webm",
+    "mkv": "video/x-matroska",
+}
 
 
 class PipelineActivities:
@@ -93,6 +120,52 @@ class PipelineActivities:
         self._local = threading.local()
 
     # CPU queue
+
+    @activity.defn(name="fetch_source")
+    async def fetch_source(self, request: FetchInput) -> StageInfo:
+        """Download a lecture given as a link to where an upload would be, then processing goes
+        on as for an upload. Skipped when the video is there already, so processing it again
+        doesn't download it again (lecture_perception.fetch)."""
+        started = time.monotonic()
+        storage = self.resources.storage
+        if await asyncio.to_thread(storage.head, request.source_key) is not None:
+            return _measured(StageInfo(stage="fetch", seconds=0.0, cached=True))
+        settings = self.resources.fetch
+        youtube = is_youtube(request.url)
+        with tempfile.TemporaryDirectory(dir=self.resources.media_dir) as tmp:
+            try:
+                fetched = await fetch.download(
+                    request.url,
+                    Path(tmp),
+                    max_bytes=request.max_bytes,
+                    max_duration_s=settings.max_duration_s,
+                    timeout_s=settings.timeout_s,
+                    progress=lambda done: activity.heartbeat(done),
+                    cookies=settings.youtube_cookies if youtube else None,
+                    proxy=settings.youtube_proxy if youtube else None,
+                    allow_private=settings.allow_private,
+                )
+                # Like an upload, it must be a lecture video before it's stored where the
+                # owner can download it back.
+                info = await asyncio.to_thread(media.probe, fetched.path)
+                if info.duration_s > settings.max_duration_s:
+                    raise fetch.FetchError(
+                        f"The video is longer than {settings.max_duration_s / 3600:g} hours, "
+                        "the most allowed."
+                    )
+            except (fetch.FetchError, MediaError) as error:
+                raise ApplicationError(
+                    str(error), type=type(error).__name__, non_retryable=True
+                ) from error
+            content_type = _CONTENT_TYPES.get(fetched.ext, "video/mp4")
+            await asyncio.to_thread(
+                storage.upload_file, fetched.path, request.source_key, content_type
+            )
+        async with self._sessionmaker()() as session, session.begin():
+            lecture = await session.get(Lecture, request.lecture_id)
+            if lecture is not None:
+                _describe(lecture, fetched, content_type, request.title_from_source)
+        return _measured(StageInfo(stage="fetch", seconds=time.monotonic() - started, cached=False))
 
     @activity.defn(name="ingest")
     def ingest(self, request: ProcessInput) -> IngestOutcome:
@@ -322,6 +395,22 @@ class _Loaded:
     usage: dict[str, object]
     # What this run's own LLM calls cost: the LLM stages it didn't take from the cache.
     spent_usd: float
+
+
+def _describe(
+    lecture: Lecture, fetched: fetch.Fetched, content_type: str, title_from_source: bool
+) -> None:
+    """What the site says about a fetched video, where the person who gave the link didn't."""
+    lecture.size_bytes = fetched.size_bytes
+    lecture.content_type = content_type
+    lecture.source_filename = f"{(fetched.title or 'video')[:240]}.{fetched.ext}"
+    if title_from_source and fetched.title:
+        lecture.title = fetched.title[:300]
+    if lecture.licence is None and fetched.licence:
+        lecture.licence = fetched.licence[:100]
+    if lecture.attribution is None and fetched.uploader:
+        where = f", {fetched.webpage_url}" if fetched.webpage_url else ""
+        lecture.attribution = f"{fetched.uploader}{where}"
 
 
 def _result_rows(

@@ -28,6 +28,11 @@ class ProcessInput(BaseModel):
     lecture_id: uuid.UUID
     run_id: uuid.UUID
     source_key: str
+    # A lecture given as a link: downloaded to source_key first, unless it's there already, up
+    # to max_bytes. When the title was made up from the link, the video's own replaces it.
+    source_url: str | None = None
+    max_bytes: int | None = None
+    title_from_source: bool = False
 
 
 class StageInfo(BaseModel):

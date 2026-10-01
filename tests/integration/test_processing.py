@@ -1,13 +1,17 @@
-"""Phase 2b end to end: upload through the API, process with Temporal workers, read results,
-then delete the lecture.
+"""Phase 2b end to end: upload through the API (or give a link), process with Temporal workers,
+read results, then delete the lecture.
 
 The workers run in this process with the fake speech model and LLM (tests/unit/fakes.py), so
 this exercises the workflow, activities, stage cache in object storage, persistence and the
 search index.
 """
 
+import functools
+import http.server
 import json
+import threading
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import httpx2
@@ -142,3 +146,59 @@ def test_deleting_a_lecture_removes_it_everywhere(
     assert points() == 0
     assert client.delete(f"/v1/lectures/{lecture_id}").status_code == 404
     qdrant.close()
+
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture(scope="module")
+def site(synthetic_video: Path) -> Iterator[str]:
+    """A web server on this machine with the synthetic lecture on it."""
+    handler = functools.partial(_QuietHandler, directory=str(synthetic_video.parent))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def test_a_lecture_from_a_link_is_downloaded_then_processed(
+    processing_client: TestClient, site: str, synthetic_video: Path
+) -> None:
+    client = processing_client
+    url = f"{site}/{synthetic_video.name}"
+
+    created = client.post("/v1/lectures/from-url", json={"url": url})
+
+    assert created.status_code == 201, created.text
+    lecture = created.json()
+    assert (lecture["status"], lecture["source_url"]) == ("processing", url)
+    assert lecture["title"] == "Video from 127.0.0.1"
+    done = wait_for(client, lecture["id"])
+    assert done["status"] == "ready", done
+    # Named by the download: a direct link's title is its file's name.
+    assert (done["title"], done["source_filename"]) == ("lecture", "lecture.mp4")
+    assert done["size_bytes"] == synthetic_video.stat().st_size
+    (run,) = client.get(f"/v1/lectures/{lecture['id']}/runs").json()
+    assert (run["stages"][0]["stage"], run["stages"][0]["cached"]) == ("fetch", False)
+    # Processed again, it isn't downloaded again.
+    client.post(f"/v1/lectures/{lecture['id']}/process")
+    assert wait_for(client, lecture["id"])["status"] == "ready"
+    latest = client.get(f"/v1/lectures/{lecture['id']}/runs").json()[0]
+    assert (latest["stages"][0]["stage"], latest["stages"][0]["cached"]) == ("fetch", True)
+
+
+def test_a_link_that_cant_be_downloaded_fails_with_the_reason(
+    processing_client: TestClient, site: str
+) -> None:
+    client = processing_client
+    created = client.post(
+        "/v1/lectures/from-url", json={"url": f"{site}/missing.mp4", "title": "Missing"}
+    ).json()
+
+    done = wait_for(client, created["id"], timeout_s=60)
+
+    assert (done["status"], done["title"]) == ("failed", "Missing")
+    (run,) = client.get(f"/v1/lectures/{created['id']}/runs").json()
+    assert "Nothing was found at that link." in run["error"]

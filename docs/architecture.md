@@ -53,6 +53,33 @@ deleted after, with uploads transcribed on GPUs in Modal.
 Lecture status: `awaiting_upload → uploaded → processing → ready`, or `failed` when a run
 fails. A ready or failed lecture can be processed again.
 
+Or `POST /v1/lectures/from-url` with a link ([ADR 0011](adr/0011-lectures-from-any-link.md)): the
+lecture starts out processing, and the workflow's first stage, `fetch`, downloads the video to
+where an upload would be. It's skipped when the video is there already, so processing again
+doesn't download again. yt-dlp does the downloading, which covers direct links and over a
+thousand sites, YouTube included (its JavaScript challenges need Deno, which runs without
+network access).
+
+- **The link is checked twice**, in the API and in the worker (`lecture_core.links`): http or
+  https, no credentials, no IP address off the public internet, no private-network name.
+- **The downloader runs in its own process**, with none of the worker's secrets in its
+  environment. Each connection it opens is checked on the address it reaches, so redirects and
+  DNS answers pointing inside are refused too. That keeps the metadata server, Postgres, Qdrant
+  and the rest of the stack out of reach.
+- **Limits**:
+  - the uploader's byte limit, enforced by yt-dlp, by `RLIMIT_FSIZE` and by a final size check;
+  - videos of up to 3 hours, and an hour for the download;
+  - a playlist's first video only, and no live streams.
+- **The file is probed like an upload** before it's stored, so a link to anything but a lecture
+  video never ends up where its owner could download it back.
+- **The lecture is filled in from the site**: its title (unless one was given), its licence
+  (YouTube reports one) and its attribution.
+- **Formats:** without FFmpeg's command line to merge separate streams, the download is one file
+  with picture and sound. That's up to 720p where there's a choice, and usually 360p on YouTube.
+- **YouTube** refuses many cloud servers. The lecture then fails, saying to upload the file
+  instead, unless `YOUTUBE_COOKIES_B64` (a signed-in account's cookies) or `YOUTUBE_PROXY` gets it
+  through.
+
 `DELETE /v1/lectures/{id}` (its owner or an admin, and not while it's processing) removes the
 lecture's points from the search index, its video from storage, then its row, which takes its
 results, processing history and conversations with it (the foreign keys cascade). The external
