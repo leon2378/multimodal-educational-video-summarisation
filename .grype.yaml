@@ -1,0 +1,12 @@
+# Grype's settings for release.yml's image scan, which fails on high or critical vulnerabilities
+# that have a fix. Each exception says why it's safe and when it goes.
+ignore:
+  # CVE-2026-82049: CPython's tarfile extraction filters and a crafted archive (a hard link to a
+  # symlink). Fixed in 3.12.15, released 2026-09-30, which the python:3.12-slim image doesn't have
+  # yet (Grype lists only the 3.14 fix). The app never extracts tar archives. Scoped to 3.12.14,
+  # so it stops matching when the image updates: delete it then.
+  - vulnerability: CVE-2026-82049
+    package:
+      name: python
+      version: 3.12.14
+      type: binary

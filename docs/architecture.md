@@ -497,7 +497,10 @@ choices are [ADR 0010](adr/0010-on-demand-demo-on-google-cloud-and-modal.md).
   (`EMBEDDINGS_HEADERS`); the API embeds questions on the VM's CPU server, one at a time, with
   small batches so its warm-up fits next to the stack.
 - **Releases and deploys**: `release.yml` builds the three images on a version tag, scans them
-  with Grype, and pushes them to GHCR; `deploy.yml` (run by hand) applies or destroys `demo`
+  with Grype (exceptions, each with its reason, in `.grype.yaml`), and pushes them to GHCR; run
+  by hand, it only builds and scans. Each image's final stage runs `apt-get upgrade` and is never
+  taken from the build cache, so a release has Debian's latest security fixes even before its
+  base image is rebuilt. `deploy.yml` (run by hand) applies or destroys `demo`
   and, on deploy, waits until `/v1/me` reports sign-in on. Destroying also deletes the
   session's uploads (`raw/`) from the bucket.
 

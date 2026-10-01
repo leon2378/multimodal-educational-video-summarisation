@@ -2,10 +2,12 @@ name: release
 
 # On a version tag, the images the demo runs (infra/compose.cloud.yaml, ADR 0010): built, scanned
 # for known vulnerabilities, and pushed to GHCR as
-# ghcr.io/<owner>/lecture-summariser-{api,worker,web}:<tag>.
+# ghcr.io/<owner>/lecture-summariser-{api,worker,web}:<tag>. Run from the Actions tab, it's a
+# dry run: the images are built and scanned but not pushed, to check a commit before tagging it.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,6 +22,8 @@ jobs:
       contents: read
       packages: write
     strategy:
+      # One image failing its scan doesn't cancel the others', so a run shows every finding.
+      fail-fast: false
       matrix:
         include:
           - name: api
@@ -56,16 +60,23 @@ jobs:
             type=gha,scope=${{ matrix.name }}
             type=gha,scope=release-${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=release-${{ matrix.name }}
-      # Fails on high or critical vulnerabilities that have a fix to update to.
+          # The final stage is never taken from the cache, so its apt-get upgrade always brings
+          # in Debian's latest security fixes.
+          no-cache-filters: runtime
+      # Fails on high or critical vulnerabilities that have a fix to update to. The exceptions,
+      # each with its reason, are in .grype.yaml.
       - uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           image: ${{ env.IMAGE }}
+          config: .grype.yaml
           severity-cutoff: high
           only-fixed: true
           output-format: table
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - if: github.ref_type == 'tag'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: docker push "$IMAGE"
+      - if: github.ref_type == 'tag'
+        run: docker push "$IMAGE"

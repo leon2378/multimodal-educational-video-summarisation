@@ -310,7 +310,9 @@ stays.
 - **Uploads** are transcribed on a GPU in Modal and indexed with the embedding model on another
   (`infra/modal/`). Questions use hybrid search on the VM's CPU, without the reranker.
 - **Releases**: pushing a tag like `v0.6.0` builds the API, worker and web images, scans them for
-  known vulnerabilities, and pushes them to GHCR. A deploy runs a release's images.
+  known vulnerabilities (the exceptions, with their reasons, are in `.grype.yaml`), and pushes
+  them to GHCR. Run by hand from the Actions tab, the release workflow only builds and scans, to
+  check a commit before tagging it. A deploy runs a release's images.
 - **From GitHub**: the *deploy* workflow (Actions, Run workflow) does what `make deploy` and
   `make destroy` do, signed in to Google Cloud without a stored key.
 

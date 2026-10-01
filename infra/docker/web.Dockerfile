@@ -24,7 +24,10 @@ ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 RUN pnpm run build
 
 
-FROM node:24-slim
+FROM node:24-slim AS runtime
+# Debian's security fixes reach the base image only when it's rebuilt; this takes any newer ones.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes \
+    && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \

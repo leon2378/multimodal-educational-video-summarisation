@@ -32,7 +32,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --package lecture-api --no-editable
 
 
-FROM python:3.12-slim
+FROM python:3.12-slim AS runtime
+# Debian's security fixes reach the base image only when it's rebuilt; this takes any newer ones.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes \
+    && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 app
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
