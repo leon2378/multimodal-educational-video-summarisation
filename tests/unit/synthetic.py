@@ -60,6 +60,20 @@ def frames_at(fps: float = 1.0) -> list[tuple[float, Image.Image]]:
     return samples
 
 
+def write_stream(source: Path, kind: str, path: Path) -> Path:
+    """Only the picture (`kind` "video") or only the sound ("audio") of `source`, copied, as
+    sites such as YouTube serve them. The container comes from `path`'s extension."""
+    with av.open(str(source)) as reader, av.open(str(path), mode="w") as writer:
+        stream = reader.streams.video[0] if kind == "video" else reader.streams.audio[0]
+        copy = writer.add_stream_from_template(stream)
+        for packet in reader.demux(stream):
+            if packet.dts is None:
+                continue
+            packet.stream = copy
+            writer.mux(packet)
+    return path
+
+
 def write_video(path: Path, fps: int = 5) -> Path:
     """Encode TIMELINE as an MP4 with a 440 Hz tone, using codecs built into FFmpeg."""
     with av.open(str(path), mode="w") as container:

@@ -91,8 +91,11 @@ network access).
   video never ends up where its owner could download it back.
 - **The lecture is filled in from the site**: its title (unless one was given), its licence
   (YouTube reports one) and its attribution.
-- **Formats:** without FFmpeg's command line to merge separate streams, the download is one file
-  with picture and sound. That's up to 720p where there's a choice, and usually 360p on YouTube.
+- **Formats:** one file with picture and sound when the site has one, up to 720p where there's a
+  choice. YouTube serves the two apart: the downloader then fetches the picture (H.264 at up to
+  720p) and the sound in the original language one after the other, and `media.join` copies
+  both into one MP4 with PyAV. The images have no FFmpeg command line for yt-dlp to merge them
+  with.
 - **YouTube** refuses many cloud servers. The lecture then fails, saying to upload the file
   instead, unless `YOUTUBE_COOKIES_B64` (a signed-in account's cookies) or `YOUTUBE_PROXY` gets it
   through.

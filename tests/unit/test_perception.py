@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from lecture_perception.media import MediaError, extract_audio, probe, sample_frames
+from lecture_perception.media import MediaError, extract_audio, join, probe, sample_frames
 from lecture_perception.slides import (
     DetectorConfig,
     detect_slides,
@@ -129,6 +129,39 @@ def test_extract_audio_gives_16k_mono_flac(video: Path) -> None:
         assert stream.codec_context.layout.name == "mono"
         assert container.duration is not None
         assert container.duration / av.time_base == pytest.approx(synthetic.DURATION_S, abs=0.2)
+
+
+def test_picture_and_sound_served_apart_are_joined_into_mp4(video: Path, tmp_path: Path) -> None:
+    picture = synthetic.write_stream(video, "video", tmp_path / "picture.mp4")
+    sound = synthetic.write_stream(video, "audio", tmp_path / "sound.m4a")
+
+    joined = join(picture, sound, tmp_path)
+
+    info = probe(joined)
+    assert joined == tmp_path / "video.mp4"
+    assert (info.video_codec, info.audio_codec) == ("mpeg4", "aac")
+    assert info.duration_s == pytest.approx(synthetic.DURATION_S, abs=0.2)
+    # Its index comes first, so a browser starts playing before the rest arrives.
+    data = joined.read_bytes()
+    assert data.index(b"moov") < data.index(b"mdat")
+
+
+def test_codecs_mp4_doesnt_take_are_joined_into_matroska(video: Path, tmp_path: Path) -> None:
+    picture = synthetic.write_stream(video, "video", tmp_path / "picture.mp4")
+    flac = tmp_path / "sound.flac"
+    flac.write_bytes(extract_audio(video))
+    sound = synthetic.write_stream(flac, "audio", tmp_path / "sound.mka")
+
+    joined = join(picture, sound, tmp_path)
+
+    assert joined == tmp_path / "video.mkv"
+    assert (probe(joined).video_codec, probe(joined).audio_codec) == ("mpeg4", "flac")
+
+
+def test_joining_takes_a_picture_and_a_sound(video: Path, tmp_path: Path) -> None:
+    sound = synthetic.write_stream(video, "audio", tmp_path / "sound.m4a")
+    with pytest.raises(MediaError, match="has no video stream"):
+        join(sound, sound, tmp_path)
 
 
 def test_sample_frames_at_one_per_second(video: Path) -> None:

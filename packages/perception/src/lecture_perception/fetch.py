@@ -9,10 +9,12 @@ address it actually connects to: redirects and DNS rebinding get the same check.
 size is capped while it's written (RLIMIT_FSIZE, which the process sets on itself, on Linux)
 and its length before the download starts; the caller then probes it like an upload.
 
-yt-dlp takes a single file with both picture and sound, up to 720p where there's a choice:
-merging separate streams needs FFmpeg's command line, which the images don't have. YouTube
-blocks many cloud servers; YOUTUBE_COOKIES and YOUTUBE_PROXY (lecture_pipeline.settings) are
-optional ways round that, and without them a refusal says to upload the file instead.
+yt-dlp takes one file with both picture and sound when the site has one, up to 720p where
+there's a choice. YouTube serves the two apart, so then the picture and the sound come down one
+after the other and media.join puts them in one file. yt-dlp can't join them itself: that needs
+FFmpeg's command line, which the images don't have. YouTube blocks many cloud servers;
+YOUTUBE_COOKIES and YOUTUBE_PROXY (lecture_pipeline.settings) are optional ways round that, and
+without them a refusal says to upload the file instead.
 """
 
 import argparse
@@ -33,9 +35,21 @@ from lecture_core.links import OFF_LIMITS, LinkError, check_url, is_public
 
 logger = logging.getLogger(__name__)
 
-# One file with picture and sound: MP4 at up to 720p if there's one, then anything up to 720p,
-# then the best there is. `?` lets through formats that don't say their height (direct links).
-FORMAT = "b[ext=mp4][height<=?720]/b[height<=?720]/b"
+# Up to 720p where there's a choice, in this order: one MP4 file with picture and sound; H.264
+# and AAC apart, as YouTube has them, to join into MP4; one file of any kind; any picture and
+# sound apart, to join into Matroska; the best there is. Sound apart is the original language's,
+# which yt-dlp prefers to dubbed tracks. `?` lets through formats that don't say their height
+# (direct links), and plain downloads come before streaming manifests.
+FORMAT = "/".join(
+    [
+        "b[ext=mp4][height<=?720]",
+        "bv[ext=mp4][vcodec^=avc1][height<=?720][protocol^=http]+ba[ext=m4a][protocol^=http]",
+        "b[height<=?720]",
+        "bv[height<=?720][protocol^=http]+ba[protocol^=http]",
+        "bv[height<=?720]+ba",
+        "b",
+    ]
+)
 YOUTUBE_REFUSED = (
     "YouTube wouldn't let this server download the video. Download it on your own computer "
     "and upload the file instead."
@@ -47,10 +61,7 @@ _EXPLANATIONS = [
         ("private video", "video unavailable", "members-only", "this video is unavailable"),
         "The video isn't available to download: it may be private, removed or restricted.",
     ),
-    (
-        ("requested format is not available",),
-        "The video has no single file with both picture and sound to download.",
-    ),
+    (("requested format is not available",), "There's no video with sound at that link."),
     (("http error 404",), "Nothing was found at that link."),
     (("isn't on the public internet",), OFF_LIMITS),
 ]
@@ -250,44 +261,19 @@ def _limit_file_size(max_bytes: int) -> None:
 
 
 def _download(args: argparse.Namespace) -> dict[str, Any]:
+    """Look the video up once, then download what FORMAT chose: one file, or the picture and
+    the sound apart, each on its own and then joined."""
     import yt_dlp
 
-    refused: list[str] = []
-    last_progress = 0.0
-
-    def match(info: dict[str, Any], incomplete: bool = False) -> str | None:
-        reason = None
-        if info.get("is_live") or info.get("live_status") in ("is_live", "is_upcoming"):
-            reason = "That's a live stream: wait until its recording is up."
-        elif (duration := info.get("duration")) and duration > args.max_duration:
-            reason = (
-                f"The video is {_hours(duration)} long, more than the {_hours(args.max_duration)}"
-                " allowed."
-            )
-        if reason:
-            refused.append(reason)
-        return reason
-
-    def hook(status: dict[str, Any]) -> None:
-        nonlocal last_progress
-        if status.get("status") != "downloading" or time.monotonic() - last_progress < 1:
-            return
-        last_progress = time.monotonic()
-        total = status.get("total_bytes") or status.get("total_bytes_estimate")
-        done = status.get("downloaded_bytes")
-        _emit({"progress": min(done / total, 1.0) if total and done else None})
+    from lecture_perception import media
 
     log = _Log()
     options: dict[str, Any] = {
         "logger": log,
         "format": FORMAT,
-        "outtmpl": {"default": "video.%(ext)s"},
         "paths": {"home": str(args.out), "temp": str(args.out)},
         "noplaylist": True,
         "playlist_items": "1",
-        "max_filesize": args.max_bytes,
-        "match_filter": match,
-        "progress_hooks": [hook],
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
@@ -303,28 +289,114 @@ def _download(args: argparse.Namespace) -> dict[str, Any]:
         options["proxy"] = proxy
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(args.url, download=True)
+            info = ydl.extract_info(args.url, download=False)
+        if info and info.get("_type") == "playlist":
+            info = next(iter(info.get("entries") or []), None)
+        if not info:
+            raise FetchError("That link has no video to download.")
+        if reason := _refusal(info, args.max_duration):
+            raise FetchError(reason)
+        chosen: list[dict[str, Any]] = info.get("requested_formats") or [info]
+        sizes = [one.get("filesize") or one.get("filesize_approx") for one in chosen]
+        expected = sum(size for size in sizes if size) if all(sizes) else None
+        if expected and expected > args.max_bytes:
+            raise FetchError(_too_big(args.max_bytes))
+        progress = _Progress(expected)
+        # FORMAT joins at most one picture to one sound.
+        names = ["video"] if len(chosen) == 1 else ["picture", "sound"]
+        paths = [
+            _download_format(
+                yt_dlp, options, info, one["format_id"], name, args.max_bytes, progress, log
+            )
+            for one, name in zip(chosen, names, strict=True)
+        ]
     except yt_dlp.utils.DownloadError as error:
         raise FetchError(_explain(str(error), args.max_bytes)) from error
-    except OSError as error:  # EFBIG: the file reached RLIMIT_FSIZE
+    except OSError as error:  # EFBIG: a file reached RLIMIT_FSIZE
         raise FetchError(_too_big(args.max_bytes)) from error
-    if info and info.get("_type") == "playlist":
-        info = next(iter(info.get("entries") or []), None)
-    downloads = (info or {}).get("requested_downloads") or []
-    path = downloads[0].get("filepath") if downloads else None
-    if info is None or not path or not Path(path).is_file():
-        # Skipped rather than failed: by the filter above, or for being too big.
-        if any("max-filesize" in line for line in log.lines):
-            raise FetchError(_too_big(args.max_bytes))
-        raise FetchError(refused[-1] if refused else "That link has no video to download.")
+    path = paths[0]
+    if len(paths) == 2:
+        try:
+            path = media.join(paths[0], paths[1], args.out)
+        except media.MediaError as error:
+            raise FetchError(f"The video couldn't be downloaded: {error}") from error
+        for part in paths:
+            part.unlink()
     return {
-        "path": path,
+        "path": str(path),
         "title": info.get("title"),
         "duration": info.get("duration"),
         "license": info.get("license"),
         "uploader": info.get("uploader") or info.get("channel"),
         "webpage_url": info.get("webpage_url"),
     }
+
+
+def _download_format(
+    yt_dlp: Any,
+    options: dict[str, Any],
+    info: dict[str, Any],
+    format_id: str,
+    name: str,
+    max_bytes: int,
+    progress: "_Progress",
+    log: "_Log",
+) -> Path:
+    """One of the formats looked up, downloaded to `name`.ext, within what's left of the byte
+    limit. It reuses the lookup: nothing is asked of the site again but the file itself."""
+    left = max_bytes - progress.finished
+    only = options | {
+        "format": format_id,
+        "outtmpl": {"default": f"{name}.%(ext)s"},
+        "max_filesize": left,
+        "progress_hooks": [progress.hook],
+    }
+    with yt_dlp.YoutubeDL(only) as ydl:
+        # Without what the lookup chose (requested_formats and the rest), so this picks anew.
+        done = ydl.process_ie_result(
+            ydl.sanitize_info(info, remove_private_keys=True), download=True
+        )
+    downloads = (done or {}).get("requested_downloads") or []
+    path = Path(downloads[0]["filepath"]) if downloads and downloads[0].get("filepath") else None
+    if path is None or not path.is_file():
+        # Skipped rather than failed: yt-dlp skips a file over max_filesize.
+        if any("max-filesize" in line for line in log.lines):
+            raise FetchError(_too_big(max_bytes))
+        raise FetchError("That link has no video to download.")
+    progress.finished += path.stat().st_size
+    return path
+
+
+def _refusal(info: dict[str, Any], max_duration: int) -> str | None:
+    if info.get("is_live") or info.get("live_status") in ("is_live", "is_upcoming"):
+        return "That's a live stream: wait until its recording is up."
+    if (duration := info.get("duration")) and duration > max_duration:
+        allowed = _hours(max_duration)
+        return f"The video is {_hours(duration)} long, more than the {allowed} allowed."
+    return None
+
+
+class _Progress:
+    """The share downloaded, over every file, about once a second. Without the files' sizes
+    up front, the share of the one downloading."""
+
+    def __init__(self, expected: int | None) -> None:
+        self.expected = expected
+        self.finished = 0
+        self._last = 0.0
+
+    def hook(self, status: dict[str, Any]) -> None:
+        if status.get("status") != "downloading" or time.monotonic() - self._last < 1:
+            return
+        self._last = time.monotonic()
+        done = status.get("downloaded_bytes")
+        share: float | None
+        if self.expected:
+            share = (self.finished + (done or 0)) / self.expected
+        else:
+            total = status.get("total_bytes") or status.get("total_bytes_estimate")
+            share = done / total if total and done else None
+        _emit({"progress": min(share, 1.0) if share is not None else None})
 
 
 class _Log:

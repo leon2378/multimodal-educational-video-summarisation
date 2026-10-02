@@ -82,13 +82,36 @@ def test_youtube_links_are_recognised() -> None:
 def site(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """A web server on this machine with the synthetic lecture and a text file."""
     root = tmp_path_factory.mktemp("site")
-    synthetic.write_video(root / "lecture.mp4")
+    lecture = synthetic.write_video(root / "lecture.mp4")
     (root / "notes.txt").write_text("Not a video.")
+    # The picture and the sound apart, listed in a DASH manifest, as YouTube serves them.
+    synthetic.write_stream(lecture, "video", root / "picture.mp4")
+    synthetic.write_stream(lecture, "audio", root / "sound.m4a")
+    (root / "apart.mpd").write_text(MANIFEST)
     handler = functools.partial(QuietHandler, directory=str(root))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}"
     server.shutdown()
+
+
+MANIFEST = """<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT12S"
+     minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
+  <Period>
+    <AdaptationSet mimeType="video/mp4" contentType="video">
+      <Representation id="picture" codecs="mp4v.20.9" width="320" height="240" bandwidth="300000">
+        <BaseURL>picture.mp4</BaseURL>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" contentType="audio" lang="en">
+      <Representation id="sound" codecs="mp4a.40.2" audioSamplingRate="48000" bandwidth="64000">
+        <BaseURL>sound.m4a</BaseURL>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
+"""
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -111,6 +134,19 @@ def test_a_direct_link_is_downloaded(site: str, tmp_path: Path) -> None:
     assert (fetched.path.parent, fetched.ext, fetched.title) == (tmp_path, "mp4", "lecture")
     assert fetched.size_bytes == fetched.path.stat().st_size
     assert probe(fetched.path).duration_s == pytest.approx(synthetic.DURATION_S, abs=0.2)
+
+
+def test_picture_and_sound_served_apart_are_downloaded_and_joined(
+    site: str, tmp_path: Path
+) -> None:
+    fetched = _download(f"{site}/apart.mpd", tmp_path)
+
+    info = probe(fetched.path)
+    assert (fetched.path.name, fetched.ext) == ("video.mp4", "mp4")
+    assert (info.video_codec, info.audio_codec) == ("mpeg4", "aac")
+    assert info.duration_s == pytest.approx(synthetic.DURATION_S, abs=0.2)
+    # Only the joined file is left.
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["video.mp4"]
 
 
 def test_the_downloader_refuses_connections_off_the_public_internet(

@@ -80,3 +80,9 @@ Option 3.
   `ALLOW_PRIVATE_LINKS` (tests only), and the worker's downloader takes a switch that only code
   can set, so the check on each connection can't be turned off from the environment.
 - The web app needs a "from a link" option in its upload dialog, with the YouTube note.
+- Update (2026-10-02): YouTube no longer offers one file with both picture and sound, so every
+  YouTube link failed, from a home connection as well as the demo's VM. When a site serves the
+  two apart, the downloader now fetches the picture (H.264 up to 720p, where there is one) and
+  the sound in the video's original language, one after the other. `media.join` then copies
+  them into one MP4 with PyAV, or into Matroska for codecs MP4 doesn't take, in the same guarded
+  process and without re-encoding. YouTube lectures now come at 720p.
