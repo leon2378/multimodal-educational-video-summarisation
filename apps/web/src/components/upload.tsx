@@ -4,7 +4,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "cn";
 import { ChevronDownIcon, CloudUploadIcon, FileVideoIcon, LinkIcon, XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type FormEvent, type ReactNode, createContext, use, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  createContext,
+  use,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -23,10 +32,12 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { allowance, refusal, resetText } from "@/lib/access";
-import { ApiError, api, unwrap } from "@/lib/api";
+import { type Lecture, api, unwrap } from "@/lib/api";
 import { formatBytes, formatDuration, pluralise, titleFromFilename } from "@/lib/format";
-import { meKey, useCourses } from "@/lib/queries";
+import { deleteLecture } from "@/lib/lectures";
+import { lectureKey, meKey, useCourses } from "@/lib/queries";
 import { formatTime } from "@/lib/timeline";
+import { lectureTransport, limitFrom, uploadInParts } from "@/lib/upload";
 
 import { SignInPrompt, useAccount } from "./account";
 import { Callout } from "./common";
@@ -34,6 +45,8 @@ import { Callout } from "./common";
 interface UploadOptions {
   courseId?: string | null;
   file?: File;
+  /** An upload that didn't finish, to continue with the same file. */
+  resume?: Lecture;
 }
 
 const UploadContext = createContext<{ openUpload: (options?: UploadOptions) => void }>({
@@ -52,6 +65,21 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState(0);
   const [dragging, setDragging] = useState(false);
   const busy = useRef(false);
+  const [uploading, setUploading] = useState(false);
+  const shown = useRef(false);
+  shown.current = open;
+  const onBusyChange = useCallback((value: boolean) => {
+    busy.current = value;
+    setUploading(value);
+  }, []);
+
+  // Leaving the page stops an upload. It can be continued later, but ask first.
+  useEffect(() => {
+    if (!uploading) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [uploading]);
 
   const openUpload = (next: UploadOptions = {}) => {
     if (busy.current) {
@@ -94,7 +122,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         toast.info("An upload is already in progress.");
         return;
       }
-      setOptions((current) => ({ courseId: current.courseId, file }));
+      // Dropped on the open dialog, it's the file for what the dialog is doing, a continued
+      // upload included.
+      setOptions((current) => (shown.current ? { ...current, file } : { courseId: current.courseId, file }));
       setSession((n) => n + 1);
       setOpen(true);
     };
@@ -118,9 +148,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         open={open}
         onOpenChange={setOpen}
         initial={options}
-        onBusyChange={(value) => {
-          busy.current = value;
-        }}
+        onBusyChange={onBusyChange}
       />
       {dragging && (
         <div className="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm animate-in fade-in-0">
@@ -137,15 +165,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
 type Phase =
   | { kind: "edit" }
-  | { kind: "uploading"; loaded: number; total: number; rate: number }
+  /** `resumed` is what storage already had when this upload started. */
+  | { kind: "uploading"; loaded: number; total: number; resumed: number; rate: number }
   | { kind: "starting" }
   | { kind: "error"; message: string };
-
-interface UploadTarget {
-  method: string;
-  url: string;
-  headers: Record<string, string>;
-}
 
 function UploadDialog({
   open,
@@ -172,8 +195,12 @@ function UploadDialog({
   const [licence, setLicence] = useState("");
   const [attribution, setAttribution] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "edit" });
-  const request = useRef<XMLHttpRequest | null>(null);
+  const stop = useRef<AbortController | null>(null);
+  // The lecture an upload from this dialog made, so trying again continues it rather than
+  // adding another.
+  const [attempt, setAttempt] = useState<{ file: File; lectureId: string } | null>(null);
   const busy = phase.kind === "uploading" || phase.kind === "starting";
+  const resuming = initial.resume;
 
   useEffect(() => onBusyChange(busy), [busy, onBusyChange]);
 
@@ -182,16 +209,25 @@ function UploadDialog({
   const course = joinable.some((c) => c.id === courseId) ? courseId : "none";
   const quotas = account.quotas;
   const left = quotas && allowance(quotas);
-  const blocked = quotas?.paused
-    ? `Today's shared budget for the language model is spent. Uploads resume at ${resetText(quotas.resets_at)}.`
-    : quotas && left?.uploads === 0
-      ? `You've added ${pluralise(quotas.uploads_per_day, "lecture")} today, the most a day. More at ${resetText(quotas.resets_at)}.`
-      : null;
-  const fromLink = source === "link";
+  // Continuing an upload doesn't use up another, so the day's limit doesn't stop it.
+  const blocked = resuming
+    ? null
+    : quotas?.paused
+      ? `Today's shared budget for the language model is spent. Uploads resume at ${resetText(quotas.resets_at)}.`
+      : quotas && left?.uploads === 0
+        ? `You've added ${pluralise(quotas.uploads_per_day, "lecture")} today, the most a day. More at ${resetText(quotas.resets_at)}.`
+        : null;
+  const fromLink = source === "link" && !resuming;
   const tooBig =
     !fromLink && file && quotas && file.size > quotas.upload_bytes
       ? `This video is ${formatBytes(file.size)}; you can upload up to ${formatBytes(quotas.upload_bytes)}.`
       : null;
+  // Continuing needs the same file: its size is what the upload was started for.
+  const otherFile =
+    resuming && file && resuming.size_bytes !== null && file.size !== resuming.size_bytes
+      ? `This file is ${formatBytes(file.size)}, but the upload is of a file of ${formatBytes(resuming.size_bytes)}. Choose the same file, or delete the lecture and add it again.`
+      : null;
+  const renamed = resuming && file && !otherFile && file.name !== resuming.source_filename;
 
   function choose(next: File | null) {
     setFile(next);
@@ -208,6 +244,7 @@ function UploadDialog({
 
   async function finish(lectureId: string) {
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: lectureKey(lectureId) }),
       queryClient.invalidateQueries({ queryKey: ["lectures"] }),
       queryClient.invalidateQueries({ queryKey: ["courses"] }),
       queryClient.invalidateQueries({ queryKey: meKey }),
@@ -241,29 +278,49 @@ function UploadDialog({
     }
   }
 
+  /** Sends the video in parts straight to storage, which signs each part's URL, so the session
+   *  token never goes there. An upload that stops can be continued: storage keeps the parts. */
   async function upload() {
-    if (!file || tooBig) return;
+    if (!file || tooBig || otherFile) return;
+    const controller = new AbortController();
+    stop.current = controller;
+    const began = Date.now();
+    let lectureId = resuming?.id ?? (attempt?.file === file ? attempt.lectureId : null);
+    let lectureTitle = resuming?.title ?? title;
     try {
-      setPhase({ kind: "uploading", loaded: 0, total: file.size, rate: 0 });
-      const created = unwrap(
-        await api.POST("/v1/lectures", {
-          body: {
-            title: title.trim() || titleFromFilename(file.name),
-            filename: file.name,
-            content_type: file.type || "video/mp4",
-            course_id: course === "none" ? null : course,
-            licence: licence.trim() || null,
-            attribution: attribution.trim() || null,
-          },
-        }),
-      );
-      // Straight to storage: the presigned URL carries its own signature, not the session token.
-      await put(created.upload, file, request, (loaded, rate) =>
-        setPhase({ kind: "uploading", loaded, total: file.size, rate }),
-      );
-      const params = { params: { path: { lecture_id: created.lecture.id } } };
-      unwrap(await api.POST("/v1/lectures/{lecture_id}/complete-upload", params));
+      setPhase({ kind: "uploading", loaded: 0, total: file.size, resumed: 0, rate: 0 });
+      if (!lectureId) {
+        // With its size, a file over the limit is refused before any of it is sent.
+        const created = unwrap(
+          await api.POST("/v1/lectures", {
+            body: {
+              title: title.trim() || titleFromFilename(file.name),
+              filename: file.name,
+              content_type: file.type || "video/mp4",
+              size_bytes: file.size,
+              course_id: course === "none" ? null : course,
+              licence: licence.trim() || null,
+              attribution: attribution.trim() || null,
+            },
+            signal: controller.signal,
+          }),
+        );
+        lectureId = created.lecture.id;
+        lectureTitle = created.lecture.title;
+        setAttempt({ file, lectureId });
+      }
+      await uploadInParts(file, lectureTransport(lectureId, file.size, controller.signal), {
+        signal: controller.signal,
+        onProgress: ({ loaded, total, resumed }) => {
+          if (controller.signal.aborted) return;
+          const seconds = (Date.now() - began) / 1000;
+          const rate = seconds > 1 ? (loaded - resumed) / seconds : 0;
+          setPhase({ kind: "uploading", loaded, total, resumed, rate });
+        },
+      });
+      setAttempt(null);
       setPhase({ kind: "starting" });
+      const params = { params: { path: { lecture_id: lectureId } } };
       // The upload is kept even if processing can't start now (say the day's budget is spent):
       // its page has a Process button for later.
       const started = await api
@@ -276,17 +333,44 @@ function UploadDialog({
             return false;
           },
         );
-      if (started) toast.success("Uploaded. Processing has started.", { description: created.lecture.title });
-      await finish(created.lecture.id);
+      if (started) toast.success("Uploaded. Processing has started.", { description: lectureTitle });
+      await finish(lectureId);
     } catch (error) {
-      if (error instanceof Error && error.message === "cancelled") {
-        setPhase({ kind: "edit" });
-      } else if (error instanceof ApiError && error.status === 413) {
-        setPhase({ kind: "error", message: `The video is ${formatBytes(file.size)}, more than you can upload. ${error.message}` });
-      } else {
-        setPhase({ kind: "error", message: refusal(error) });
-      }
+      // Cancelled: cancel() has said so.
+      if (controller.signal.aborted) return;
+      const limit = limitFrom(error);
+      setPhase({
+        kind: "error",
+        message:
+          limit !== null
+            ? `The video is ${formatBytes(file.size)}; you can upload up to ${formatBytes(limit)}.`
+            : refusal(error),
+      });
+      // The lecture waits in the library to be continued, if this dialog is closed.
+      if (lectureId) void queryClient.invalidateQueries({ queryKey: ["lectures"] });
+    } finally {
+      stop.current = null;
     }
+  }
+
+  /** Stops the upload. A new lecture's is discarded, parts and all; one being continued keeps
+   *  what arrived, to continue another time. */
+  async function cancel() {
+    stop.current?.abort();
+    setPhase({ kind: "edit" });
+    const discard = resuming ? null : attempt?.lectureId;
+    setAttempt(null);
+    if (!discard) {
+      toast.info("Upload stopped", { description: "What was uploaded is kept, to continue later." });
+      return;
+    }
+    try {
+      await deleteLecture(discard);
+      toast.info("Upload cancelled");
+    } catch (error) {
+      toast.warning("The upload stopped, but its lecture wasn't deleted", { description: refusal(error) });
+    }
+    void queryClient.invalidateQueries({ queryKey: ["lectures"] });
   }
 
   const keepOpen = (event: Event) => {
@@ -302,10 +386,20 @@ function UploadDialog({
         onEscapeKeyDown={keepOpen}
       >
         <DialogHeader>
-          <DialogTitle>Add a lecture</DialogTitle>
+          <DialogTitle>{resuming ? "Continue the upload" : "Add a lecture"}</DialogTitle>
           <DialogDescription>
-            Upload a lecture video or give a link to one. It&apos;s transcribed and its slides are read, then you get
-            notes, a quiz, search and Q&amp;A.
+            {resuming ? (
+              <>
+                Choose the same video again: {resuming.source_filename}
+                {resuming.size_bytes !== null && `, ${formatBytes(resuming.size_bytes)}`}. The parts already uploaded
+                are kept, and the rest follows.
+              </>
+            ) : (
+              <>
+                Upload a lecture video or give a link to one. It&apos;s transcribed and its slides are read, then you
+                get notes, a quiz, search and Q&amp;A.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -324,7 +418,7 @@ function UploadDialog({
               }}
               className="gap-4"
             >
-              <TabsList className="w-full">
+              <TabsList className={cn("w-full", resuming && "hidden")}>
                 <TabsTrigger value="file" disabled={busy}>
                   <CloudUploadIcon /> Upload a file
                 </TabsTrigger>
@@ -382,7 +476,7 @@ function UploadDialog({
                 </Callout>
               </TabsContent>
             </Tabs>
-            {quotas && left && !blocked && (
+            {quotas && left && !blocked && !resuming && (
               <p className="-mt-2 text-xs text-muted-foreground">
                 {pluralise(left.uploads, "upload")} of {quotas.uploads_per_day} left today, up to{" "}
                 {formatBytes(quotas.upload_bytes)} each{fromLink && ", links included"}. What you add is private to
@@ -391,71 +485,82 @@ function UploadDialog({
             )}
             {blocked && <Callout tone="warning">{blocked}</Callout>}
             {tooBig && <Callout tone="error">{tooBig}</Callout>}
-
-            <div className="grid gap-2">
-              <Label htmlFor="upload-title">Title</Label>
-              <Input
-                id="upload-title"
-                value={title}
-                onChange={(event) => {
-                  setTitle(event.target.value);
-                  setTitleEdited(true);
-                }}
-                placeholder={fromLink ? "Taken from the video" : "Taken from the file name"}
-                maxLength={300}
-                disabled={busy}
-              />
-            </div>
-
-            {joinable.length > 0 && (
-              <div className="grid gap-2">
-                <Label htmlFor="upload-course">Course</Label>
-                <Select value={course} onValueChange={setCourseId} disabled={busy}>
-                  <SelectTrigger id="upload-course" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No course</SelectItem>
-                    {joinable.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            {otherFile && <Callout tone="error">{otherFile}</Callout>}
+            {renamed && (
+              <Callout>
+                This file isn&apos;t called {resuming.source_filename}. If it&apos;s the same video, carry on: a
+                different video of the same size would be joined to what&apos;s there.
+              </Callout>
             )}
 
-            <Collapsible>
-              <CollapsibleTrigger className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-                <ChevronDownIcon className="size-4 transition-transform group-data-[state=closed]:-rotate-90" />
-                Source and licence
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-3 grid gap-3 sm:grid-cols-2">
+            {!resuming && (
+              <>
                 <div className="grid gap-2">
-                  <Label htmlFor="upload-licence">Licence</Label>
+                  <Label htmlFor="upload-title">Title</Label>
                   <Input
-                    id="upload-licence"
-                    value={licence}
-                    onChange={(event) => setLicence(event.target.value)}
-                    placeholder={fromLink ? "What the site says, if it says" : "CC BY-NC-SA 4.0"}
-                    maxLength={100}
+                    id="upload-title"
+                    value={title}
+                    onChange={(event) => {
+                      setTitle(event.target.value);
+                      setTitleEdited(true);
+                    }}
+                    placeholder={fromLink ? "Taken from the video" : "Taken from the file name"}
+                    maxLength={300}
                     disabled={busy}
                   />
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="upload-attribution">Attribution</Label>
-                  <Input
-                    id="upload-attribution"
-                    value={attribution}
-                    onChange={(event) => setAttribution(event.target.value)}
-                    placeholder="MIT OpenCourseWare"
-                    maxLength={2000}
-                    disabled={busy}
-                  />
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
+
+                {joinable.length > 0 && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="upload-course">Course</Label>
+                    <Select value={course} onValueChange={setCourseId} disabled={busy}>
+                      <SelectTrigger id="upload-course" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No course</SelectItem>
+                        {joinable.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <Collapsible>
+                  <CollapsibleTrigger className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+                    <ChevronDownIcon className="size-4 transition-transform group-data-[state=closed]:-rotate-90" />
+                    Source and licence
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label htmlFor="upload-licence">Licence</Label>
+                      <Input
+                        id="upload-licence"
+                        value={licence}
+                        onChange={(event) => setLicence(event.target.value)}
+                        placeholder={fromLink ? "What the site says, if it says" : "CC BY-NC-SA 4.0"}
+                        maxLength={100}
+                        disabled={busy}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="upload-attribution">Attribution</Label>
+                      <Input
+                        id="upload-attribution"
+                        value={attribution}
+                        onChange={(event) => setAttribution(event.target.value)}
+                        placeholder="MIT OpenCourseWare"
+                        maxLength={2000}
+                        disabled={busy}
+                      />
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </>
+            )}
 
             {phase.kind === "uploading" && (
               <div className="flex flex-col gap-2" role="status">
@@ -470,6 +575,12 @@ function UploadDialog({
                       : "Starting…"}
                   </span>
                 </div>
+                {phase.resumed > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {Math.floor((phase.resumed / Math.max(phase.total, 1)) * 100)}% was already uploaded: carrying on
+                    from there.
+                  </p>
+                )}
               </div>
             )}
             {phase.kind === "starting" && (
@@ -480,6 +591,7 @@ function UploadDialog({
             {phase.kind === "error" && (
               <Callout tone="error" title={fromLink ? "The lecture wasn't added" : "The upload didn't finish"}>
                 {phase.message}
+                {!fromLink && (attempt || resuming) && " What was uploaded is kept: try again to carry on."}
               </Callout>
             )}
           </form>
@@ -487,8 +599,8 @@ function UploadDialog({
 
         <DialogFooter>
           {phase.kind === "uploading" ? (
-            <Button variant="outline" onClick={() => request.current?.abort()}>
-              Cancel upload
+            <Button variant="outline" onClick={() => void cancel()}>
+              {resuming ? "Stop" : "Cancel upload"}
             </Button>
           ) : (
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
@@ -499,10 +611,18 @@ function UploadDialog({
             <Button
               type="submit"
               form="upload"
-              disabled={(fromLink ? !link.trim() : !file) || busy || Boolean(blocked || tooBig)}
+              disabled={(fromLink ? !link.trim() : !file) || busy || Boolean(blocked || tooBig || otherFile)}
             >
               {fromLink ? <LinkIcon /> : <CloudUploadIcon />}
-              {fromLink ? (busy ? "Adding…" : "Add and process") : busy ? "Uploading…" : "Upload and process"}
+              {fromLink
+                ? busy
+                  ? "Adding…"
+                  : "Add and process"
+                : busy
+                  ? "Uploading…"
+                  : resuming || (phase.kind === "error" && attempt)
+                    ? "Continue upload"
+                    : "Upload and process"}
             </Button>
           )}
         </DialogFooter>
@@ -556,34 +676,6 @@ function ChosenFile({ file, onClear }: { file: File; onClear?: () => void }) {
       )}
     </div>
   );
-}
-
-/** PUT with upload progress, which fetch can't report. Headers must match what the URL was
- *  signed with. Aborting rejects with "cancelled". */
-function put(
-  target: UploadTarget,
-  file: File,
-  handle: { current: XMLHttpRequest | null },
-  onProgress: (loaded: number, bytesPerSecond: number) => void,
-) {
-  return new Promise<void>((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    handle.current = request;
-    const started = performance.now();
-    request.open(target.method, target.url);
-    for (const [name, value] of Object.entries(target.headers)) request.setRequestHeader(name, value);
-    request.upload.onprogress = (event) => {
-      const seconds = (performance.now() - started) / 1000;
-      if (event.lengthComputable) onProgress(event.loaded, seconds > 0.5 ? event.loaded / seconds : 0);
-    };
-    request.onload = () =>
-      request.status >= 200 && request.status < 300
-        ? resolve()
-        : reject(new Error(`Storage refused the upload (HTTP ${request.status}).`));
-    request.onerror = () => reject(new Error("Couldn't reach storage."));
-    request.onabort = () => reject(new Error("cancelled"));
-    request.send(file);
-  });
 }
 
 /** The dashed drop target on empty pages, which opens the upload dialog. */

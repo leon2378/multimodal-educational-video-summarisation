@@ -33,8 +33,13 @@ export function waitText(error: unknown): string | null {
   return error.retryAfterS <= 15 * 60 ? `Try again in ${formatDuration(Math.max(error.retryAfterS, 1))}.` : null;
 }
 
-/** A refused request's message for people, with the wait when there is one. */
+/** A refused request's message for people, with the wait when there is one. A request that
+ *  never got an answer says so in words, rather than each browser's own ("Failed to fetch",
+ *  "NetworkError when attempting to fetch resource.", "Load failed"). */
 export function refusal(error: unknown): string {
+  if (error instanceof TypeError && /fetch|network|load failed/i.test(error.message)) {
+    return "Couldn't reach the server. Check the connection and try again.";
+  }
   const message = error instanceof Error ? error.message : String(error);
   const wait = waitText(error);
   return wait ? `${message} ${wait}` : message;

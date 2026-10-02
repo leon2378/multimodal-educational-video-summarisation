@@ -92,7 +92,7 @@ export function ProcessingPanel({ lecture, event }: { lecture: Lecture; event: P
             <p className="font-semibold">{waiting ? "The upload didn't finish" : "Not processed yet"}</p>
             <p className="max-w-xs text-sm text-muted-foreground">
               {waiting
-                ? "The video never reached storage. Add the lecture again to upload it."
+                ? "Not all of the video reached storage. Choose the same file again to continue: what was uploaded is kept."
                 : mine
                   ? "Process the lecture to get its transcript, slides, notes, quiz, search and Q&A."
                   : "Its transcript, notes and the rest appear once its owner processes it."}
@@ -100,8 +100,8 @@ export function ProcessingPanel({ lecture, event }: { lecture: Lecture; event: P
           </div>
           {mine &&
             (waiting ? (
-              <Button onClick={() => openUpload({ courseId: lecture.course_id })}>
-                <CloudUploadIcon /> Add it again
+              <Button onClick={() => openUpload({ resume: lecture })}>
+                <CloudUploadIcon /> Continue the upload
               </Button>
             ) : (
               <Button onClick={() => void start()} disabled={busy}>

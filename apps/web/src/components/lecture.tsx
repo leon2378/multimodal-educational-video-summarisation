@@ -210,7 +210,7 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
           ) : (
             <div className="flex aspect-video items-center justify-center text-sm text-white/60">
               {status === "awaiting_upload"
-                ? "The video wasn't uploaded"
+                ? "The upload hasn't finished"
                 : downloading
                   ? status === "failed"
                     ? "The video wasn't downloaded"

@@ -65,4 +65,11 @@ describe("waitText and refusal", () => {
     expect(refusal(new ApiError("Sign in to do this.", 401))).toBe("Sign in to do this.");
     expect(refusal(new Error("offline"))).toBe("offline");
   });
+
+  it("says when the server couldn't be reached, in any browser's words", () => {
+    for (const message of ["Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed"]) {
+      expect(refusal(new TypeError(message))).toBe("Couldn't reach the server. Check the connection and try again.");
+    }
+    expect(refusal(new TypeError("x is not a function"))).toBe("x is not a function");
+  });
 });

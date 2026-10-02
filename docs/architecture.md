@@ -113,9 +113,15 @@ straight from storage through presigned URLs, cached for half an hour so images 
 every refetch. Colours are CSS variables in `globals.css`, one set per theme; a script in
 `<head>` sets the theme before the first paint.
 
-- **Library** (`/`): upload with progress (a presigned PUT from the browser), then it starts
-  processing and opens the lecture. The upload dialog is app-wide, so a video dropped on any
-  page opens it, and so does Add lecture on a course page (with that course chosen).
+- **Library** (`/`): upload in parts straight to storage (`lib/upload.ts`): four parts at a
+  time, each tried again after a pause, and fresh URLs from `upload-parts` for any that expired
+  or that joining finds missing; progress counts the parts storage has and those on their way.
+  Then it starts processing and opens the lecture. An upload that stops is continued from the
+  lecture's page by choosing the same file again (its size must match), so it needs nothing kept
+  in the browser; cancelling deletes the lecture, and leaving the page mid-upload asks first. The
+  upload dialog is app-wide, so a video dropped on any page opens it, and so does Add lecture on
+  a course page (with that course chosen). It also adds a lecture from a link
+  (`POST /v1/lectures/from-url`).
 - **Lecture** (`/lectures/{id}`): a stream on `/events`, read with `fetch` so it can carry
   the session token (`EventSource` can't send headers) and reconnecting with backoff, shows each
   stage while it processes and refreshes the page's data when the run ends. The video's
@@ -132,10 +138,10 @@ every refetch. Colours are CSS variables in `globals.css`, one set per theme; a 
 - **Sign-in** (Phase 6): with a Clerk publishable key built in, `@clerk/nextjs` provides the
   sign-in and sign-up windows and the account button, and every API call carries the session
   token as a bearer token: the generated client's middleware, the Q&A and progress streams, and
-  the upload's API calls (not its presigned PUT). Calls wait up to 8 s for Clerk to load, so a
-  visit's first requests don't go out signed out. `GET /v1/me` drives what's shown: nothing
-  about sign-in when the API has it off, sign-in prompts for anonymous visitors, and the quotas
-  left. Without the key, the app runs as before.
+  the upload's API calls (not its parts, which go to storage). Calls wait up to 8 s for Clerk to
+  load, so a visit's first requests don't go out signed out. `GET /v1/me` drives what's shown:
+  nothing about sign-in when the API has it off, sign-in prompts for anonymous visitors, and the
+  quotas left. Without the key, the app runs as before.
 
 ### Processing (Phase 2b)
 

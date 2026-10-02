@@ -13,10 +13,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   recognition), `packages/llm` (Pydantic AI agents for the pipeline and Q&A), `packages/pipeline` (stages, stage cache,
   local runner), `packages/rag` (chunking, embeddings, the search index, hybrid search) and
   `evals` (baselines, golden sets and scoring).
-- A web app ([below](#web-app)): drag-and-drop upload, live processing progress, and a
-  lecture page with the video, a transcript that follows playback, slides and what was read
-  from them, chapters, notes, a quiz, search and a Q&A chat, every timestamp clickable. Ctrl+K
-  searches the whole library.
+- A web app ([below](#web-app)): drag-and-drop uploads that resume, lectures from a link, live
+  processing progress, and a lecture page with the video, a transcript that follows playback,
+  slides and what was read from them, chapters, notes, a quiz, search and a Q&A chat, every
+  timestamp clickable. Ctrl+K searches the whole library.
 - Processing through the API: a Temporal workflow per lecture, CPU and GPU workers, progress
   over server-sent events, and results in Postgres ([below](#processing-a-lecture)).
 - The processing pipeline: speech recognition, slide detection, OCR on every slide with a vision
@@ -138,9 +138,13 @@ migrations in a one-off container, and starts the API on port 8000.
 `make gpu-worker` for speech recognition and the reranker. Then open http://localhost:3000:
 
 - **Library**: lectures (their first slide as the cover) and courses, filtered by title or
-  status. Drop a video anywhere, or use Add lecture: it uploads straight to storage with
-  progress, speed and time left (and can be cancelled), optionally into a course and with its
-  licence and attribution. Processing starts on its own, and the page switches to the lecture.
+  status. Drop a video anywhere, or use Add lecture: it uploads straight to storage in parts, a
+  few at a time, with progress, speed and time left, optionally into a course and with its
+  licence and attribution. An upload that stops (a dropped connection, a closed laptop, a
+  reload) continues from the parts that arrived: choose the same file again on the lecture's
+  page. Cancelling discards it. Add lecture also takes a link to a video (YouTube, Vimeo and the
+  other sites yt-dlp knows), which the server downloads first. Processing starts on its own, and
+  the page switches to the lecture. Your own lectures can be deleted from their menu.
 - **Lecture page**: while it processes, each stage by phase, with timings and what came from
   the cache. Then the video with a chapter bar under it and a slide strip that follows the slide
   on screen, beside tabs for:
@@ -157,7 +161,8 @@ migrations in a one-off container, and starts the API on port 8000.
 
   Every timestamp plays the video from there. K, J and L (or the arrows) control playback. The
   header moves the lecture between courses, copies a link to the current moment, shows the
-  processing history (stage times, LLM tokens and cost per run) and processes it again.
+  processing history (stage times, LLM tokens and cost per run), processes it again and deletes
+  it.
 - **Course page**: its lectures, and tabs to ask or search across all of them. A citation or
   result opens the lecture it points into, playing from there. Lectures can be added to it
   directly, and the course deleted (its lectures stay).
@@ -783,10 +788,6 @@ from the blueprint in these places:
   embedding model stays on the CPU; set `SEARCH_MODE=hybrid`
   ([ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md),
   [ADR 0008](docs/adr/0008-where-the-models-run.md)).
-- **The web app still uploads in one presigned PUT**, not in resumable parts through Uppy. The
-  API's uploads in parts are in place
-  ([ADR 0012](docs/adr/0012-resumable-uploads-in-parts.md)); the web app's uploader moves to
-  them next.
 - **The player streams the uploaded MP4 directly** (a presigned URL with range requests) rather
   than HLS renditions. Transcoding to HLS comes back if other formats or adaptive bitrate are
   needed.
