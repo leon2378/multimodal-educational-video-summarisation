@@ -444,6 +444,7 @@ async def _passages(session: AsyncSession, hits: Sequence[Hit]) -> list[Passage]
                 figure_description=row.figure_description,
                 latex=row.latex,
                 code=row.code,
+                reader=row.reader,
             )
     passages = []
     for hit in hits:

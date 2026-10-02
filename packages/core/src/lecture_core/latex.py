@@ -5,13 +5,18 @@ Reading a slide, the vision model sometimes writes every backslash twice: `\\\\f
 `\\frac{a}{b}`. KaTeX reads each pair as a line break, so the command prints as plain letters
 ("phileftarrowphi") or, inside an environment, the whole formula fails, and the notes copy
 whatever the slide reading says. It also writes LaTeX into a slide's text (`\\gamma = 0`, `s \\in
-S`), which is shown as it is. `LaTeX` repairs a formula and `PlainText` makes such text
-readable (γ = 0, s ∈ S) wherever one is read, from the model, the stage cache or the database,
-so lectures read before this are repaired too.
+S`), which is shown as it is. `LaTeX` repairs a formula, and sets the names of functions it
+calls upright (len, not l, e and n in italics); `PlainText` makes such text readable (γ = 0,
+s ∈ S). Both work wherever one is read, from the model, the stage cache or the database, so
+lectures read before this are repaired too.
+
+A slide reading lists the slide's formulas and often writes them out in its text as well;
+`place_formulas` finds them there, so a slide can be shown with its formulas in place, once.
 """
 
 import re
-from typing import Annotated
+from collections.abc import Sequence
+from typing import Annotated, NamedTuple
 
 from pydantic import AfterValidator
 
@@ -29,6 +34,25 @@ def undouble_backslashes(tex: str) -> str:
     if not runs or any(len(run) % 2 for run in runs) or not _DOUBLED_COMMAND.search(tex):
         return tex
     return _BACKSLASHES.sub(lambda run: "\\" * (len(run.group()) // 2), tex)
+
+
+# A lowercase name called like a function: len(L), fib(n), L.append(e). Not aT(n/b), which is a
+# times T.
+_FUNCTION_NAME = re.compile(r"(?<![\\A-Za-z])([a-z]{2,})(?=\()")
+# Text inside a formula, where a math command would break it.
+_TEXT_GROUP = re.compile(r"\\(?:text\w*|math(?:rm|sf|tt|it|bf)|operatorname\*?|mbox)\s*\{[^{}]*\}")
+
+
+def upright_names(tex: str) -> str:
+    """`tex` with the names of functions it calls set upright, as \\log is: KaTeX shows len as
+    the variables l, e and n, in italics."""
+    parts: list[str] = []
+    done = 0
+    for group in _TEXT_GROUP.finditer(tex):
+        parts += [_FUNCTION_NAME.sub(r"\\operatorname{\1}", tex[done : group.start()]), group[0]]
+        done = group.end()
+    parts.append(_FUNCTION_NAME.sub(r"\\operatorname{\1}", tex[done:]))
+    return "".join(parts)
 
 
 def unique(formulas: list[str]) -> list[str]:
@@ -217,8 +241,112 @@ def _grouped(text: str) -> str:
     return text if len(text) <= 1 else f"({text})"
 
 
+class TextPart(NamedTuple):
+    """Part of a text: plain text, or a formula written out in it (`math`), as LaTeX."""
+
+    value: str
+    math: bool = False
+
+
+def place_formulas(text: str, formulas: Sequence[str]) -> tuple[list[TextPart], list[str]]:
+    """`text` in parts, with each of `formulas` that it writes out put in its place as LaTeX;
+    and the formulas it doesn't write out. A formula is found however it's spelled (`\\gamma =
+    1` as γ = 1, `\\le` as <=, spaced differently), but only as a whole: not n in "len" or in
+    t_n, nor O(n) in O(n log n), as the longest formulas are placed first. Formulas with just an
+    operator between them become one: O(1) + O(n) -> O(n)."""
+    compared, origins = _compared(text)
+    placed: list[tuple[int, int, str]] = []
+    found: set[str] = set()
+    for formula in sorted(formulas, key=lambda f: len(_compared(plain(f))[0]), reverse=True):
+        wanted = _compared(plain(formula))[0]
+        # One letter could be any word: "a".
+        at = compared.find(wanted) if len(wanted) > 1 else -1
+        while at >= 0:
+            start, end = origins[at][0], origins[at + len(wanted) - 1][1]
+            if _whole(text, start, end):
+                if not any(s < end and start < e for s, e, _ in placed):
+                    placed.append((start, end, formula))
+                    found.add(formula)
+                elif any(s <= start and end <= e for s, e, _ in placed):
+                    found.add(formula)  # written out as part of a longer one
+            at = compared.find(wanted, at + 1)
+
+    parts: list[TextPart] = []
+    done = 0
+    for start, end, formula in sorted(placed):
+        if start > done:
+            parts.append(TextPart(text[done:start]))
+        parts.append(TextPart(formula, math=True))
+        done = end
+    if done < len(text):
+        parts.append(TextPart(text[done:]))
+
+    joined: list[TextPart] = []
+    for part in parts:
+        if part.math and len(joined) > 1 and joined[-2].math and not joined[-1].math:
+            operator = _OPERATORS.get(joined[-1].value.strip(" \t"))
+            if operator is not None:
+                joined.pop()
+                part = TextPart(f"{joined.pop().value} {operator} {part.value}", math=True)
+        joined.append(part)
+    return joined, [formula for formula in formulas if formula not in found]
+
+
+# A formula and the text it's looked for in are compared without spaces, and with symbols spelled
+# one way: a model writes -> or →, <= or ≤.
+_SPELLED = {
+    "->": _SYMBOLS["to"],
+    "<-": _SYMBOLS["gets"],
+    "=>": _SYMBOLS["implies"],
+    "<=": _SYMBOLS["le"],
+    ">=": _SYMBOLS["ge"],
+    "!=": _SYMBOLS["ne"],
+    "...": _SYMBOLS["dots"],
+    _SYMBOLS["cdots"]: _SYMBOLS["dots"],
+    "*": _SYMBOLS["cdot"],
+}
+_TOKEN = re.compile(r"\.\.\.|->|<-|=>|<=|>=|!=|[ \t]+|.", re.DOTALL)
+# What joins two formulas on a line into one, and how it's written in LaTeX.
+_OPERATORS = {
+    **{operator: operator for operator in "+-=<>/*"},
+    "->": r"\to",
+    "<-": r"\gets",
+    "=>": r"\Rightarrow",
+    "<=": r"\le",
+    ">=": r"\ge",
+    "!=": r"\ne",
+    **{_SYMBOLS[name]: f"\\{name}" for name in ("to", "gets", "le", "ge", "ne", "times", "cdot")},
+    _SYMBOLS["implies"]: r"\Rightarrow",
+}
+
+
+def _compared(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """`text` as it's compared, and where in `text` each of its characters came from."""
+    characters: list[str] = []
+    origins: list[tuple[int, int]] = []
+    for token in _TOKEN.finditer(text):
+        if token.group().strip(" \t"):
+            characters.append(_SPELLED.get(token.group(), token.group()))
+            origins.append(token.span())
+    return "".join(characters), origins
+
+
+def _whole(text: str, start: int, end: int) -> bool:
+    """Whether `text[start:end]` stands on its own, rather than being part of a longer word or
+    expression: n in "len", "t_n" or "n^2"."""
+    before = text[start - 1] if start else " "
+    after = text[end] if end < len(text) else " "
+    return not (_joined(before) and _joined(text[start])) and not (
+        _joined(text[end - 1]) and _joined(after)
+    )
+
+
+def _joined(character: str) -> bool:
+    return character.isalnum() or character in "_^'"
+
+
 # A formula from a model, repaired when it's read.
-LaTeX = Annotated[str, AfterValidator(undouble_backslashes)]
+LaTeX = Annotated[str, AfterValidator(undouble_backslashes), AfterValidator(upright_names)]
 # A slide's formulas, each repaired and listed once.
 Formulas = Annotated[list[LaTeX], AfterValidator(unique)]
 # Text from a model, with any LaTeX in it made readable.

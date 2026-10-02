@@ -1623,6 +1623,13 @@
             "title": "Latex",
             "type": "array"
           },
+          "latex_not_in_text": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Latex Not In Text",
+            "type": "array"
+          },
           "reader": {
             "enum": [
               "vlm",
@@ -1646,6 +1653,13 @@
             "title": "Text",
             "type": "string"
           },
+          "text_parts": {
+            "items": {
+              "$ref": "#/components/schemas/SlideTextPart"
+            },
+            "title": "Text Parts",
+            "type": "array"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -1659,11 +1673,32 @@
           "text",
           "figure_description",
           "latex",
+          "text_parts",
+          "latex_not_in_text",
           "code",
           "reader",
           "spans"
         ],
         "title": "SlideOut",
+        "type": "object"
+      },
+      "SlideTextPart": {
+        "description": "Part of a slide's text: plain text, or a formula written out in it (`math`), as LaTeX.",
+        "properties": {
+          "math": {
+            "title": "Math",
+            "type": "boolean"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "math"
+        ],
+        "title": "SlideTextPart",
         "type": "object"
       },
       "SourceOut": {

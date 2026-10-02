@@ -58,6 +58,9 @@ def test_upload_process_and_read_results(
     slides = client.get(f"/v1/lectures/{lecture_id}/slides").json()
     assert [s["slide_id"] for s in slides] == [0, 1]
     assert [len(s["spans"]) for s in slides] == [2, 1]  # slide 0 is shown twice
+    # Slide 1's formula isn't in its text, so it's shown apart.
+    assert slides[1]["text_parts"] == [{"value": "- a bullet", "math": False}]
+    assert slides[1]["latex_not_in_text"] == ["O(n)"]
     image = httpx2.get(slides[0]["image_url"])
     assert image.status_code == 200
     assert image.content[:3] == b"\xff\xd8\xff"  # a JPEG, served straight from storage

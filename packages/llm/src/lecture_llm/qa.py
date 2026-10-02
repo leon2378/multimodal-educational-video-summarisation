@@ -7,6 +7,7 @@ delimited, HTML-escaped blocks, and the prompts say they are content, never inst
 """
 
 import html
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +40,7 @@ class QAPrompts:
         return cls(
             answer=Prompt.load(prompts_dir, "answer.v4"),
             course_answer=Prompt.load(prompts_dir, "course-answer.v1"),
-            rewrite=Prompt.load(prompts_dir, "rewrite.v1"),
+            rewrite=Prompt.load(prompts_dir, "rewrite.v2"),
         )
 
 
@@ -52,15 +53,17 @@ class AnswerLLM:
         self._rewrite = Agent(model, instructions=prompts.rewrite.text)
 
     async def rewrite(self, question: str, history: Sequence[ChatTurn]) -> tuple[str, Usage]:
-        """The question made standalone. Without earlier turns it already is: no model call."""
+        """The question made standalone. Without earlier turns it already is: no model call.
+        The model sees only the last exchange, which is what "it" or "that" points back to:
+        given more, it sometimes took "summarise it" for the first question in the thread."""
         usage = Usage()
         if not history:
             return question, usage
         result = await self._rewrite.run(
-            f"{render_conversation(history)}\n\n<question>{_text(question)}</question>"
+            f"{render_conversation(history[-1:])}\n\n<question>{_text(question)}</question>"
         )
         usage.add(result.usage)
-        return result.output.strip() or question, usage
+        return _one_question(result.output) or question, usage
 
     async def stream_answer(
         self,
@@ -85,16 +88,31 @@ class AnswerLLM:
             usage.add(result.usage)
 
 
+# The prompt's own tags. Others are left alone: a question can be about List<T>.
+_TAG = re.compile(r"</?(?:conversation|turn|question|answer)>")
+
+
+def _one_question(output: str) -> str:
+    """The rewritten question alone: its first line, without a tag copied from the prompt
+    ("Summarise the last topic.</answer>")."""
+    lines = [line.strip() for line in _TAG.sub("", output).splitlines() if line.strip()]
+    return lines[0] if lines else ""
+
+
 def render_passages(passages: Sequence[Passage]) -> str:
+    """Each passage with its slide and its sentences, each sentence after its time. A passage
+    isn't headed with its own span: given time="09:46-10:17", the model cited that, which
+    isn't a citation the API or the web app reads."""
     blocks = []
     for passage in passages:
-        span = f"{format_timestamp(passage.start_s)}-{format_timestamp(passage.end_s)}"
-        attrs = f'time="{span}"' + (f" chapter={attr(passage.chapter)}" if passage.chapter else "")
+        attrs = []
         if passage.label:
             lecture = f"{passage.label}: {passage.lecture_title or 'Untitled'}"
-            attrs = f"lecture={attr(lecture)} {attrs}"
+            attrs.append(f"lecture={attr(lecture)}")
+        if passage.chapter:
+            attrs.append(f"chapter={attr(passage.chapter)}")
         prefix = f"{passage.label} " if passage.label else ""
-        lines = [f"<passage {attrs}>"]
+        lines = [" ".join(["<passage", *attrs]) + ">"]
         if passage.slide is not None and (slide := render_slide(passage.slide)):
             lines.append(f"<slide>\n{slide}\n</slide>")
         lines.append("<speech>")

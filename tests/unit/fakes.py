@@ -173,14 +173,16 @@ class FakeReranker:
 
 
 class FakeQA:
-    """The Q&A model. It rewrites a follow-up by marking it, and answers by citing the first
-    sentence it was shown plus a time outside every passage. `fail` makes answers fail the way
-    an overloaded Gemini does. `instructions` records the system prompt of each answer."""
+    """The Q&A model. It rewrites a follow-up by marking it, or replies with `rewritten`, and
+    answers by citing the first sentence it was shown plus a time outside every passage. `fail`
+    makes answers fail the way an overloaded Gemini does. `instructions` records the system
+    prompt of each answer."""
 
     def __init__(self) -> None:
         self.prompts: list[str] = []
         self.instructions: list[str] = []
         self.fail = False
+        self.rewritten: str | None = None
         self.model = FunctionModel(
             self._rewrite, stream_function=self._answer, model_name="fake-qa"
         )
@@ -188,7 +190,8 @@ class FakeQA:
     def _rewrite(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         prompt = self._prompt(messages)
         question = re.findall(r"<question>(.*?)</question>", prompt, re.DOTALL)[-1]
-        return ModelResponse(parts=[TextPart(f"{html.unescape(question)} (standalone)")])
+        reply = self.rewritten or f"{html.unescape(question)} (standalone)"
+        return ModelResponse(parts=[TextPart(reply)])
 
     async def _answer(self, messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
         self.instructions.append(info.instructions or "")

@@ -128,7 +128,10 @@ def test_a_chapter_start_from_the_outline_is_grounded() -> None:
 def test_passages_are_escaped_and_timestamped() -> None:
     rendered = render_passages(PASSAGES)
 
-    assert '<passage time="01:30-02:30" chapter="Memoisation">' in rendered
+    # Headed without its span, which the model copied as a citation: [01:30-02:30].
+    assert '<passage chapter="Memoisation">' in rendered
+    assert "<passage>" in rendered
+    assert "02:30" not in rendered
     assert "Title: Memo &lt;b&gt;" in rendered
     assert "[01:30] Memoisation stores results." in rendered
     # A transcript can't close its block or pose as instructions outside it.
@@ -205,16 +208,39 @@ def test_a_first_question_isnt_rewritten() -> None:
     assert (query, usage.requests, fake.prompts) == ("What is memoisation?", 0, [])
 
 
-def test_a_follow_up_is_rewritten_with_the_conversation() -> None:
+def test_a_follow_up_is_rewritten_with_the_last_exchange() -> None:
     fake = FakeQA()
-    history = [ChatTurn(question="What is memoisation?", answer="Caching [01:30].")]
+    history = [
+        ChatTurn(question="Summarise the lecture.", answer="Memoisation, then growth [00:10]."),
+        ChatTurn(question="What is memoisation?", answer="Caching [01:30]."),
+    ]
 
     query, usage = asyncio.run(_answerer(fake).rewrite("Why <does> it help?", history))
 
     assert query == "Why <does> it help? (standalone)"
     assert usage.requests == 1
+    # What "it" points back to: the last exchange, not the first question in the thread.
     assert "<question>What is memoisation?</question>" in fake.prompts[-1]
+    assert "Summarise the lecture." not in fake.prompts[-1]
     assert fake.prompts[-1].endswith("<question>Why &lt;does&gt; it help?</question>")
+
+
+@pytest.mark.parametrize(
+    ("reply", "query"),
+    [
+        # A tag copied from the prompt, and an answer after the question.
+        ("Summarise the last topic.</answer>\nIt was growth.", "Summarise the last topic."),
+        ("<question>Summarise the last topic.</question>", "Summarise the last topic."),
+        # Nothing left: the question as it was asked.
+        ("</answer>", "summarise it"),
+    ],
+)
+def test_only_the_rewritten_question_is_kept(reply: str, query: str) -> None:
+    fake = FakeQA()
+    fake.rewritten = reply
+    history = [ChatTurn(question="What was the last topic?", answer="Growth [50:00].")]
+
+    assert asyncio.run(_answerer(fake).rewrite("summarise it", history))[0] == query
 
 
 # Across a course
@@ -257,7 +283,7 @@ def test_labelled_citations_point_into_their_lecture() -> None:
 def test_labelled_passages_name_their_lecture() -> None:
     rendered = render_passages(label_lectures(PASSAGES[:1], {LECTURE: 'Efficiency "1"'}))
 
-    assert '<passage lecture="L1: Efficiency &quot;1&quot;" time="01:30-02:30"' in rendered
+    assert '<passage lecture="L1: Efficiency &quot;1&quot;" chapter="Memoisation">' in rendered
     assert "[L1 01:30] Memoisation stores results." in rendered
 
 

@@ -1106,6 +1106,8 @@ export interface components {
             image_url: string;
             /** Latex */
             latex: string[];
+            /** Latex Not In Text */
+            latex_not_in_text: string[];
             /**
              * Reader
              * @enum {string}
@@ -1117,8 +1119,20 @@ export interface components {
             spans: components["schemas"]["TimeSpan"][];
             /** Text */
             text: string;
+            /** Text Parts */
+            text_parts: components["schemas"]["SlideTextPart"][];
             /** Title */
             title: string;
+        };
+        /**
+         * SlideTextPart
+         * @description Part of a slide's text: plain text, or a formula written out in it (`math`), as LaTeX.
+         */
+        SlideTextPart: {
+            /** Math */
+            math: boolean;
+            /** Value */
+            value: string;
         };
         /**
          * SourceOut

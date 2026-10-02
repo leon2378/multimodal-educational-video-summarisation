@@ -3,7 +3,13 @@ wherever either is read (lecture_core.latex)."""
 
 import pytest
 
-from lecture_core.latex import plain, undouble_backslashes
+from lecture_core.latex import (
+    TextPart,
+    place_formulas,
+    plain,
+    undouble_backslashes,
+    upright_names,
+)
 from lecture_core.notes import Formula, StudyNotes
 from lecture_core.timeline import SlideReading
 
@@ -50,6 +56,25 @@ def test_a_formula_escaped_once_is_left_alone(tex: str) -> None:
     assert undouble_backslashes(tex) == tex
 
 
+@pytest.mark.parametrize(
+    ("tex", "upright"),
+    [
+        # From slide readings of MIT 6.0001 Lectures 10 and 11.
+        ("O(len(L))", r"O(\operatorname{len}(L))"),
+        (r"n \text{ is } len(L)", r"n \text{ is } \operatorname{len}(L)"),
+        ("fib(n-1) + fib(n-2)", r"\operatorname{fib}(n-1) + \operatorname{fib}(n-2)"),
+        ("L.append(e)", r"L.\operatorname{append}(e)"),
+        # a times T; commands; text; names already upright.
+        ("T(n) = aT(n/b) + f(n)", "T(n) = aT(n/b) + f(n)"),
+        (r"O(\log n) + \sin(x)", r"O(\log n) + \sin(x)"),
+        (r"\text{if len(L) > 0}", r"\text{if len(L) > 0}"),
+        (r"\operatorname{len}(L)", r"\operatorname{len}(L)"),
+    ],
+)
+def test_function_names_in_a_formula_are_upright(tex: str, upright: str) -> None:
+    assert upright_names(tex) == upright
+
+
 def test_notes_and_slides_are_repaired_when_read() -> None:
     # As the API reads stored notes and slide readings: those stored before the repair too.
     formula = Formula.model_validate({"latex": DOUBLED, "meaning": "Greedy policy", "at_s": 2421})
@@ -59,13 +84,13 @@ def test_notes_and_slides_are_repaired_when_read() -> None:
             "title": "Q-learning",
             "text": "",
             "figure_description": "",
-            "latex": [DOUBLED, r"\gamma"],
+            "latex": [DOUBLED, r"\gamma", "O(len(L))"],
             "code": "",
         }
     )
 
     assert formula.latex == REPAIRED
-    assert reading.latex == [REPAIRED, r"\gamma"]
+    assert reading.latex == [REPAIRED, r"\gamma", r"O(\operatorname{len}(L))"]
 
 
 def test_a_formula_shown_again_is_listed_once() -> None:
@@ -140,3 +165,89 @@ def test_a_slide_reading_is_tidied_when_read() -> None:
     # The title isn't repeated, the text reads as text, and each formula is listed once.
     assert reading.text == "- γ = 0: Only care about immediate reward"
     assert reading.latex == [r"\gamma = 0", r"\gamma = 1", r"\gamma < 1"]
+
+
+@pytest.mark.parametrize("reader", ["ocr", "vlm"])
+def test_ocr_reading_big_o_as_zero_is_put_right(reader: str) -> None:
+    # MIT 6.0001 Lecture 11, slide 30, read by OCR alone.
+    reading = SlideReading.model_validate(
+        {
+            "slide_id": 30,
+            "title": "COMPLEXITY OF COMMON PYTHON FUNCTIONS",
+            "text": "index 0(1)\nsort 0(n log n)\nlen 0(len(L))\nf(0), 10(1) and 2.0(3)",
+            "figure_description": "",
+            "latex": [],
+            "code": "",
+            "reader": reader,
+        }
+    )
+
+    if reader == "ocr":
+        assert reading.text == "index O(1)\nsort O(n log n)\nlen O(len(L))\nf(0), 10(1) and 2.0(3)"
+    else:  # the vision model reads an O as an O
+        assert reading.text.startswith("index 0(1)")
+
+
+def test_formulas_are_placed_where_the_text_writes_them_out() -> None:
+    # MIT 6.0001 Lecture 11, as the vision model read it: each formula in the text and listed.
+    text = "- Best case:\nO(1)\n- Worst case:\nO(1) + O(n) + O(1) -> O(n)"
+
+    parts, elsewhere = place_formulas(text, ["O(1)", "O(n)"])
+
+    # Formulas with only an operator between them are one.
+    assert parts == [
+        TextPart("- Best case:\n"),
+        TextPart("O(1)", math=True),
+        TextPart("\n- Worst case:\n"),
+        TextPart(r"O(1) + O(n) + O(1) \to O(n)", math=True),
+    ]
+    assert elsewhere == []
+
+
+def test_formulas_the_text_doesnt_write_out_are_kept_apart() -> None:
+    # Stanford CS234 Lecture 2: the text has the letter gamma where the formulas have \gamma.
+    text = "- γ = 0: Only care about immediate reward\n- If episodes are finite, use γ = 1"
+
+    parts, elsewhere = place_formulas(text, [r"\gamma = 0", r"\gamma < 1", r"\gamma = 1"])
+
+    assert parts == [
+        TextPart("- "),
+        TextPart(r"\gamma = 0", math=True),
+        TextPart(": Only care about immediate reward\n- If episodes are finite, use "),
+        TextPart(r"\gamma = 1", math=True),
+    ]
+    assert elsewhere == [r"\gamma < 1"]
+
+
+@pytest.mark.parametrize(
+    ("text", "formula"),
+    [
+        ("so i = log n", r"i = \log n"),
+        ("if a<=b, stop", r"a \le b"),
+        ("a = 2^{n-1} + ... + 2 + 1", r"a = 2^{n-1} + \dots + 2 + 1"),
+        ("at base + 4*i", r"base + 4 \cdot i"),
+    ],
+)
+def test_a_formula_is_found_however_its_spelled(text: str, formula: str) -> None:
+    parts, elsewhere = place_formulas(text, [formula])
+
+    assert TextPart(formula, math=True) in parts
+    assert elsewhere == []
+
+
+def test_a_formula_is_placed_only_as_a_whole() -> None:
+    # MIT 6.0001 Lecture 10. Words between two formulas keep them apart.
+    text = "- O(len(L)) for the loop * O(1) to test\n  - O(1 + 4n + 1) = O(4n + 2) = O(n)\nkn^2"
+    formulas = ["O(len(L))", "O(1)", "O(n)", "O(1 + 4n + 1) = O(4n + 2) = O(n)", "n^2", "n"]
+
+    parts, elsewhere = place_formulas(text, formulas)
+
+    assert [part.value for part in parts if part.math] == [
+        "O(len(L))",
+        "O(1)",
+        "O(1 + 4n + 1) = O(4n + 2) = O(n)",
+    ]
+    # O(n) is written out within a longer formula. n^2 is only part of kn^2, and a formula of
+    # one letter could be any word.
+    assert elsewhere == ["n^2", "n"]
+    assert "".join(part.value for part in parts if not part.math).endswith("\nkn^2")

@@ -181,6 +181,13 @@ class TimeSpan(BaseModel):
     end_s: float
 
 
+class SlideTextPart(BaseModel):
+    """Part of a slide's text: plain text, or a formula written out in it (`math`), as LaTeX."""
+
+    value: str
+    math: bool
+
+
 class SlideOut(BaseModel):
     slide_id: int
     image_url: str
@@ -189,6 +196,10 @@ class SlideOut(BaseModel):
     text: str
     figure_description: str
     latex: list[str]
+    # The text with the formulas it writes out in their places, and the formulas it doesn't:
+    # the two show a slide's text and formulas as one, with nothing twice.
+    text_parts: list[SlideTextPart]
+    latex_not_in_text: list[str]
     code: str
     # Who read the slide: the vision LLM, or OCR alone for slides with nothing but text.
     reader: Literal["vlm", "ocr"]

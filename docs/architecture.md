@@ -199,12 +199,19 @@ Code in `apps/api/src/lecture_api/routes/qa.py`, `packages/llm` (`qa`) and `pack
 
 1. `POST /v1/lectures/{id}/ask` saves the question, in a new thread or the one named by
    `thread_id`, and returns a stream of server-sent events.
-2. A follow-up is rewritten to stand on its own, from the thread's last 3 answered exchanges
-   ("why does that help?" becomes "why does memoisation help?"), because search sees only the
-   question. A first question skips this call.
+2. A follow-up is rewritten to stand on its own ("why does that help?" becomes "why does
+   memoisation help?"), because search sees only the question. The model gets the last exchange,
+   which is what "it" or "that" points back to: given the last 3, it sometimes took "summarise
+   it" for the thread's first question. A question that already stands on its own, like "what
+   was the last topic?", is left as it is (`prompts/qa/rewrite.v2.md`), and only the first line
+   of the reply is kept, without any tag copied from the prompt. A first question skips this
+   call.
 3. Search (`SEARCH_MODE`) gives the top 6 segments. Their sentences come from the lecture's
    transcript rows and their slides from its slide readings, so the model sees each sentence with
-   its `[mm:ss]`.
+   its `[mm:ss]`. A passage isn't headed with its span: given `time="09:46-10:17"`, the model
+   cited `[09:46-10:17]` in all three answers to "What is Big O notation?", which neither the
+   API nor the web app reads as a citation. Without it, 18 answers to six questions cited only
+   sentence times (87 citations, all valid).
 4. The answer model gets the passages in delimited, HTML-escaped blocks, with the conversation
    for context, and the lecture's outline from the study notes: the lecture's summary, then its
    chapters with their start times and summaries. Search finds passages by meaning, so it can't
@@ -389,11 +396,21 @@ so a second run only redoes stages whose inputs, version, model, params or promp
   backslashes all come in pairs, with a pair starting a command, has each pair made one again
   (`lecture_core.latex`). The repair runs when slide readings and notes are read, from the model,
   the cache or the database, so lectures read before it are repaired too. Notes list a formula
-  shown again later, on a recap slide, once, where it first appears.
+  shown again later, on a recap slide, once, where it first appears. A lowercase name called
+  like a function, `len(L)`, becomes `\operatorname{len}(L)`: KaTeX shows a bare len as the
+  variables l, e and n in italics. `aT(n/b)` (a times T) and text in `\text{...}` are left alone.
 - **Slide text**: the vision LLM also writes LaTeX into a slide's plain text (`\gamma = 0`,
-  `s \in S`), starts the text with the title shown above it, and lists a formula twice. Each
-  reading is tidied as it's read, the same way: LaTeX in text becomes readable (γ = 0, s ∈ S,
-  Q̂_φ), the title isn't repeated, and each formula is listed once.
+  `s \in S`), starts the text with the title shown above it, and lists a formula twice; OCR
+  reads big-O's O as a zero (0(n log n)). Each reading is tidied as it's read, the same way:
+  LaTeX in text becomes readable (γ = 0, s ∈ S, Q̂_φ), the title isn't repeated, each formula
+  is listed once, and an OCR reading's 0(...) becomes O(...).
+- **Formulas in place**: a slide's formulas are listed apart from its text, and the text often
+  writes them out too, so the web app showed them twice. The API also gives the text in parts,
+  with each formula it writes out in its place (`place_formulas`): found however it's spelled
+  (γ = 1 for `\gamma = 1`, <= for `\le`, other spacing), only as a whole (not n in "len", nor
+  O(n) in O(n log n)), and joined to the next across an operator, so O(1) + O(n) -> O(n) is one
+  formula. On the 22 slides with formulas in the local lectures, 50 of 65 formulas were placed;
+  the other 15 aren't in their slide's text, and are shown after it.
 - **Untrusted files**: FFmpeg reads hundreds of formats, and its vulnerabilities tend to be in the
   ones nobody needs. `media` has it open only MP4/MOV, Matroska and WebM files
   (`format_whitelist`) and start only the decoders lectures use while it probes a file

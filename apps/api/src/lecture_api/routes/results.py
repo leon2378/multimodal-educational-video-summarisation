@@ -14,10 +14,12 @@ from lecture_api.deps import SessionDep, SettingsDep, StorageDep
 from lecture_api.schemas import (
     NotesOut,
     SlideOut,
+    SlideTextPart,
     TimelineSegmentOut,
     TimeSpan,
     TranscriptLineOut,
 )
+from lecture_core.latex import place_formulas
 from lecture_core.models import SlideRow, SummaryRow, TimelineSegmentRow, TranscriptSegmentRow
 from lecture_core.notes import StudyNotes
 from lecture_core.timeline import SlideReading
@@ -51,24 +53,30 @@ async def slides(
     rows = await session.scalars(
         select(SlideRow).where(SlideRow.lecture_id == lecture_id).order_by(SlideRow.slide_id)
     )
-    # Through SlideReading, which tidies what the model wrote, as Q&A reads it.
-    return [
-        SlideOut(
-            **SlideReading(
-                slide_id=row.slide_id,
-                title=row.title,
-                text=row.text,
-                figure_description=row.figure_description,
-                latex=row.latex,
-                code=row.code,
-                reader=row.reader,
-            ).model_dump(),
-            image_url=storage.presign_get(row.image_key, settings.upload_url_ttl_s),
-            first_seen_s=row.first_seen_s,
-            spans=[TimeSpan.model_validate(span) for span in row.spans],
+    out = []
+    for row in rows:
+        # Through SlideReading, which tidies what the model wrote, as Q&A reads it.
+        reading = SlideReading(
+            slide_id=row.slide_id,
+            title=row.title,
+            text=row.text,
+            figure_description=row.figure_description,
+            latex=row.latex,
+            code=row.code,
+            reader=row.reader,
         )
-        for row in rows
-    ]
+        parts, elsewhere = place_formulas(reading.text, reading.latex)
+        out.append(
+            SlideOut(
+                **reading.model_dump(),
+                text_parts=[SlideTextPart(value=part.value, math=part.math) for part in parts],
+                latex_not_in_text=elsewhere,
+                image_url=storage.presign_get(row.image_key, settings.upload_url_ttl_s),
+                first_seen_s=row.first_seen_s,
+                spans=[TimeSpan.model_validate(span) for span in row.spans],
+            )
+        )
+    return out
 
 
 @router.get("/{lecture_id}/timeline")
