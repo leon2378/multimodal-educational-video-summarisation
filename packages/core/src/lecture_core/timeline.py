@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from lecture_core.latex import LaTeX
+
 
 class Word(BaseModel):
     start_s: float
@@ -58,7 +60,7 @@ class SlideReading(BaseModel):
     title: str
     text: str
     figure_description: str
-    latex: list[str]
+    latex: list[LaTeX]
     code: str
     # Who read it: the vision LLM, or OCR alone (slides with only text; see lecture_perception.ocr).
     reader: Literal["vlm", "ocr"] = "vlm"

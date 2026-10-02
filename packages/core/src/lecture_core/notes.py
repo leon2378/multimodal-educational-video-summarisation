@@ -7,7 +7,9 @@ the same way. Times are seconds from the start of the video.
 import math
 import re
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from lecture_core.latex import LaTeX
 
 
 class Chapter(BaseModel):
@@ -24,7 +26,7 @@ class Concept(BaseModel):
 
 
 class Formula(BaseModel):
-    latex: str
+    latex: LaTeX
     meaning: str
     at_s: float
 
@@ -41,6 +43,19 @@ class StudyNotes(BaseModel):
     concepts: list[Concept]
     formulas: list[Formula]
     quiz: list[QuizQuestion]
+
+    @field_validator("formulas")
+    @classmethod
+    def _once_each(cls, formulas: list[Formula]) -> list[Formula]:
+        """A formula a lecture shows again (a recap slide) is listed once, where it first
+        appears. Checked when notes are read, so notes made before this are tidied too."""
+        seen: set[str] = set()
+        once = []
+        for formula in formulas:
+            if formula.latex not in seen:
+                seen.add(formula.latex)
+                once.append(formula)
+        return once
 
 
 _TIMESTAMP = re.compile(r"\[?\s*(?:(\d+):)?(\d+):(\d{1,2}(?:\.\d+)?)\s*\]?")

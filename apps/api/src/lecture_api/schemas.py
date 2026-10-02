@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, RootModel, computed_field
 
 from lecture_api.quotas import QuotaUsage
+from lecture_core.latex import LaTeX
 from lecture_core.models import LectureStatus, MessageRole, Rating, RunStatus, Visibility
 from lecture_core.notes import StudyNotes
 from lecture_core.processing import Progress, StageInfo
@@ -188,7 +189,7 @@ class SlideOut(BaseModel):
     title: str
     text: str
     figure_description: str
-    latex: list[str]
+    latex: list[LaTeX]
     code: str
     # Who read the slide: the vision LLM, or OCR alone for slides with nothing but text.
     reader: Literal["vlm", "ocr"]

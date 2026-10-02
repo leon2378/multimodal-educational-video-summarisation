@@ -54,9 +54,11 @@ class Passage(BaseModel):
 
 
 class Outline(BaseModel):
-    """A lecture's chapters, in order, from its study notes."""
+    """A lecture's summary and its chapters in order, each with its own summary, from its study
+    notes: what a question about the whole lecture, or its order, is answered from."""
 
     lecture_id: uuid.UUID
+    summary: str = ""
     chapters: list[Chapter]
 
 

@@ -1,6 +1,6 @@
 """Answer eval: ask the golden questions through the API, then score the answers.
 
-- Correctness and faithfulness: an LLM judge (prompts/evals/judge-answer.v2.md) compares each
+- Correctness and faithfulness: an LLM judge (prompts/evals/judge-answer.v3.md) compares each
   answer with the reference answer, and checks its claims against what it was written from: the
   passages, with their slides, and the lecture's outline. The judge isn't calibrated against
   hand grades yet (the blueprint wants about 50), so read its scores as a trend rather than the
@@ -89,7 +89,7 @@ class AnswersReport(BaseModel):
 class Judge:
     def __init__(self, model: Model, prompts_dir: Path = JUDGE_PROMPTS) -> None:
         self.model_name = f"{model.system}:{model.model_name}"
-        self.prompt = Prompt.load(prompts_dir, "judge-answer.v2")
+        self.prompt = Prompt.load(prompts_dir, "judge-answer.v3")
         self._agent = Agent(model, output_type=Judgement, instructions=self.prompt.text)
 
     def grade(
@@ -172,7 +172,9 @@ def evaluate(
         if segment["slide_id"] in readings
     }
     notes = StudyNotes.model_validate(get(client, f"/v1/lectures/{lecture_id}/notes")["notes"])
-    outline = render_outline(Outline(lecture_id=lecture_id, chapters=notes.chapters))
+    outline = render_outline(
+        Outline(lecture_id=lecture_id, summary=notes.tldr, chapters=notes.chapters)
+    )
     results = []
     answer_model = None
     for question in golden.questions:

@@ -276,6 +276,13 @@
       "question": "What does the lecture move on to right after explaining Big O notation?",
       "answer": "Analysing a program's complexity from its parts: the law of addition for code that runs one part after another and the law of multiplication for nested loops, then the main complexity classes.",
       "spans": [["32:40", "39:25"]]
+    },
+    {
+      "id": "s03",
+      "kind": "structure",
+      "question": "Can you summarise the entire lecture?",
+      "answer": "Why a program's efficiency matters as data grows, mostly its time rather than its space; measuring it by timing programs and by counting operations, and why both fall short; orders of growth and Big O notation for the worst case, dropping constants and lower-order terms; the laws of addition and multiplication, and the main complexity classes; then examples of linear complexity (searching lists, unsorted and sorted) and of quadratic complexity with nested loops.",
+      "spans": [["00:00", "51:25"]]
     }
   ]
 }

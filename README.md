@@ -28,8 +28,9 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
   search.
 - Q&A ([below](#questions-and-answers)): ask about a lecture and get a streamed answer that
   cites the moments it comes from as `[mm:ss]`, each citation checked against what was
-  retrieved. The lecture's outline comes with the passages, so a question about its order
-  ("what was the last topic?") is answered from its chapters. Follow-ups are rewritten to stand
+  retrieved. The lecture's outline comes with the passages, its summary and each chapter's, so
+  a question about its order ("what was the last topic?") or the whole of it ("summarise the
+  lecture") is answered from its chapters. Follow-ups are rewritten to stand
   alone before searching. Threads, answers (with sources, tokens and time to first token) and
   thumbs up/down feedback are stored.
 - Courses ([below](#courses)): group lectures, then search and ask across all of them, with

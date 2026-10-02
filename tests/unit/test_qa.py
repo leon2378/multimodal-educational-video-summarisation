@@ -59,9 +59,20 @@ PASSAGES = [
 
 OUTLINE = Outline(
     lecture_id=LECTURE,
+    summary="How programs scale, & how to tell.",
     chapters=[
-        Chapter(title="Why efficiency matters", start_s=0.37, end_s=418.8, summary=""),
-        Chapter(title="Linear & <quadratic> examples", start_s=2365.75, end_s=3085.7, summary=""),
+        Chapter(
+            title="Why efficiency matters",
+            start_s=0.37,
+            end_s=418.8,
+            summary="Data keeps growing, so it's worth it.",
+        ),
+        Chapter(
+            title="Linear & <quadratic> examples",
+            start_s=2365.75,
+            end_s=3085.7,
+            summary="Searching lists, then nested loops.",
+        ),
     ],
 )
 
@@ -157,8 +168,19 @@ def test_an_answer_about_one_lecture_gets_its_outline() -> None:
 
     asyncio.run(collect())
 
+    # The lecture's summary, then each chapter's start and title with its summary: what a
+    # question about the whole lecture is answered from. Text is escaped but for its quotes,
+    # which a model would copy into its answer as &#x27;.
     prompt = fake.prompts[-1]
-    outline = "[00:00] Why efficiency matters\n[39:25] Linear &amp; &lt;quadratic&gt; examples"
+    outline = "\n".join(
+        [
+            "<summary>How programs scale, &amp; how to tell.</summary>",
+            "[00:00] Why efficiency matters",
+            "Data keeps growing, so it's worth it.",
+            "[39:25] Linear &amp; &lt;quadratic&gt; examples",
+            "Searching lists, then nested loops.",
+        ]
+    )
     assert f"<outline>\n{outline}\n</outline>" in prompt
     assert prompt.index("</passages>") < prompt.index("<outline>") < prompt.index("<question>")
 

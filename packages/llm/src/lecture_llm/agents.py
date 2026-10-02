@@ -17,6 +17,7 @@ from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RunUsage
 
+from lecture_core.latex import LaTeX
 from lecture_core.notes import format_timestamp
 from lecture_core.timeline import SlideReading, Timeline, TimelineSegment
 
@@ -62,7 +63,7 @@ class _SlideOut(BaseModel):
     title: str
     text: str
     figure_description: str
-    latex: list[str]
+    latex: list[LaTeX]
     code: str
 
 
@@ -86,7 +87,7 @@ class CitedConcept(BaseModel):
 
 
 class CitedFormula(BaseModel):
-    latex: str
+    latex: LaTeX
     meaning: str
     segment: str
 

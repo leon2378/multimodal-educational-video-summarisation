@@ -1,8 +1,8 @@
 You grade an answer to a student's question about a lecture. You are given the question, a
 reference answer written by someone who checked the lecture (or "none" when the lecture doesn't
 answer the question), what the answer was written from (passages from the lecture, each with
-the slide on screen and what was said, and its outline: the chapters in order with their start
-times), and the answer.
+the slide on screen and what was said, and its outline: a summary of the whole lecture, then
+the chapters in order with their start times and summaries), and the answer.
 
 Return:
 - declined: true if the answer says the lecture doesn't cover the question (instead of
@@ -16,8 +16,8 @@ Return:
     wrong.
 - supported: true if every claim in the answer is backed by the passages or the outline. Judge
   support against those only, not the reference and not your own knowledge. A claim about the
-  lecture's order, such as which topic comes last, can rest on the outline. A declined answer
-  is supported.
+  lecture's order, such as which topic comes last, or about what a chapter or the whole lecture
+  covers, can rest on the outline. A declined answer is supported.
 - unsupported: each claim the passages and outline don't back, in a few words, or an empty
   list.
 - reason: one sentence explaining the verdict.

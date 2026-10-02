@@ -33,9 +33,13 @@ def test_ask_follow_up_and_rate(
 
     events = ask(client, lecture_id, "What does memoisation store?")
 
-    # The model also saw the lecture's outline, from its notes' chapters.
+    # The model also saw the lecture's outline, from its notes: their summary, then each
+    # chapter's start and title, with the chapter's summary below.
     outline = fake_qa.prompts[-1].split("<outline>\n")[1].split("\n</outline>")[0]
-    assert [line.split("] ", 1)[1] for line in outline.splitlines()] == ["Memoisation", "Growth"]
+    lines = outline.splitlines()
+    assert lines[0].startswith("<summary>")
+    titles = [line.split("] ", 1)[1] for line in lines if line.startswith("[")]
+    assert titles == ["Memoisation", "Growth"]
 
     assert [e["type"] for e in events[:2]] == ["start", "sources"]
     assert events[-1]["type"] == "done"

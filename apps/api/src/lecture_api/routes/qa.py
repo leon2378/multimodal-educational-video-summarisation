@@ -469,11 +469,12 @@ async def _passages(session: AsyncSession, hits: Sequence[Hit]) -> list[Passage]
 
 
 async def _outline(session: AsyncSession, lecture_id: uuid.UUID) -> Outline | None:
-    """The lecture's chapters, from its study notes."""
+    """The lecture's summary and chapters, from its study notes."""
     row = await session.get(SummaryRow, (lecture_id, "study_notes"))
     if row is None:
         return None
-    return Outline(lecture_id=lecture_id, chapters=StudyNotes.model_validate(row.content).chapters)
+    notes = StudyNotes.model_validate(row.content)
+    return Outline(lecture_id=lecture_id, summary=notes.tldr, chapters=notes.chapters)
 
 
 async def _history(session: AsyncSession, thread_id: uuid.UUID, turns: int) -> list[ChatTurn]:

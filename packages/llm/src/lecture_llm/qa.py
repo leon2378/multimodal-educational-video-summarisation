@@ -22,6 +22,12 @@ from lecture_llm.agents import Prompt, Usage, attr, render_slide
 _ANSWER_CHARS = 600
 
 
+def _text(value: str) -> str:
+    """Text between tags: <, > and & escaped, so it can't open or close a block. Quotes stay
+    as they are; escaped, a model copies them into its answer as &#x27;."""
+    return html.escape(value, quote=False)
+
+
 @dataclass(frozen=True)
 class QAPrompts:
     answer: Prompt
@@ -31,7 +37,7 @@ class QAPrompts:
     @classmethod
     def load(cls, prompts_dir: Path) -> "QAPrompts":
         return cls(
-            answer=Prompt.load(prompts_dir, "answer.v2"),
+            answer=Prompt.load(prompts_dir, "answer.v3"),
             course_answer=Prompt.load(prompts_dir, "course-answer.v1"),
             rewrite=Prompt.load(prompts_dir, "rewrite.v1"),
         )
@@ -51,7 +57,7 @@ class AnswerLLM:
         if not history:
             return question, usage
         result = await self._rewrite.run(
-            f"{render_conversation(history)}\n\n<question>{html.escape(question)}</question>"
+            f"{render_conversation(history)}\n\n<question>{_text(question)}</question>"
         )
         usage.add(result.usage)
         return result.output.strip() or question, usage
@@ -71,7 +77,7 @@ class AnswerLLM:
         parts.append(render_passages(passages))
         if outline is not None and outline.chapters:
             parts.append(render_outline(outline))
-        parts.append(f"<question>{html.escape(question)}</question>")
+        parts.append(f"<question>{_text(question)}</question>")
         agent = self._course_answer if any(p.label for p in passages) else self._answer
         async with agent.run_stream("\n\n".join(parts)) as result:
             async for delta in result.stream_text(delta=True, debounce_by=None):
@@ -93,8 +99,7 @@ def render_passages(passages: Sequence[Passage]) -> str:
             lines.append(f"<slide>\n{slide}\n</slide>")
         lines.append("<speech>")
         lines += [
-            f"[{prefix}{format_timestamp(s.start_s)}] {html.escape(s.text)}"
-            for s in passage.sentences
+            f"[{prefix}{format_timestamp(s.start_s)}] {_text(s.text)}" for s in passage.sentences
         ]
         lines += ["</speech>", "</passage>"]
         blocks.append("\n".join(lines))
@@ -102,7 +107,12 @@ def render_passages(passages: Sequence[Passage]) -> str:
 
 
 def render_outline(outline: Outline) -> str:
-    lines = [f"[{format_timestamp(c.start_s)}] {html.escape(c.title)}" for c in outline.chapters]
+    """The lecture's summary, then each chapter's start and title, with its summary below."""
+    lines = [f"<summary>{_text(outline.summary)}</summary>"] if outline.summary else []
+    for chapter in outline.chapters:
+        lines.append(f"[{format_timestamp(chapter.start_s)}] {_text(chapter.title)}")
+        if chapter.summary:
+            lines.append(_text(chapter.summary))
     return "<outline>\n" + "\n".join(lines) + "\n</outline>"
 
 
@@ -113,7 +123,7 @@ def render_conversation(history: Sequence[ChatTurn]) -> str:
         if len(answer) > _ANSWER_CHARS:
             answer = answer[:_ANSWER_CHARS] + "…"
         turns.append(
-            f"<turn>\n<question>{html.escape(turn.question)}</question>\n"
-            f"<answer>{html.escape(answer)}</answer>\n</turn>"
+            f"<turn>\n<question>{_text(turn.question)}</question>\n"
+            f"<answer>{_text(answer)}</answer>\n</turn>"
         )
     return "<conversation>\n" + "\n".join(turns) + "\n</conversation>"
