@@ -2,7 +2,7 @@
 
 import { cn } from "cn";
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, PlayIcon, ScanTextIcon, SparklesIcon } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -189,6 +189,10 @@ function SlideDialog({
 }) {
   const slide = index === null ? undefined : slides[index];
   const [copied, setCopied] = useState(false);
+  const read = slide !== undefined && (slide.text_parts.length > 0 || slide.latex_not_in_text.length > 0);
+  // The text sits beside the figure, unless there's only one of them, or formulas on their own
+  // (a matrix, say), which need the width.
+  const stacked = !read || !slide.figure_description || slide.latex_not_in_text.length > 0;
   const go = (step: number) => index !== null && onIndex(Math.min(slides.length - 1, Math.max(0, index + step)));
   const play = (seconds: number) => {
     onIndex(null);
@@ -218,29 +222,28 @@ function SlideDialog({
               className="max-h-[45dvh] w-full rounded-lg bg-black object-contain ring-1 ring-border"
             />
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-              {slide.text && (
-                <section className={cn(!slide.latex.length && !slide.figure_description && "md:col-span-2")}>
-                  <SectionLabel>Text</SectionLabel>
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{slide.text}</p>
+              {/* The text with the formulas it writes out in their places, then the ones it doesn't,
+                  so nothing shows twice. */}
+              {read && (
+                <section className={cn("min-w-0", stacked && "md:col-span-2")}>
+                  <SectionLabel>{slide.text_parts.length > 0 ? "Text" : "Formulas"}</SectionLabel>
+                  {slide.text_parts.length > 0 && (
+                    <p className="text-sm leading-relaxed wrap-break-word whitespace-pre-wrap">
+                      {slide.text_parts.map((part, i) =>
+                        part.math ? <Latex key={i} source={part.value} inline /> : <Fragment key={i}>{part.value}</Fragment>,
+                      )}
+                    </p>
+                  )}
+                  {slide.latex_not_in_text.map((source) => (
+                    <Latex key={source} source={source} />
+                  ))}
                 </section>
               )}
-              {(slide.latex.length > 0 || slide.figure_description) && (
-                <div className="flex flex-col gap-6">
-                  {slide.latex.length > 0 && (
-                    <section>
-                      <SectionLabel>Formulas</SectionLabel>
-                      {slide.latex.map((source) => (
-                        <Latex key={source} source={source} />
-                      ))}
-                    </section>
-                  )}
-                  {slide.figure_description && (
-                    <section>
-                      <SectionLabel>Figure</SectionLabel>
-                      <p className="text-sm leading-relaxed text-muted-foreground">{slide.figure_description}</p>
-                    </section>
-                  )}
-                </div>
+              {slide.figure_description && (
+                <section className={cn("min-w-0", stacked && "md:col-span-2")}>
+                  <SectionLabel>Figure</SectionLabel>
+                  <p className="text-sm leading-relaxed text-muted-foreground">{slide.figure_description}</p>
+                </section>
               )}
               {slide.code && (
                 <section className="md:col-span-2">

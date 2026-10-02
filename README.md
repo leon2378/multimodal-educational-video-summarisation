@@ -153,8 +153,8 @@ migrations in a one-off container, and starts the API on port 8000.
     (KaTeX), to copy or download as Markdown.
   - **Transcript**: highlights and scrolls with playback, headed by chapter; its search box
     searches the lecture.
-  - **Slides**: each slide's text, formulas, code and figure description, and whether OCR or
-    the vision model read it.
+  - **Slides**: each slide's text with its formulas typeset in place, code and figure
+    description, and whether OCR or the vision model read it.
   - **Quiz**: reveal answers and mark what you knew; it remembers, per lecture.
   - **Ask**: a chat whose answers stream in (and can be stopped), with citations that play the
     video from where they point, suggested questions from the notes, and each answer's model,
