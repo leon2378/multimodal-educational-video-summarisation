@@ -122,6 +122,9 @@ class Lecture(Base):
     source_filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    # An unfinished upload in parts (docs/adr/0012-resumable-uploads-in-parts.md): storage's id
+    # for it. size_bytes is then the size it was started for.
+    upload_id: Mapped[str | None] = mapped_column(Text)
     # SHA-256 of the source file, computed at ingest and used to dedupe re-uploads.
     content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     duration_s: Mapped[float | None]

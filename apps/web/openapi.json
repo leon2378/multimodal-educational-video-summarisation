@@ -611,6 +611,21 @@
             ],
             "title": "Licence"
           },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              734003200
+            ],
+            "title": "Size Bytes"
+          },
           "title": {
             "maxLength": 300,
             "minLength": 1,
@@ -1157,6 +1172,69 @@
           "created_at"
         ],
         "title": "NotesOut",
+        "type": "object"
+      },
+      "PartTarget": {
+        "properties": {
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "url"
+        ],
+        "title": "PartTarget",
+        "type": "object"
+      },
+      "PartsUpload": {
+        "description": "An upload in parts. Part n is the file's bytes from (n - 1) * part_bytes up to\nn * part_bytes. PUT each one in `parts` to its URL, with no other headers, in any order\nand several at a time, then POST complete-upload. Parts storage has already are left out.\nThe URLs expire: ask again for new ones.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "expires_in_s": {
+            "title": "Expires In S",
+            "type": "integer"
+          },
+          "part_bytes": {
+            "title": "Part Bytes",
+            "type": "integer"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/PartTarget"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "uploaded": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Uploaded",
+            "type": "array"
+          }
+        },
+        "required": [
+          "size_bytes",
+          "part_bytes",
+          "count",
+          "uploaded",
+          "parts",
+          "expires_in_s"
+        ],
+        "title": "PartsUpload",
         "type": "object"
       },
       "Progress": {
@@ -1946,6 +2024,23 @@
         "title": "TranscriptLineOut",
         "type": "object"
       },
+      "UploadPartsRequest": {
+        "properties": {
+          "size_bytes": {
+            "examples": [
+              734003200
+            ],
+            "minimum": 1.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "size_bytes"
+        ],
+        "title": "UploadPartsRequest",
+        "type": "object"
+      },
       "UploadTarget": {
         "description": "Send the file with `method` to `url`, including `headers` exactly as given.",
         "properties": {
@@ -2565,7 +2660,7 @@
     },
     "/v1/lectures/{lecture_id}": {
       "delete": {
-        "description": "Delete the lecture everywhere: its video, its passages in the search index, its results,\nprocessing history and conversations. What processing computed stays in the stage cache,\nwhere another upload of the same video finds it (docs/adr/0001-stage-cache.md). Its owner or\nan admin only, and not while it's processing. What it used still counts towards today's\nquotas.",
+        "description": "Delete the lecture everywhere: its video (or an unfinished upload's parts), its passages\nin the search index, its results, processing history and conversations. What processing\ncomputed stays in the stage cache, where another upload of the same video finds it\n(docs/adr/0001-stage-cache.md). Its owner or an admin only, and not while it's processing.\nWhat it used still counts towards today's quotas.",
         "operationId": "delete_lecture_v1_lectures__lecture_id__delete",
         "parameters": [
           {
@@ -2749,7 +2844,7 @@
     },
     "/v1/lectures/{lecture_id}/complete-upload": {
       "post": {
-        "description": "Idempotent: confirming an upload that's already confirmed returns the lecture unchanged.",
+        "description": "Idempotent: confirming an upload that's already confirmed returns the lecture unchanged.\nAn upload in parts is joined first, once storage has every part; until then it's a 409\nsaying how many are missing.",
         "operationId": "complete_upload_v1_lectures__lecture_id__complete_upload_post",
         "parameters": [
           {
@@ -3200,6 +3295,60 @@
         "summary": "Transcript",
         "tags": [
           "results"
+        ]
+      }
+    },
+    "/v1/lectures/{lecture_id}/upload-parts": {
+      "post": {
+        "description": "Upload the video in parts, which can be resumed: the parts storage has, and a URL for\neach of the others. Ask again to resume after an interruption, or for new URLs when they\nexpire. The first call starts the upload for a file of `size_bytes`, and later ones must\ngive the same size. An upload left unfinished for a week is cleared, and resuming it then\nstarts again (docs/adr/0012-resumable-uploads-in-parts.md).",
+        "operationId": "upload_parts_v1_lectures__lecture_id__upload_parts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lecture_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lecture Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadPartsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartsUpload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Parts",
+        "tags": [
+          "lectures"
         ]
       }
     },

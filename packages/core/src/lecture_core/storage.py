@@ -26,7 +26,14 @@ if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
 
 _NOT_FOUND_CODES = {"404", "NoSuchKey", "NotFound"}
+# An upload in parts that's over: finished, aborted, or cleared by the bucket's lifecycle rule.
+_NO_UPLOAD_CODES = {"404", "NoSuchUpload"}
 _SAFE_EXTENSION = re.compile(r"\.[a-z0-9]{1,8}")
+
+# Uploads in parts (S3's multipart uploads, which Cloud Storage and SeaweedFS speak too): every
+# part but the last must be at least 5 MiB, and an upload can have up to 10,000.
+MIN_PART_BYTES = 5 * 1024**2
+MAX_PARTS = 10_000
 
 
 def source_key(lecture_id: uuid.UUID, filename: str) -> str:
@@ -40,6 +47,42 @@ def source_key(lecture_id: uuid.UUID, filename: str) -> str:
 class ObjectInfo:
     size: int
     content_type: str | None
+
+
+@dataclass(frozen=True)
+class UploadedPart:
+    number: int
+    size: int
+    etag: str
+
+
+@dataclass(frozen=True)
+class PartPlan:
+    """How a file is cut up for an upload in parts: parts of `part_bytes`, numbered from 1, the
+    last one shorter."""
+
+    size_bytes: int
+    part_bytes: int
+
+    @classmethod
+    def for_size(cls, size_bytes: int, part_bytes: int) -> "PartPlan":
+        # Bigger parts when the usual size would make more than storage allows.
+        return cls(size_bytes, max(part_bytes, -(-size_bytes // MAX_PARTS)))
+
+    @property
+    def count(self) -> int:
+        return max(1, -(-self.size_bytes // self.part_bytes))
+
+    def size_of(self, number: int) -> int:
+        return min(self.part_bytes, self.size_bytes - (number - 1) * self.part_bytes)
+
+    def matching(self, uploaded: list[UploadedPart]) -> dict[int, UploadedPart]:
+        """The parts storage has that fit this plan, by number. Any other is sent again."""
+        return {
+            part.number: part
+            for part in uploaded
+            if 1 <= part.number <= self.count and part.size == self.size_of(part.number)
+        }
 
 
 class ObjectStorage:
@@ -62,6 +105,73 @@ class ObjectStorage:
             Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
             ExpiresIn=expires_in_s,
         )
+
+    def start_upload(self, key: str, content_type: str) -> str:
+        """Start an upload in parts, which can be resumed; its id. The client sends each part
+        straight to storage (presign_part), and finish_upload joins them into the object."""
+        response = self._client.create_multipart_upload(
+            Bucket=self.bucket, Key=key, ContentType=content_type
+        )
+        return response["UploadId"]
+
+    def presign_part(
+        self, key: str, upload_id: str, number: int, size: int, expires_in_s: int
+    ) -> str:
+        """URL the client PUTs one part to. It's signed for the part's length, so storage
+        refuses a part of any other size, and an upload can't grow past the size it was given."""
+        return self._presign_client.generate_presigned_url(
+            "upload_part",
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "UploadId": upload_id,
+                "PartNumber": number,
+                "ContentLength": size,
+            },
+            ExpiresIn=expires_in_s,
+        )
+
+    def uploaded_parts(self, key: str, upload_id: str) -> list[UploadedPart] | None:
+        """The parts storage has so far, or None once the upload is over: finished, or left
+        unfinished long enough for the bucket to clear it."""
+        parts: list[UploadedPart] = []
+        try:
+            for page in self._client.get_paginator("list_parts").paginate(
+                Bucket=self.bucket, Key=key, UploadId=upload_id
+            ):
+                parts.extend(
+                    UploadedPart(part["PartNumber"], part["Size"], part["ETag"])
+                    for part in page.get("Parts", [])
+                )
+        except ClientError as error:
+            if _code(error) in _NO_UPLOAD_CODES:
+                return None
+            raise
+        return parts
+
+    def finish_upload(self, key: str, upload_id: str, parts: list[UploadedPart]) -> None:
+        """Join the parts, in order, into the object; storage drops any others. An upload
+        that's over already is left alone: whether the object is there tells how it ended."""
+        try:
+            self._client.complete_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                UploadId=upload_id,
+                MultipartUpload={
+                    "Parts": [{"PartNumber": part.number, "ETag": part.etag} for part in parts]
+                },
+            )
+        except ClientError as error:
+            if _code(error) not in _NO_UPLOAD_CODES:
+                raise
+
+    def abort_upload(self, key: str, upload_id: str) -> None:
+        """Drop an unfinished upload's parts. Safe to repeat."""
+        try:
+            self._client.abort_multipart_upload(Bucket=self.bucket, Key=key, UploadId=upload_id)
+        except ClientError as error:
+            if _code(error) not in _NO_UPLOAD_CODES:
+                raise
 
     def presign_get(self, key: str, expires_in_s: int) -> str:
         """URL a browser can fetch directly: slide images, and later the video for playback."""
@@ -141,7 +251,11 @@ def _make_client(settings: Settings, endpoint_url: str | None) -> "S3Client":
 
 
 def _is_not_found(error: ClientError) -> bool:
-    return error.response.get("Error", {}).get("Code") in _NOT_FOUND_CODES
+    return _code(error) in _NOT_FOUND_CODES
+
+
+def _code(error: ClientError) -> str | None:
+    return error.response.get("Error", {}).get("Code")
 
 
 class LocalStorage:

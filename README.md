@@ -61,8 +61,10 @@ What exists today is described in [docs/architecture.md](docs/architecture.md).
 - A single-call Gemini baseline that summarises a lecture video and records tokens, cost and
   timings ([below](#gemini-baseline)).
 - Direct-to-storage uploads: the API creates a lecture and hands out a presigned URL, the client
-  uploads the file to storage, and the API confirms it. The worker reads MP4, MOV, Matroska and
-  WebM files, and only the codecs lectures use, since anyone signed in can upload one.
+  uploads the file to storage, and the API confirms it. Or the file goes in 16 MiB parts, each
+  straight to storage, so an interrupted upload resumes where it stopped
+  ([ADR 0012](docs/adr/0012-resumable-uploads-in-parts.md)). The worker reads MP4, MOV, Matroska
+  and WebM files, and only the codecs lectures use, since anyone signed in can upload one.
 - Lectures from a link (`POST /v1/lectures/from-url`): a direct link to a video, or a page on
   YouTube, Vimeo, a Zoom share and the many other sites yt-dlp knows. The worker downloads it
   first, in a process of its own that can't reach anything but the public internet
@@ -119,6 +121,11 @@ curl -X PUT -H 'Content-Type: video/mp4' --data-binary @lecture.mp4 "$URL"
 # 3. Confirm the upload. The status becomes "uploaded".
 curl -s -X POST "localhost:8000/v1/lectures/$ID/complete-upload"
 ```
+
+To upload in parts instead, which can be resumed, replace step 2 with
+`POST /v1/lectures/$ID/upload-parts` and the file's size (`{"size_bytes": ...}`). It returns
+a URL for each part, and asking again lists the parts that have arrived
+([architecture](docs/architecture.md#upload-path-phase-1)).
 
 To browse stored files, open the SeaweedFS filer UI at http://localhost:8888.
 
@@ -776,8 +783,10 @@ from the blueprint in these places:
   embedding model stays on the CPU; set `SEARCH_MODE=hybrid`
   ([ADR 0005](docs/adr/0005-qdrant-for-hybrid-search.md),
   [ADR 0008](docs/adr/0008-where-the-models-run.md)).
-- **Uploads are a single presigned PUT** (up to 5 GiB), not resumable multipart through Uppy.
-  Worth adding when uploads get large or flaky.
+- **The web app still uploads in one presigned PUT**, not in resumable parts through Uppy. The
+  API's uploads in parts are in place
+  ([ADR 0012](docs/adr/0012-resumable-uploads-in-parts.md)); the web app's uploader moves to
+  them next.
 - **The player streams the uploaded MP4 directly** (a presigned URL with range requests) rather
   than HLS renditions. Transcoding to HLS comes back if other formats or adaptive bitrate are
   needed.

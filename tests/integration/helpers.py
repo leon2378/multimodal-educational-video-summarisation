@@ -9,14 +9,19 @@ from fastapi.testclient import TestClient
 
 
 def upload_lecture(client: TestClient, data: bytes, title: str) -> str:
+    """In parts, as the web app uploads (tests/integration/test_uploads.py has the details)."""
     created = client.post(
         "/v1/lectures",
         json={"title": title, "filename": "lecture.mp4", "content_type": "video/mp4"},
     ).json()
-    target = created["upload"]
-    put = httpx2.request(target["method"], target["url"], content=data, headers=target["headers"])
-    assert put.status_code == 200, put.text
     lecture_id: str = created["lecture"]["id"]
+    plan = client.post(
+        f"/v1/lectures/{lecture_id}/upload-parts", json={"size_bytes": len(data)}
+    ).json()
+    for part in plan["parts"]:
+        start = (part["number"] - 1) * plan["part_bytes"]
+        put = httpx2.put(part["url"], content=data[start : start + plan["part_bytes"]])
+        assert put.status_code == 200, put.text
     assert client.post(f"/v1/lectures/{lecture_id}/complete-upload").status_code == 200
     return lecture_id
 

@@ -22,6 +22,8 @@ class LectureCreate(BaseModel):
     licence: str | None = Field(default=None, max_length=100, examples=["CC BY-NC-SA 4.0"])
     attribution: str | None = Field(default=None, max_length=2000)
     course_id: uuid.UUID | None = None
+    # The file's size, when known: a file over the limit is refused before it's uploaded.
+    size_bytes: int | None = Field(default=None, ge=1, examples=[734003200])
 
 
 class LectureFromUrl(BaseModel):
@@ -55,6 +57,7 @@ class LectureOut(BaseModel):
     # The link it was downloaded from, for a lecture given as one.
     source_url: str | None
     content_type: str
+    # Before the upload's finished, the size its uploader gave.
     size_bytes: int | None
     duration_s: float | None
     # SHA-256 of the video, set by processing.
@@ -104,7 +107,35 @@ class UploadTarget(BaseModel):
 
 class LectureCreated(BaseModel):
     lecture: LectureOut
+    # One PUT of the whole file. To upload in parts instead, which can be resumed, ask
+    # upload-parts for the parts' URLs.
     upload: UploadTarget
+
+
+class UploadPartsRequest(BaseModel):
+    # The whole file's size. Resuming, it must be the size the upload started with.
+    size_bytes: int = Field(ge=1, examples=[734003200])
+
+
+class PartTarget(BaseModel):
+    number: int
+    url: str
+
+
+class PartsUpload(BaseModel):
+    """An upload in parts. Part n is the file's bytes from (n - 1) * part_bytes up to
+    n * part_bytes. PUT each one in `parts` to its URL, with no other headers, in any order
+    and several at a time, then POST complete-upload. Parts storage has already are left out.
+    The URLs expire: ask again for new ones."""
+
+    size_bytes: int
+    part_bytes: int
+    count: int
+    # The numbers of the parts storage has.
+    uploaded: list[int]
+    # The parts still to send.
+    parts: list[PartTarget]
+    expires_in_s: int
 
 
 class MediaOut(BaseModel):

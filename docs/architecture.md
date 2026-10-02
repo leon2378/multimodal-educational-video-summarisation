@@ -45,10 +45,27 @@ deleted after, with uploads transcribed on GPUs in Modal.
 ```
 
 1. `POST /v1/lectures` stores a lecture with status `awaiting_upload` and returns a presigned PUT
-   URL for `raw/{lecture_id}/source.{ext}`.
+   URL for `raw/{lecture_id}/source.{ext}`. Given the file's size, it refuses a file over the
+   limit before it's sent.
 2. The client uploads the file straight to storage. The API never handles video bytes.
 3. `POST /v1/lectures/{id}/complete-upload` checks the object exists and is within the size limit,
    then sets the status to `uploaded`. Calling it again returns the same result.
+
+**In parts, to resume** ([ADR 0012](adr/0012-resumable-uploads-in-parts.md)), for any client
+that knows the file's size:
+
+- **Step 2 becomes `POST /v1/lectures/{id}/upload-parts`**, with the file's size. It starts a
+  multipart upload and returns a presigned URL for each 16 MiB part. The client PUTs the parts
+  straight to storage, several at a time.
+- **Resuming:** asked again, after an interruption or once the URLs expire, upload-parts says
+  which parts storage has and gives URLs for the rest. Storage's own list is what counts, so the
+  browser keeps nothing but the file.
+- **Each part's URL is signed for its length**, so an upload can't grow past the size it started
+  with.
+- **`complete-upload` joins the parts** once storage has every one, and until then answers 409
+  saying how many are missing.
+- **Unfinished uploads:** deleting the lecture drops its parts. On the demo's bucket, a
+  lifecycle rule clears any upload left unfinished for a week, and resuming it then starts over.
 
 Lecture status: `awaiting_upload → uploaded → processing → ready`, or `failed` when a run
 fails. A ready or failed lecture can be processed again.
@@ -526,7 +543,9 @@ choices are [ADR 0010](adr/0010-on-demand-demo-on-google-cloud-and-modal.md).
 - **One origin**: Caddy gets a Let's Encrypt certificate for `<ip with dashes>.sslip.io` and
   sends the API's paths to the API and the rest to the web app, which is built with an empty
   API URL so it calls its own origin; server-sent events go through unbuffered. Media skip it:
-  presigned URLs go straight to the bucket, which allows any origin to use them.
+  presigned URLs go straight to the bucket, which allows any origin to use them. The bucket
+  clears uploads in parts left unfinished for 7 days, whose parts would otherwise be billed
+  unseen.
 - **The demo lectures**: `lecture-demo export` (on a dev machine, against the local stack)
   writes the public, processed lectures and their course to `demo/` (videos and a manifest) and
   the stage cache to `artifacts/`, as laid out in the bucket. On the VM's first boot, with

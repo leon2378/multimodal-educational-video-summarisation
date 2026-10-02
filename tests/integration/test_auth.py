@@ -114,6 +114,8 @@ def test_a_lecture_belongs_to_whoever_uploaded_it(api: TestClient) -> None:
     assert api.get(path, headers=as_(alice)).status_code == 200
     assert api.get(path, headers=as_(bob)).status_code == 404
     assert api.post(f"{path}/process", headers=as_(bob)).status_code == 404
+    parts = api.post(f"{path}/upload-parts", json={"size_bytes": 10}, headers=as_(bob))
+    assert parts.status_code == 404
     assert api.patch(path, json={"course_id": None}, headers=as_(bob)).status_code == 404
     # Only admins publish.
     assert api.patch(path, json={"visibility": "public"}, headers=as_(alice)).status_code == 403
@@ -161,6 +163,25 @@ def test_uploads_are_limited_per_day_except_for_admins(api: TestClient) -> None:
     assert (usage["uploads_today"], usage["uploads_per_day"]) == (2, 2)
     for _ in range(3):
         new_lecture(api, "admin")
+
+
+def test_a_file_over_the_size_limit_doesnt_use_up_an_upload(api: TestClient) -> None:
+    alice = who("alice")
+    limit = api.get("/v1/me", headers=as_(alice)).json()["quotas"]["upload_bytes"]
+
+    too_big = api.post(
+        "/v1/lectures",
+        json={
+            "title": "x",
+            "filename": "x.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": limit + 1,
+        },
+        headers=as_(alice),
+    )
+
+    assert too_big.status_code == 413
+    assert api.get("/v1/me", headers=as_(alice)).json()["quotas"]["uploads_today"] == 0
 
 
 class _Index:

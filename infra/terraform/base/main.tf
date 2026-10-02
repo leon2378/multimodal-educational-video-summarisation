@@ -55,6 +55,17 @@ resource "google_storage_bucket" "media" {
     response_header = ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]
     max_age_seconds = 3600
   }
+  # An upload in parts left unfinished keeps its parts, billed but out of sight in listings
+  # (docs/adr/0012-resumable-uploads-in-parts.md). After a week it's cleared; resuming it then
+  # starts over.
+  lifecycle_rule {
+    condition {
+      age = 7
+    }
+    action {
+      type = "AbortIncompleteMultipartUpload"
+    }
+  }
   depends_on = [google_project_service.apis]
 }
 

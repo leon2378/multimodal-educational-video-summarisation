@@ -204,11 +204,11 @@ export interface paths {
         post?: never;
         /**
          * Delete Lecture
-         * @description Delete the lecture everywhere: its video, its passages in the search index, its results,
-         *     processing history and conversations. What processing computed stays in the stage cache,
-         *     where another upload of the same video finds it (docs/adr/0001-stage-cache.md). Its owner or
-         *     an admin only, and not while it's processing. What it used still counts towards today's
-         *     quotas.
+         * @description Delete the lecture everywhere: its video (or an unfinished upload's parts), its passages
+         *     in the search index, its results, processing history and conversations. What processing
+         *     computed stays in the stage cache, where another upload of the same video finds it
+         *     (docs/adr/0001-stage-cache.md). Its owner or an admin only, and not while it's processing.
+         *     What it used still counts towards today's quotas.
          */
         delete: operations["delete_lecture_v1_lectures__lecture_id__delete"];
         options?: never;
@@ -255,6 +255,8 @@ export interface paths {
         /**
          * Complete Upload
          * @description Idempotent: confirming an upload that's already confirmed returns the lecture unchanged.
+         *     An upload in parts is joined first, once storage has every part; until then it's a 409
+         *     saying how many are missing.
          */
         post: operations["complete_upload_v1_lectures__lecture_id__complete_upload_post"];
         delete?: never;
@@ -427,6 +429,30 @@ export interface paths {
         get: operations["transcript_v1_lectures__lecture_id__transcript_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/lectures/{lecture_id}/upload-parts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Parts
+         * @description Upload the video in parts, which can be resumed: the parts storage has, and a URL for
+         *     each of the others. Ask again to resume after an interruption, or for new URLs when they
+         *     expire. The first call starts the upload for a file of `size_bytes`, and later ones must
+         *     give the same size. An upload left unfinished for a week is cleared, and resuming it then
+         *     starts again (docs/adr/0012-resumable-uploads-in-parts.md).
+         */
+        post: operations["upload_parts_v1_lectures__lecture_id__upload_parts_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -727,6 +753,11 @@ export interface components {
              * @example CC BY-NC-SA 4.0
              */
             licence?: string | null;
+            /**
+             * Size Bytes
+             * @example 734003200
+             */
+            size_bytes?: number | null;
             /** Title */
             title: string;
         };
@@ -891,6 +922,34 @@ export interface components {
             notes: components["schemas"]["StudyNotes"];
             /** Run Id */
             run_id: string | null;
+        };
+        /** PartTarget */
+        PartTarget: {
+            /** Number */
+            number: number;
+            /** Url */
+            url: string;
+        };
+        /**
+         * PartsUpload
+         * @description An upload in parts. Part n is the file's bytes from (n - 1) * part_bytes up to
+         *     n * part_bytes. PUT each one in `parts` to its URL, with no other headers, in any order
+         *     and several at a time, then POST complete-upload. Parts storage has already are left out.
+         *     The URLs expire: ask again for new ones.
+         */
+        PartsUpload: {
+            /** Count */
+            count: number;
+            /** Expires In S */
+            expires_in_s: number;
+            /** Part Bytes */
+            part_bytes: number;
+            /** Parts */
+            parts: components["schemas"]["PartTarget"][];
+            /** Size Bytes */
+            size_bytes: number;
+            /** Uploaded */
+            uploaded: number[];
         };
         /** Progress */
         Progress: {
@@ -1193,6 +1252,14 @@ export interface components {
             start_s: number;
             /** Text */
             text: string;
+        };
+        /** UploadPartsRequest */
+        UploadPartsRequest: {
+            /**
+             * Size Bytes
+             * @example 734003200
+             */
+            size_bytes: number;
         };
         /**
          * UploadTarget
@@ -2051,6 +2118,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TranscriptLineOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_parts_v1_lectures__lecture_id__upload_parts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lecture_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadPartsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartsUpload"];
                 };
             };
             /** @description Validation Error */

@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -55,8 +55,13 @@ class Settings(BaseSettings):
     langfuse_host: str = "https://cloud.langfuse.com"
 
     upload_url_ttl_s: int = 3600
-    # A single presigned PUT tops out at 5 GiB on S3. Multipart uploads arrive with the web app.
+    # The biggest video a lecture may have; quotas lower it for signed-in users. One presigned PUT
+    # can't take more than 5 GiB anyway, though an upload in parts could.
     max_upload_bytes: int = 5 * 1024**3
+    # Uploads in parts (docs/adr/0012-resumable-uploads-in-parts.md): each part's size, but the
+    # last's. Storage wants at least 5 MiB. Bigger parts mean fewer requests, smaller ones less
+    # to send again when one fails.
+    upload_part_bytes: int = Field(default=16 * 1024**2, ge=5 * 1024**2)
     # Tests only: lets links to this machine through the API's check (lecture_core.links), for
     # the integration tests' web server. The worker checks every connection regardless.
     allow_private_links: bool = False

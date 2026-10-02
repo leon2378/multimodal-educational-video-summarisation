@@ -6,6 +6,10 @@ Upload flow:
     2. client PUTs the file straight to storage  (the API never sees the bytes)
     3. POST /v1/lectures/{id}/complete-upload    -> API checks the object exists and its size
 
+Or, to resume after an interruption, in parts (docs/adr/0012-resumable-uploads-in-parts.md):
+step 2 becomes POST /v1/lectures/{id}/upload-parts for a URL per part, again to resume, and
+complete-upload joins the parts first.
+
 Or POST /v1/lectures/from-url: processing starts at once and downloads the video first.
 """
 
@@ -33,6 +37,9 @@ from lecture_api.schemas import (
     LectureOut,
     LectureUpdate,
     MediaOut,
+    PartsUpload,
+    PartTarget,
+    UploadPartsRequest,
     UploadTarget,
 )
 from lecture_core.links import LinkError, check_url
@@ -45,7 +52,8 @@ from lecture_core.models import (
     Visibility,
 )
 from lecture_core.processing import workflow_id
-from lecture_core.storage import source_key
+from lecture_core.settings import Settings
+from lecture_core.storage import ObjectStorage, PartPlan, UploadedPart, source_key
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
 
@@ -59,6 +67,8 @@ async def create_lecture(
     viewer: SignedInDep,
 ) -> LectureCreated:
     """A signed-in user's lecture is private to them. Without sign-in (local), it's public."""
+    if body.size_bytes is not None:
+        _check_size(body.size_bytes, quotas.upload_limit(viewer, settings))
     await quotas.check_upload(session, viewer, settings)
     if body.course_id is not None:
         await _joinable(session, body.course_id, viewer)
@@ -72,6 +82,7 @@ async def create_lecture(
         source_key=source_key(lecture_id, body.filename),
         source_filename=body.filename,
         content_type=body.content_type,
+        size_bytes=body.size_bytes,
         licence=body.licence,
         attribution=body.attribution,
     )
@@ -190,6 +201,67 @@ async def update_lecture(
     return LectureOut.model_validate(lecture)
 
 
+@router.post("/{lecture_id}/upload-parts")
+async def upload_parts(
+    lecture_id: uuid.UUID,
+    body: UploadPartsRequest,
+    session: SessionDep,
+    storage: StorageDep,
+    settings: SettingsDep,
+    viewer: SignedInDep,
+) -> PartsUpload:
+    """Upload the video in parts, which can be resumed: the parts storage has, and a URL for
+    each of the others. Ask again to resume after an interruption, or for new URLs when they
+    expire. The first call starts the upload for a file of `size_bytes`, and later ones must
+    give the same size. An upload left unfinished for a week is cleared, and resuming it then
+    starts again (docs/adr/0012-resumable-uploads-in-parts.md)."""
+    lecture = await own_lecture(session, lecture_id, viewer)
+    if lecture.status != LectureStatus.AWAITING_UPLOAD:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Lecture is already {lecture.status}.")
+    _check_size(body.size_bytes, quotas.upload_limit(viewer, settings))
+    if lecture.upload_id is not None and body.size_bytes != lecture.size_bytes:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"This upload is of a file of {lecture.size_bytes} bytes, not {body.size_bytes}. "
+            "Choose the same file, or delete the lecture and add it again.",
+        )
+
+    upload_id = lecture.upload_id
+    uploaded: list[UploadedPart] | None = None
+    if upload_id is not None:
+        uploaded = await run_in_threadpool(storage.uploaded_parts, lecture.source_key, upload_id)
+    if upload_id is None or uploaded is None:
+        # Not started yet, or cleared unfinished: from the first part.
+        upload_id = await run_in_threadpool(
+            storage.start_upload, lecture.source_key, lecture.content_type
+        )
+        lecture.upload_id, lecture.size_bytes = upload_id, body.size_bytes
+        await session.commit()
+        uploaded = []
+
+    plan = PartPlan.for_size(body.size_bytes, settings.upload_part_bytes)
+    done = plan.matching(uploaded)
+    to_send = [number for number in range(1, plan.count + 1) if number not in done]
+    # Signing is local HMAC work, but a few hundred URLs add up: off the event loop.
+    parts = await run_in_threadpool(
+        _sign_parts,
+        storage,
+        lecture.source_key,
+        upload_id,
+        plan,
+        to_send,
+        settings.upload_url_ttl_s,
+    )
+    return PartsUpload(
+        size_bytes=plan.size_bytes,
+        part_bytes=plan.part_bytes,
+        count=plan.count,
+        uploaded=sorted(done),
+        parts=parts,
+        expires_in_s=settings.upload_url_ttl_s,
+    )
+
+
 @router.post("/{lecture_id}/complete-upload")
 async def complete_upload(
     lecture_id: uuid.UUID,
@@ -198,13 +270,19 @@ async def complete_upload(
     settings: SettingsDep,
     viewer: SignedInDep,
 ) -> LectureOut:
-    """Idempotent: confirming an upload that's already confirmed returns the lecture unchanged."""
+    """Idempotent: confirming an upload that's already confirmed returns the lecture unchanged.
+    An upload in parts is joined first, once storage has every part; until then it's a 409
+    saying how many are missing."""
     lecture = await own_lecture(session, lecture_id, viewer)
     if lecture.status == LectureStatus.UPLOADED:
         return LectureOut.model_validate(lecture)
     if lecture.status != LectureStatus.AWAITING_UPLOAD:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Lecture is already {lecture.status}.")
 
+    if lecture.upload_id is not None and lecture.size_bytes is not None:
+        await _join_parts(
+            storage, settings, lecture.source_key, lecture.upload_id, lecture.size_bytes
+        )
     info = await run_in_threadpool(storage.head, lecture.source_key)
     if info is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "No uploaded file found for this lecture.")
@@ -217,6 +295,7 @@ async def complete_upload(
         )
 
     lecture.size_bytes = info.size
+    lecture.upload_id = None
     lecture.status = LectureStatus.UPLOADED
     await session.commit()
     await session.refresh(lecture)
@@ -251,11 +330,11 @@ async def delete_lecture(
     searcher: SearcherDep,
     viewer: SignedInDep,
 ) -> None:
-    """Delete the lecture everywhere: its video, its passages in the search index, its results,
-    processing history and conversations. What processing computed stays in the stage cache,
-    where another upload of the same video finds it (docs/adr/0001-stage-cache.md). Its owner or
-    an admin only, and not while it's processing. What it used still counts towards today's
-    quotas."""
+    """Delete the lecture everywhere: its video (or an unfinished upload's parts), its passages
+    in the search index, its results, processing history and conversations. What processing
+    computed stays in the stage cache, where another upload of the same video finds it
+    (docs/adr/0001-stage-cache.md). Its owner or an admin only, and not while it's processing.
+    What it used still counts towards today's quotas."""
     lecture = await own_lecture(session, lecture_id, viewer)
     if lecture.status == LectureStatus.PROCESSING:
         raise HTTPException(
@@ -269,9 +348,61 @@ async def delete_lecture(
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Search is unavailable right now. Try again soon."
         ) from error
+    if lecture.upload_id is not None:
+        await run_in_threadpool(storage.abort_upload, lecture.source_key, lecture.upload_id)
     await run_in_threadpool(storage.delete, lecture.source_key)
     await session.delete(lecture)
     await session.commit()
+
+
+def _check_size(size: int, limit: int) -> None:
+    if size > limit:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE, f"File is {size} bytes; the limit is {limit}."
+        )
+
+
+def _sign_parts(
+    storage: ObjectStorage,
+    key: str,
+    upload_id: str,
+    plan: PartPlan,
+    numbers: list[int],
+    expires_in_s: int,
+) -> list[PartTarget]:
+    return [
+        PartTarget(
+            number=number,
+            url=storage.presign_part(key, upload_id, number, plan.size_of(number), expires_in_s),
+        )
+        for number in numbers
+    ]
+
+
+async def _join_parts(
+    storage: ObjectStorage, settings: Settings, key: str, upload_id: str, size_bytes: int
+) -> None:
+    """Join an upload's parts into the video, once storage has every one."""
+    plan = PartPlan.for_size(size_bytes, settings.upload_part_bytes)
+    uploaded = await run_in_threadpool(storage.uploaded_parts, key, upload_id)
+    if uploaded is None:
+        # Joined by a request just before this one, or cleared unfinished: whether the video
+        # is there tells which.
+        return
+    parts = plan.matching(uploaded)
+    missing = [number for number in range(1, plan.count + 1) if number not in parts]
+    if len(missing) == 1:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"Part {missing[0]} of {plan.count} hasn't been uploaded yet."
+        )
+    if missing:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{len(missing)} of the {plan.count} parts haven't been uploaded yet, starting with "
+            f"part {missing[0]}.",
+        )
+    ordered = [parts[number] for number in range(1, plan.count + 1)]
+    await run_in_threadpool(storage.finish_upload, key, upload_id, ordered)
 
 
 def _title_from(url: str) -> str:

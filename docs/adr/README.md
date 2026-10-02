@@ -17,6 +17,7 @@ old one "Superseded by NNNN" instead of editing it.
 | [0009](0009-clerk-sign-in-and-quotas.md) | Clerk for sign-in, public demo lectures, and quotas counted in Postgres | Accepted |
 | [0010](0010-on-demand-demo-on-google-cloud-and-modal.md) | The demo on an on-demand Google Cloud VM, GPU work on Modal | Accepted |
 | [0011](0011-lectures-from-any-link.md) | Lectures from any link, downloaded by a guarded yt-dlp | Accepted |
+| [0012](0012-resumable-uploads-in-parts.md) | Resumable uploads in parts, each straight to storage | Accepted |
 
 ## Still to write
 
