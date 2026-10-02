@@ -16,7 +16,7 @@ reranker had already moved to the GPU: on the CPU it took 77 seconds a query
 ([ADR 0005](0005-qdrant-for-hybrid-search.md)). The GPU is an RTX 3060 Laptop with 6 GB.
 
 Phase 5c measured each model every way it could run, on that laptop, and scored every variant
-(`lecture-bench`; the tables are in the README):
+(`lecture-bench`; the tables are in [results.md](../results.md#speed)):
 
 - **Embedding model**, Lecture 10's 47 chunks: 218 s on the CPU (fp32), 1.4 s on the GPU
   (fp16), with the same vectors (mean cosine 1.0000) and search scores. A question: 437 ms

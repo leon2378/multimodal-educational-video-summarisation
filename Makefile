@@ -11,9 +11,12 @@ PROJECT = $(shell sed -n 's/^project_id *= *"\(.*\)"/\1/p' $(TFVARS))
 REGION = $(shell sed -n 's/^region *= *"\(.*\)"/\1/p' $(TFVARS))
 TERRAFORM = terraform -chdir=infra/terraform/$(1)
 TF_INIT = $(call TERRAFORM,$(1)) init -input=false -backend-config=bucket=$(PROJECT)-tfstate
+# The speech model the GPU worker loads, at the revision the code expects.
+WHISPER_DIR := data/models/faster-whisper-large-v3-turbo
+WHISPER_REVISION := 0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf
 
 .DEFAULT_GOAL := help
-.PHONY: help install up app observability gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval detector-data detector-train bench modal-model modal cloud-base cloud-secrets cloud-seed deploy destroy test test-unit lint fmt typecheck audit check
+.PHONY: help install speech-model up app observability gpu-worker worker web openapi down reset migrate revision api process eval eval-retrieval detector-data detector-train bench modal-model modal cloud-base cloud-secrets cloud-seed deploy destroy test test-unit lint fmt typecheck audit check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-15s %s\n", $$1, $$2}'
@@ -21,6 +24,13 @@ help: ## List targets
 install: ## Install Python dependencies and git hooks
 	uv sync
 	uv run pre-commit install
+
+speech-model: ## Download the speech model (1.6 GB, MIT licence) into data/models/ and check it
+	mkdir -p $(WHISPER_DIR)
+	cd $(WHISPER_DIR) && for f in config.json preprocessor_config.json tokenizer.json vocabulary.json model.bin; do \
+		test -f $$f || curl -fLO "https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo/resolve/$(WHISPER_REVISION)/$$f"; \
+	done
+	echo "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da  $(WHISPER_DIR)/model.bin" | sha256sum -c -
 
 up: ## Start Postgres, SeaweedFS, Temporal (UI on http://localhost:8233), Qdrant and the embedding server
 	$(COMPOSE) up -d --wait postgres seaweedfs temporal qdrant embeddings

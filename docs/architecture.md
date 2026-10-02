@@ -3,7 +3,7 @@
 The target design is in [blueprint.md](blueprint.md). This page describes what exists now and
 changes as each phase lands.
 
-## Current state: Phase 6 under way (the on-demand cloud demo built, its first run next)
+## Current state: all six phases built, the demo deployed and tested
 
 A lecture goes from upload in the browser to study notes: the web app uploads straight to
 storage and asks the API to process; the API starts a Temporal workflow; workers run the
@@ -257,16 +257,18 @@ lectures.
   course when it runs. So moving a lecture between courses needs no re-indexing. The blueprint
   put `course_id` in each point's payload instead, which would have to be rewritten on every
   move.
-- A time alone is ambiguous across lectures, so a course answer labels each lecture L1, L2, ...
-  in the order its passages first come up, shows each sentence as `[L2 12:34]`, and cites the
-  same way (`prompts/qa/course-answer.v1.md`). The check maps the label back to the lecture's
-  passages, and each source carries its lecture's label and title, so the web app can open the
-  right lecture at the cited moment (`/lectures/{id}?t=seconds`).
+- A time alone is ambiguous across lectures, so a course answer labels each lecture by its
+  number in the course, as the course page lists them (by when they were added): L3 is the
+  third. It shows each sentence as `[L3 12:34]` and cites the same way
+  (`prompts/qa/course-answer.v1.md`). The check maps the label back to the lecture's passages,
+  and each source carries its lecture's label and title, so the web app can open the right
+  lecture at the cited moment (`/lectures/{id}?t=seconds`). Labels first followed the order the
+  passages came up in, so an answer's L2 could sit beside the course page's "Lecture 2", a
+  different lecture.
 
 On a course holding Lecture 10 and a short Lecture 1 exercise, "why was nothing shown on the
-console in the print exercise?" was answered from the exercise with a valid `[L1 01:04]`, which
-opens that lecture at 1:04. A big-O question was answered from Lecture 10 with citations like
-`[L1 29:30]`: there Lecture 10 was L1, because its passages came up first.
+console in the print exercise?" was answered from the exercise with a valid citation that opens
+it at 1:04, and a big-O question from Lecture 10, at 29:30.
 
 ### Evals (Phase 4a)
 
@@ -402,8 +404,9 @@ so a second run only redoes stages whose inputs, version, model, params or promp
 - **Slide text**: the vision LLM also writes LaTeX into a slide's plain text (`\gamma = 0`,
   `s \in S`), starts the text with the title shown above it, and lists a formula twice; OCR
   reads big-O's O as a zero (0(n log n)). Each reading is tidied as it's read, the same way:
-  LaTeX in text becomes readable (γ = 0, s ∈ S, Q̂_φ), the title isn't repeated, each formula
-  is listed once, and an OCR reading's 0(...) becomes O(...).
+  LaTeX in text becomes readable (γ = 0, s ∈ S, Q̂_φ), the title is one line and the text
+  doesn't repeat it (on one line or over several, as the slide sets it), each formula is listed
+  once, and an OCR reading's 0(...) becomes O(...).
 - **Formulas in place**: a slide's formulas are listed apart from its text, and the text often
   writes them out too, so the web app showed them twice. The API also gives the text in parts,
   with each formula it writes out in its place (`place_formulas`): found however it's spelled
@@ -460,8 +463,8 @@ Every slide is OCR'd, and only the slides OCR can't handle go to the vision LLM
   `ocr`. `vlm` keeps the cache key slide reading always had, so lectures read before 5a aren't
   read again.
 - **Evaluated** by the `slides` suite against the lecture's slide PDF, and by the other suites
-  on the notes and answers made from each reading (the comparison is in the README's
-  results). Routed reading matched or beat the vision LLM on slide text, search and answers,
+  on the notes and answers made from each reading (the comparison is in
+  [results.md](results.md#slide-reading)). Routed reading matched or beat the vision LLM on slide text, search and answers,
   at 55% of its cost; the notes, written again from the new reading, cited 9 of 11 checkable
   concepts near where they're said, against 9 of 10.
 - **The slides no longer wait for speech recognition**: reading needs only the slides. In a
@@ -473,7 +476,8 @@ Every slide is OCR'd, and only the slides OCR can't handle go to the vision LLM
 
 RF-DETR Nano ([ADR 0007](adr/0007-rf-detr-for-the-frame-detector.md)) finding four things in a
 video frame: the slide, people, figures and annotations. It lives in `ml/detector`
-(`lecture-detector`), outside the pipeline; results are in the README.
+(`lecture-detector`), outside the pipeline; results are in
+[results.md](results.md#frame-detector).
 
 ```
  slide PDF ─► pages rendered ─► vision LLM boxes figures, annotations (once per page, saved)
@@ -511,7 +515,7 @@ video frame: the slide, people, figures and annotations. It lives in `ml/detecto
 
 `ml/bench` (`lecture-bench`, `make bench`) measures the three models the stack runs itself,
 every way they could run, on one laptop, and scores each variant with the eval suites' own
-measures. The tables are in the README; what they decided is
+measures. The tables are in [results.md](results.md#speed); what they decided is
 [ADR 0008](adr/0008-where-the-models-run.md).
 
 - **Embeddings** (`lecture-bench embeddings`): Lecture 10's chunks as the index holds them,
@@ -627,18 +631,24 @@ choices are [ADR 0010](adr/0010-on-demand-demo-on-google-cloud-and-modal.md).
   the VM (`replace_triggered_by`), since its startup script reads the release only at boot; a
   metadata change alone would leave the old images running. Destroying also deletes the
   session's uploads (`raw/`) from the bucket.
+- **In use**: deployed for each release from v0.6.1 to v0.6.9 and tested there: signing in
+  on the sslip.io origin (Clerk's development instance accepts it), uploads in parts to
+  Cloud Storage, lectures from a file and from a YouTube link transcribed on Modal, Q&A, and
+  the screenshots in the README. The demo's lectures load from the cache in about 20 s, and
+  a session costs cents.
 
 ### Known limitations
 
 - Slide detection assumes light slides on a dark hall, as in MIT OCW recordings. Two slides with the
   same template and layout can merge: in 6.0001 Lecture 10, "Law of Addition" and "Law of
-  Multiplication" become one. Phase 5's detector (crop the slide, mask the presenter) is meant to
-  fix both. OCR's slide area and ink measure make the same light-slide assumption.
-- OCR reads lines top to bottom, so text written across a slide interleaves with the slide's
-  own lines. Routing sends such slides to the vision LLM; with `SLIDE_READER=ocr` one answer
+  Multiplication" become one. The frame detector (crop the slide, mask the presenter) is meant to
+  fix both, once it's in the pipeline. OCR's slide area and ink measure make the same light-slide assumption.
+- OCR reads lines top to bottom, so text written across a slide, or set side by side, interleaves
+  with the slide's own lines. Routing sends such slides to the vision LLM; with `SLIDE_READER=ocr` one answer
   in Lecture 10's eval missed a bullet that way. Routing thresholds were set on one lecture.
-- No verification pass yet (flagging claims the cited segments don't support). It comes with the
-  eval suites in Phase 4.
+- No verification pass (flagging claims the cited segments don't support): a citation is
+  checked for where it points, not for what it's cited for. The eval suites' judge does that
+  offline.
 - Chunks follow slides, and lecturers often start the next topic before changing slide. In
   Lecture 10 the explanation of primitive operations (12:46 to 13:15) is spoken under the
   previous slide, so its chunk leads with the wrong slide text, and search ranks the next
@@ -653,8 +663,6 @@ choices are [ADR 0010](adr/0010-on-demand-demo-on-google-cloud-and-modal.md).
   (the Lecture 1 exercise) and how to compare algorithms (Lecture 10), the answer covered the
   second and said the course doesn't seem to cover the first. Splitting such questions, or
   keeping a segment from each lecture that matches well, would help.
-- Lectures processed before search existed (Phase 3a) aren't indexed. Processing one again
-  indexes it, and only the embedding and indexing steps run: the rest is cached.
 - Without a GPU, embedding runs on the CPU, at about 75 tokens a second on a Ryzen 7 5800H:
   3.5 minutes for a 51-minute lecture on an idle machine, the slowest stage, and a lecture is
   ready only once it's indexed. The GPU takes 1.4 s.
@@ -666,11 +674,12 @@ choices are [ADR 0010](adr/0010-on-demand-demo-on-google-cloud-and-modal.md).
   get wrong vectors. The GPU server got 60 such bursts right, and every vector in the index
   was checked. Worth reporting to TEI.
 
-## Next: shipping (Phase 6), and a detector that routes as well as the rule
+## Next
 
-Phase 6c's code is built and rehearsed locally; the first deploy to Google Cloud and Modal
-comes next, which also settles whether Clerk's development instance accepts an sslip.io origin.
-Then 6d: the results write-up, a diagram and screenshots.
+The blueprint's features not built yet: HLS streaming, an endpoint to re-run one stage,
+answers rated unhelpful turned into eval cases, an ADR for running at scale, and a demo export
+that leaves out private lectures' cached results. The frame detector joins the pipeline once it
+routes slides as well as the rule.
 
 The detector finds slides (AP 1.00) and people (0.99) on the held-out lectures, and a slide
 playing a video, which the brightness test misses; but trained on ten lectures it still routes
