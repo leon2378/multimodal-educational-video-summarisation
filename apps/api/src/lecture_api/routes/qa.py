@@ -355,8 +355,10 @@ async def _answer(
         ]
         answer.sources = [source.model_dump(mode="json") for source in sources]
         yield _sse(AskSources(search_query=query, sources=sources))
+        # The answer gets the question as it reads on its own, as search did: with the
+        # conversation alone, the model took a follow-up's "summarise it" for the whole lecture.
         deltas = (
-            answerer.stream_answer(question.content, passages, history, usage, outline)
+            answerer.stream_answer(query, passages, history, usage, outline)
             if passages
             else _just(scope.nothing_found)
         )

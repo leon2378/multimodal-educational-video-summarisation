@@ -6,9 +6,9 @@ section 3). Times are seconds from the start of the video.
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
-from lecture_core.latex import LaTeX
+from lecture_core.latex import Formulas, PlainText
 
 
 class Word(BaseModel):
@@ -56,14 +56,25 @@ class SlideDeck(BaseModel):
 
 
 class SlideReading(BaseModel):
+    """What a slide says. A reading is tidied whenever it's read, from the model, the cache or
+    the database (lecture_core.latex): LaTeX in its text is made readable, a formula listed
+    twice is listed once, and text that starts by repeating the title, shown above it, doesn't."""
+
     slide_id: int
-    title: str
-    text: str
-    figure_description: str
-    latex: list[LaTeX]
+    title: PlainText
+    text: PlainText
+    figure_description: PlainText
+    latex: Formulas
     code: str
     # Who read it: the vision LLM, or OCR alone (slides with only text; see lecture_perception.ocr).
     reader: Literal["vlm", "ocr"] = "vlm"
+
+    @model_validator(mode="after")
+    def _text_without_its_title(self) -> "SlideReading":
+        first, _, rest = self.text.partition("\n")
+        if self.title and first.strip().casefold() == self.title.strip().casefold():
+            self.text = rest.lstrip("\n")
+        return self
 
 
 class TimelineSegment(BaseModel):

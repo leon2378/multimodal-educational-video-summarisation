@@ -1,8 +1,9 @@
-"""LaTeX a model escaped twice is repaired wherever it's read (lecture_core.latex)."""
+"""LaTeX a model escaped twice is repaired, and LaTeX it wrote into plain text made readable,
+wherever either is read (lecture_core.latex)."""
 
 import pytest
 
-from lecture_core.latex import undouble_backslashes
+from lecture_core.latex import plain, undouble_backslashes
 from lecture_core.notes import Formula, StudyNotes
 from lecture_core.timeline import SlideReading
 
@@ -84,3 +85,58 @@ def test_a_formula_shown_again_is_listed_once() -> None:
     )
 
     assert [(f.latex, f.at_s) for f in notes.formulas] == [(REPAIRED, 2035), (r"\gamma", 2100)]
+
+
+@pytest.mark.parametrize(
+    ("text", "readable"),
+    [
+        # From slide readings of the two test lectures.
+        (
+            r"- \gamma = 0: Only care about immediate reward",
+            "- γ = 0: Only care about immediate reward",
+        ),
+        (r"S is a (finite) set of states (s \in S)", "S is a (finite) set of states (s ∈ S)"),
+        (r"S_4, S_5, S_6, \dots", "S_4, S_5, S_6, …"),
+        (r"Sample \bar{a}'_i \sim \pi_{\theta}(\cdot|s'_i)", "Sample a\u0304'_i ∼ π_θ(·|s'_i)"),
+        (r"an estimate \hat{Q}^{\pi}(s, a)", "an estimate Q\u0302^π(s, a)"),
+        (r"a batch \{s_i, a_i, r_i, s'_i\} from R", "a batch {s_i, a_i, r_i, s'_i} from R"),
+        (r"a_t = \arg\max_{\mathbf{a}} Q_{\phi}(s_t, a)", "a_t = argmax_a Q_φ(s_t, a)"),
+        (r"R(s) = \mathbb{E}[r_t | s_t = s]", "R(s) = 𝔼[r_t | s_t = s]"),
+        (r"\alpha \sum_i \frac{dQ_{\phi}}{d\phi}", "α ∑_i (dQ_φ)/(dφ)"),
+        (r"1 & \text{if } x \\ 0 & \text{otherwise}", "1 & if x 0 & otherwise"),
+        # Escaped twice, as a formula can be.
+        ("\\\\gamma = 1", "γ = 1"),
+    ],
+)
+def test_latex_in_plain_text_is_made_readable(text: str, readable: str) -> None:
+    assert plain(text) == readable
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Costs 50% of $10 & more {x}",
+        r"C:\Users\me",
+        "  - a nested bullet, indented",
+        "",
+    ],
+)
+def test_text_without_latex_is_left_alone(text: str) -> None:
+    assert plain(text) == text
+
+
+def test_a_slide_reading_is_tidied_when_read() -> None:
+    reading = SlideReading.model_validate(
+        {
+            "slide_id": 12,
+            "title": "Discount Factor",
+            "text": "Discount Factor\n- \\gamma = 0: Only care about immediate reward",
+            "figure_description": "",
+            "latex": [r"\gamma = 0", r"\gamma = 1", r"\gamma < 1", r"\gamma = 1"],
+            "code": "",
+        }
+    )
+
+    # The title isn't repeated, the text reads as text, and each formula is listed once.
+    assert reading.text == "- γ = 0: Only care about immediate reward"
+    assert reading.latex == [r"\gamma = 0", r"\gamma = 1", r"\gamma < 1"]

@@ -20,6 +20,7 @@ from lecture_api.schemas import (
 )
 from lecture_core.models import SlideRow, SummaryRow, TimelineSegmentRow, TranscriptSegmentRow
 from lecture_core.notes import StudyNotes
+from lecture_core.timeline import SlideReading
 
 router = APIRouter(prefix="/lectures", tags=["results"])
 
@@ -50,17 +51,20 @@ async def slides(
     rows = await session.scalars(
         select(SlideRow).where(SlideRow.lecture_id == lecture_id).order_by(SlideRow.slide_id)
     )
+    # Through SlideReading, which tidies what the model wrote, as Q&A reads it.
     return [
         SlideOut(
-            slide_id=row.slide_id,
+            **SlideReading(
+                slide_id=row.slide_id,
+                title=row.title,
+                text=row.text,
+                figure_description=row.figure_description,
+                latex=row.latex,
+                code=row.code,
+                reader=row.reader,
+            ).model_dump(),
             image_url=storage.presign_get(row.image_key, settings.upload_url_ttl_s),
             first_seen_s=row.first_seen_s,
-            title=row.title,
-            text=row.text,
-            figure_description=row.figure_description,
-            latex=row.latex,
-            code=row.code,
-            reader=row.reader,
             spans=[TimeSpan.model_validate(span) for span in row.spans],
         )
         for row in rows

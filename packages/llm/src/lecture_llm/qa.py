@@ -37,7 +37,7 @@ class QAPrompts:
     @classmethod
     def load(cls, prompts_dir: Path) -> "QAPrompts":
         return cls(
-            answer=Prompt.load(prompts_dir, "answer.v3"),
+            answer=Prompt.load(prompts_dir, "answer.v4"),
             course_answer=Prompt.load(prompts_dir, "course-answer.v1"),
             rewrite=Prompt.load(prompts_dir, "rewrite.v1"),
         )

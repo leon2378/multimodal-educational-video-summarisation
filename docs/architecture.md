@@ -215,8 +215,10 @@ Code in `apps/api/src/lecture_api/routes/qa.py`, `packages/llm` (`qa`) and `pack
    - to use only the passages and outline;
    - to cite by copying a sentence's time, or a chapter's start for a question about the
      lecture's order or the whole lecture;
-   - to answer the whole lecture chapter by chapter from their summaries;
-   - to say when the lecture doesn't cover the question (`prompts/qa/answer.v3.md`).
+   - to answer the whole lecture chapter by chapter from their summaries, in as many points as
+     the question asks for;
+   - to take a follow-up such as "summarise it" as being about what was just discussed;
+   - to say when the lecture doesn't cover the question (`prompts/qa/answer.v4.md`).
 
    The answer streams out as it's written.
 5. Every `[mm:ss]` in the answer is checked: valid if it falls inside a retrieved segment or on a
@@ -388,6 +390,10 @@ so a second run only redoes stages whose inputs, version, model, params or promp
   (`lecture_core.latex`). The repair runs when slide readings and notes are read, from the model,
   the cache or the database, so lectures read before it are repaired too. Notes list a formula
   shown again later, on a recap slide, once, where it first appears.
+- **Slide text**: the vision LLM also writes LaTeX into a slide's plain text (`\gamma = 0`,
+  `s \in S`), starts the text with the title shown above it, and lists a formula twice. Each
+  reading is tidied as it's read, the same way: LaTeX in text becomes readable (γ = 0, s ∈ S,
+  Q̂_φ), the title isn't repeated, and each formula is listed once.
 - **Untrusted files**: FFmpeg reads hundreds of formats, and its vulnerabilities tend to be in the
   ones nobody needs. `media` has it open only MP4/MOV, Matroska and WebM files
   (`format_whitelist`) and start only the decoders lectures use while it probes a file
