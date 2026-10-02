@@ -54,7 +54,7 @@ import type { Open, Scope } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
 
 import { SignInPrompt, useAccount } from "./account";
-import { Callout, Latex, TimeChip } from "./common";
+import { Callout, Latex, TimeChip, loadKatex } from "./common";
 
 /** The answer being streamed, until it's saved and the thread reloads. */
 interface Pending {
@@ -69,6 +69,8 @@ interface Pending {
 export function AskPanel(props: { scope: Scope; onOpen: Open; suggestions?: string[] }) {
   const account = useAccount();
   const where = props.scope.kind === "lecture" ? "this lecture" : "this course";
+  // Answers may hold formulas: have KaTeX ready by the time one arrives.
+  useEffect(() => void loadKatex(), []);
   if (account.pending) {
     return (
       <div className="flex flex-col gap-3 p-4">

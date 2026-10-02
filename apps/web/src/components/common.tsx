@@ -1,7 +1,6 @@
 "use client";
 
 import { cn } from "cn";
-import katex from "katex";
 import {
   CircleAlertIcon,
   CircleCheckIcon,
@@ -12,7 +11,7 @@ import {
   PlayIcon,
   UploadIcon,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, Suspense, use, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import type { Lecture, LectureStatus } from "@/lib/api";
@@ -82,13 +81,43 @@ export function TimeChip({
   );
 }
 
-/** LaTeX from the notes or an answer, rendered by KaTeX. It comes from an LLM, so it's untrusted:
- *  KaTeX escapes its input, and with `trust` off it refuses \href, \url and raw HTML. */
-export function Latex({ source, inline = false }: { source: string; inline?: boolean }) {
-  const html = useMemo(
-    () => katex.renderToString(source, { throwOnError: false, displayMode: !inline, trust: false }),
-    [source, inline],
+type Katex = typeof import("katex").default;
+let katexModule: Promise<Katex | null> | undefined;
+
+/** KaTeX is a large script that only formulas need, so it loads on first use rather than with
+ *  every page. Pages that are likely to show formulas call this early to have it ready. */
+export function loadKatex(): Promise<Katex | null> {
+  katexModule ??= import("katex").then(
+    (module) => module.default,
+    // Couldn't load (offline, say): formulas stay as their source.
+    () => null,
   );
+  return katexModule;
+}
+
+/** LaTeX from the notes or an answer, rendered by KaTeX. It comes from an LLM, so it's untrusted:
+ *  KaTeX escapes its input, and with `trust` off it refuses \href, \url and raw HTML. The
+ *  source shows until KaTeX has loaded. */
+export function Latex({ source, inline = false }: { source: string; inline?: boolean }) {
+  const plain = inline ? (
+    <span className="font-mono text-[0.9em]">{source}</span>
+  ) : (
+    <div className="overflow-x-auto py-1 font-mono text-sm text-muted-foreground">{source}</div>
+  );
+  return (
+    <Suspense fallback={plain}>
+      <Rendered source={source} inline={inline} plain={plain} />
+    </Suspense>
+  );
+}
+
+function Rendered({ source, inline, plain }: { source: string; inline: boolean; plain: ReactNode }) {
+  const katex = use(loadKatex());
+  const html = useMemo(
+    () => katex?.renderToString(source, { throwOnError: false, displayMode: !inline, trust: false }),
+    [katex, source, inline],
+  );
+  if (html === undefined) return plain;
   return inline ? (
     <span dangerouslySetInnerHTML={{ __html: html }} />
   ) : (
@@ -96,7 +125,29 @@ export function Latex({ source, inline = false }: { source: string; inline?: boo
   );
 }
 
-/** A lecture's cover: its first slide once it's processed, otherwise a colour of its own. */
+/** A ref for an element, and whether it has come near the viewport. It stays true once it has,
+ *  so whatever it starts loading is kept. */
+export function useSeen<T extends Element>(margin = "300px"): [(node: T | null) => void, boolean] {
+  const [node, setNode] = useState<T | null>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    if (seen || !node) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setSeen(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setSeen(true);
+    }, { rootMargin: margin });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node, seen, margin]);
+  return [setNode, seen];
+}
+
+/** A lecture's cover: its first slide once it's processed, over a colour of its own that shows
+ *  until the slide has loaded. Its slides are asked for only once the cover is near the screen,
+ *  so a long library doesn't load every lecture's slides at once. */
 export function LectureCover({
   lecture,
   className,
@@ -106,29 +157,46 @@ export function LectureCover({
   className?: string;
   children?: ReactNode;
 }) {
-  const ready = lecture.status === "ready";
-  const slides = useSlides(lecture.id, ready);
+  const [ref, seen] = useSeen<HTMLDivElement>();
+  const slides = useSlides(lecture.id, lecture.status === "ready" && seen);
   const first = slides.data?.[0];
+  // The slide frame's shape once it has loaded, and a link that failed to load (it may have
+  // expired; the slides' next refresh brings a new one).
+  const [shape, setShape] = useState<"wide" | "narrow" | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
   const hue = hueFor(lecture.id);
+  const measure = (image: HTMLImageElement) =>
+    setShape(image.naturalWidth / image.naturalHeight < 1.5 ? "narrow" : "wide");
   return (
     <div
+      ref={ref}
       className={cn("relative isolate overflow-hidden bg-muted", className)}
-      style={
-        first
-          ? undefined
-          : {
-              backgroundImage: `linear-gradient(135deg, oklch(0.72 0.12 ${hue}), oklch(0.46 0.15 ${(hue + 50) % 360}))`,
-            }
-      }
+      style={{
+        backgroundImage: `linear-gradient(135deg, oklch(0.72 0.12 ${hue}), oklch(0.46 0.15 ${(hue + 50) % 360}))`,
+      }}
     >
-      {first ? (
-        // Presigned storage URLs, loaded directly rather than through next/image.
-        // Slide frames are 4:3 with dark bars at the sides; zoom past them to fill a 16:9 cover.
-        <img src={first.image_url} alt="" loading="lazy" className="size-full scale-[1.22] bg-white object-cover" />
-      ) : (
-        <div className="flex size-full items-center justify-center">
-          <FilmIcon className="size-8 text-white/80" aria-hidden />
-        </div>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <FilmIcon className="size-8 text-white/80" aria-hidden />
+      </div>
+      {first && first.image_url !== failed && (
+        // Presigned storage URLs, loaded directly rather than through next/image. A 4:3 frame
+        // often has dark bars at its sides, and a thin one at the top: zoom past them, keeping
+        // the top, where a slide's title is. A 16:9 frame fills the cover as it is.
+        <img
+          ref={(image) => {
+            if (image?.complete && image.naturalWidth > 0) measure(image);
+          }}
+          src={first.image_url}
+          alt=""
+          decoding="async"
+          onLoad={(event) => measure(event.currentTarget)}
+          onError={() => setFailed(first.image_url)}
+          className={cn(
+            "absolute inset-0 size-full object-cover transition-opacity duration-300",
+            shape ? "opacity-100" : "opacity-0",
+            shape === "narrow" && "origin-top -translate-y-[2%] scale-[1.34] object-top",
+          )}
+        />
       )}
       {lecture.status === "processing" && (
         <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/15 to-transparent" />
@@ -244,5 +312,6 @@ export function scrollWithin(container: HTMLElement | null, element: HTMLElement
   const item = element.getBoundingClientRect();
   if (item.top >= box.top + 24 && item.bottom <= box.bottom - 24) return;
   const top = container.scrollTop + (item.top - box.top) - box.height / 3;
-  container.scrollTo({ top, behavior: smooth ? "smooth" : "auto" });
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  container.scrollTo({ top, behavior: smooth && !still ? "smooth" : "auto" });
 }

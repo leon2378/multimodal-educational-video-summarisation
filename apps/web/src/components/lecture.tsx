@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -52,6 +52,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { refusal } from "@/lib/access";
 import {
+  ApiError,
   type Lecture,
   type Slide,
   type StudyNotes,
@@ -77,7 +78,7 @@ import { formatTime, indexAt, slideAt } from "@/lib/timeline";
 
 import { PrivateBadge, useAccount } from "./account";
 import { AskPanel } from "./chat";
-import { StatusBadge, useDocumentTitle } from "./common";
+import { StatusBadge, loadKatex, useDocumentTitle } from "./common";
 import { DeleteLectureDialog, deleteBlocked } from "./delete-lecture";
 import { NotesPanel, QuizPanel, downloadNotes } from "./notes";
 import { ChapterRail, KeyHints, usePlayerKeys } from "./player";
@@ -122,6 +123,10 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
   );
   const started = useRef(false);
   usePlayerKeys(video);
+  // Notes and answers may hold formulas: have KaTeX ready by the time they show.
+  useEffect(() => {
+    if (ready) void loadKatex();
+  }, [ready]);
   const onDeleted = useCallback(() => {
     setDeleted(true);
     router.replace("/");
@@ -147,14 +152,18 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
   }
   if (lecture.isPending) return <LectureSkeleton />;
   if (lecture.isError) {
+    // Not found, or not a lecture's address at all.
+    const missing = lecture.error instanceof ApiError && [404, 422].includes(lecture.error.status);
     return (
       <Empty className="min-h-[60vh]">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <FileQuestionIcon />
           </EmptyMedia>
-          <EmptyTitle>Couldn&apos;t open this lecture</EmptyTitle>
-          <EmptyDescription>{lecture.error.message}</EmptyDescription>
+          <EmptyTitle>{missing ? "Lecture not found" : "Couldn't open this lecture"}</EmptyTitle>
+          <EmptyDescription>
+            {missing ? "It may have been deleted, or it's private to someone else." : lecture.error.message}
+          </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <Button asChild variant="outline">
@@ -184,6 +193,8 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
             <video
               ref={video}
               src={media.data.url}
+              // The first slide until it plays, rather than a black box.
+              poster={slides.data?.[0]?.image_url}
               controls
               playsInline
               preload="metadata"
@@ -339,7 +350,9 @@ function LectureHeader({
               </a>
             )}
             {(lecture.attribution || lecture.licence) && (
-              <span className="truncate">{[lecture.attribution, lecture.licence].filter(Boolean).join(" · ")}</span>
+              <span className="truncate" title={[lecture.attribution, lecture.licence].filter(Boolean).join(" · ")}>
+                {[lecture.attribution, lecture.licence].filter(Boolean).join(" · ")}
+              </span>
             )}
           </div>
         </div>
@@ -496,6 +509,9 @@ function StudyPanel({
   const suggestions = useMemo(() => suggest(notes), [notes]);
   const [selected, setSelected] = useState("notes");
   const tab = "min-h-0 flex-1 data-[state=inactive]:hidden";
+  // Words only where the panel is narrow (a phone, or beside the video on a smaller laptop),
+  // so all five tabs fit.
+  const trigger = "flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden lg:max-xl:px-2 lg:max-xl:[&_svg]:hidden";
 
   return (
     <Tabs
@@ -505,19 +521,19 @@ function StudyPanel({
     >
       <div className="overflow-x-auto border-b px-2 scrollbar-none">
         <TabsList variant="line" className="h-11 w-full justify-start gap-0">
-          <TabsTrigger value="notes" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+          <TabsTrigger value="notes" className={trigger}>
             <NotebookTextIcon /> Notes
           </TabsTrigger>
-          <TabsTrigger value="transcript" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+          <TabsTrigger value="transcript" className={trigger}>
             <CaptionsIcon /> Transcript
           </TabsTrigger>
-          <TabsTrigger value="slides" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+          <TabsTrigger value="slides" className={trigger}>
             <PresentationIcon /> Slides
           </TabsTrigger>
-          <TabsTrigger value="quiz" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+          <TabsTrigger value="quiz" className={trigger}>
             <GraduationCapIcon /> Quiz
           </TabsTrigger>
-          <TabsTrigger value="ask" className="flex-none px-2.5 max-sm:px-2 max-sm:[&_svg]:hidden">
+          <TabsTrigger value="ask" className={trigger}>
             <MessagesSquareIcon /> Ask
           </TabsTrigger>
         </TabsList>
@@ -559,8 +575,8 @@ function suggest(notes: StudyNotes): string[] {
   const [first, second] = notes.concepts;
   return [
     "Summarise this lecture in five points.",
-    first && `What is ${first.term}, and why does it matter here?`,
-    second && `Give an example of ${second.term} from the lecture.`,
+    first && `What is “${first.term}”, and why does it matter here?`,
+    second && `Give an example of “${second.term}” from the lecture.`,
     notes.quiz[0]?.question,
   ].filter((s): s is string => Boolean(s));
 }

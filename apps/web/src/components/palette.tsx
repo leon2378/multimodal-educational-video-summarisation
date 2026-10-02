@@ -32,6 +32,7 @@ import { useCourses, useLectures } from "@/lib/queries";
 import { lectureHref } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
 
+import { Highlighted } from "./search";
 import { useTheme } from "./theme";
 import { useUpload } from "./upload";
 
@@ -168,7 +169,9 @@ function Palette({ close }: { close: () => void }) {
                         {[titles.get(hit.lecture_id), hit.slide_title ?? hit.chapter].filter(Boolean).join(" · ")}
                       </span>
                     </span>
-                    <span className="line-clamp-2 text-sm">{hit.transcript}</span>
+                    <span className="line-clamp-2 text-sm">
+                      <Highlighted text={hit.transcript} query={query} />
+                    </span>
                   </div>
                 </CommandItem>
               ))}
@@ -203,7 +206,11 @@ function Palette({ close }: { close: () => void }) {
       </CommandList>
       <div className="flex items-center gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
         <SearchIcon className="size-3.5" />
-        <span className="flex-1">Type 3 or more letters to search inside the lectures.</span>
+        <span className="flex-1">
+          {searchable
+            ? "Inside the lectures, matched by meaning as well as words."
+            : "Type 3 or more letters to search inside the lectures."}
+        </span>
         <span className="hidden items-center gap-1 sm:flex">
           <Kbd>↑</Kbd>
           <Kbd>↓</Kbd> to move <Kbd>↵</Kbd> to open

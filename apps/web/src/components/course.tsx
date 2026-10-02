@@ -38,7 +38,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { refusal } from "@/lib/access";
-import { api, ensureOk } from "@/lib/api";
+import { ApiError, api, ensureOk } from "@/lib/api";
 import { formatDuration, hueFor, pluralise } from "@/lib/format";
 import { useCourse } from "@/lib/queries";
 import { type Open, lectureHref } from "@/lib/scope";
@@ -97,14 +97,18 @@ export function CourseView({ id }: { id: string }) {
     );
   }
   if (course.isError) {
+    // Not found, or not a course's address at all.
+    const missing = course.error instanceof ApiError && [404, 422].includes(course.error.status);
     return (
       <Empty className="min-h-[60vh]">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <FileQuestionIcon />
           </EmptyMedia>
-          <EmptyTitle>Couldn&apos;t open this course</EmptyTitle>
-          <EmptyDescription>{course.error.message}</EmptyDescription>
+          <EmptyTitle>{missing ? "Course not found" : "Couldn't open this course"}</EmptyTitle>
+          <EmptyDescription>
+            {missing ? "It may have been deleted, or it's private to someone else." : course.error.message}
+          </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <Button asChild variant="outline">

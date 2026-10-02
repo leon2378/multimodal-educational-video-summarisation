@@ -5,12 +5,26 @@ import { useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { highlight } from "@/lib/highlight";
+import { excerpt, highlight } from "@/lib/highlight";
 import { useSearch } from "@/lib/queries";
 import type { Open, Scope } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
 
 import { Callout } from "./common";
+
+/** `text` with the words of `query` it contains marked, to show why a result matched. It starts
+ *  near the first of them, so a result clamped to a few lines still shows one. */
+export function Highlighted({ text, query }: { text: string; query: string }) {
+  return highlight(excerpt(text, query), query).map((piece, i) =>
+    piece.match ? (
+      <mark key={i} className="rounded-sm bg-now px-0.5 text-foreground">
+        {piece.text}
+      </mark>
+    ) : (
+      <span key={i}>{piece.text}</span>
+    ),
+  );
+}
 
 /** A search box that searches when submitted, since each search embeds and reranks. */
 export function SearchBox({
@@ -125,15 +139,7 @@ export function SearchResults({
                 </span>
                 {hit.slide_title && <span className="text-sm font-medium">{hit.slide_title}</span>}
                 <span className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
-                  {highlight(hit.transcript, query).map((piece, i) =>
-                    piece.match ? (
-                      <mark key={i} className="rounded-sm bg-now px-0.5 text-foreground">
-                        {piece.text}
-                      </mark>
-                    ) : (
-                      <span key={i}>{piece.text}</span>
-                    ),
-                  )}
+                  <Highlighted text={hit.transcript} query={query} />
                 </span>
               </button>
             </li>
