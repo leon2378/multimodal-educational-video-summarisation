@@ -92,8 +92,8 @@ export interface paths {
         /**
          * Ask Course
          * @description Answer a question from every processed lecture in the course the caller may read.
-         *     Citations name the lecture, like [L2 12:34]; each source's `lecture_label` says which
-         *     lecture is L2.
+         *     Citations name the lecture by its number in the course, like [L2 12:34] for the second
+         *     one listed; each source's `lecture_label` says which lecture is L2.
          */
         post: operations["ask_course_v1_courses__course_id__ask_post"];
         delete?: never;

@@ -15,7 +15,7 @@ grounded too.
 
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from pydantic import BaseModel
 
@@ -77,14 +77,15 @@ class ChatTurn(BaseModel):
     answer: str
 
 
-def label_lectures(passages: Sequence[Passage], titles: dict[uuid.UUID, str]) -> list[Passage]:
-    """Label each lecture L1, L2, ... in the order the passages first mention it."""
-    labels: dict[uuid.UUID, str] = {}
-    for passage in passages:
-        labels.setdefault(passage.lecture_id, f"L{len(labels) + 1}")
+def label_lectures(
+    passages: Sequence[Passage], titles: Mapping[uuid.UUID, str], numbers: Mapping[uuid.UUID, int]
+) -> list[Passage]:
+    """Label each lecture by its number in the course, as the course page numbers them: L3 is
+    the third lecture listed there. Numbered in the order the passages mentioned them, L2 had
+    been the second lecture cited, which the course page calls something else."""
     return [
         p.model_copy(
-            update={"label": labels[p.lecture_id], "lecture_title": titles.get(p.lecture_id)}
+            update={"label": f"L{numbers[p.lecture_id]}", "lecture_title": titles.get(p.lecture_id)}
         )
         for p in passages
     ]

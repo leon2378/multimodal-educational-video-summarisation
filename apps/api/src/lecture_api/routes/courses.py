@@ -62,7 +62,7 @@ async def get_course(course_id: uuid.UUID, session: SessionDep, viewer: ViewerDe
         await session.scalars(
             select(Lecture)
             .where(Lecture.course_id == course_id, readable(Lecture, viewer))
-            .order_by(Lecture.created_at)
+            .order_by(Lecture.created_at, Lecture.id)
         )
     ).all()
     return CourseDetail(

@@ -167,6 +167,46 @@ def test_a_slide_reading_is_tidied_when_read() -> None:
     assert reading.latex == [r"\gamma = 0", r"\gamma = 1", r"\gamma < 1"]
 
 
+@pytest.mark.parametrize(
+    ("title", "text", "tidied"),
+    [
+        # From slide readings of MIT 6.0001 Lectures 10 to 12: the title repeated over two
+        # lines, as the slide sets it, and a title broken over two lines itself.
+        (
+            "LINEAR SEARCH ON UNSORTED LIST",
+            "LINEAR SEARCH\nON UNSORTED LIST\n- must look through all elements",
+            ("LINEAR SEARCH ON UNSORTED LIST", "- must look through all elements"),
+        ),
+        (
+            "COMPLEXITY OF SELECTION\nSORT",
+            "COMPLEXITY OF SELECTION\nSORT\n- outer loop executes len(L) times",
+            ("COMPLEXITY OF SELECTION SORT", "- outer loop executes len(L) times"),
+        ),
+        # Text that only starts like the title keeps it.
+        (
+            "COMPLEXITY",
+            "COMPLEXITY CLASSES\n- O(1) denotes constant running time",
+            ("COMPLEXITY", "COMPLEXITY CLASSES\n- O(1) denotes constant running time"),
+        ),
+    ],
+)
+def test_text_that_repeats_the_title_over_lines_doesnt(
+    title: str, text: str, tidied: tuple[str, str]
+) -> None:
+    reading = SlideReading.model_validate(
+        {
+            "slide_id": 2,
+            "title": title,
+            "text": text,
+            "figure_description": "",
+            "latex": [],
+            "code": "",
+        }
+    )
+
+    assert (reading.title, reading.text) == tidied
+
+
 def test_a_field_filled_with_a_word_for_nothing_is_empty() -> None:
     # MIT 6.0001 Lecture 11: the prompt said to use "" for nothing, and the model wrote that, or
     # None when it said to use an empty string.

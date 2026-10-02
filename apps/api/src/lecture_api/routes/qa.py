@@ -18,7 +18,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -103,6 +103,8 @@ class _Scope:
     lecture_ids: list[uuid.UUID]
     titles: dict[uuid.UUID, str]
     course_id: uuid.UUID | None = None
+    # Each lecture's number in the course, as the course page lists them.
+    numbers: dict[uuid.UUID, int] = field(default_factory=dict)
 
     @property
     def lecture_id(self) -> uuid.UUID | None:
@@ -150,18 +152,18 @@ async def ask_course(
     answerer: AnswererDep,
 ) -> StreamingResponse:
     """Answer a question from every processed lecture in the course the caller may read.
-    Citations name the lecture, like [L2 12:34]; each source's `lecture_label` says which
-    lecture is L2."""
+    Citations name the lecture by its number in the course, like [L2 12:34] for the second
+    one listed; each source's `lecture_label` says which lecture is L2."""
     await course_or_404(session, course_id, viewer)
-    lectures = (
+    # In the course page's order (routes.courses), so [L3 12:34] is the lecture listed third.
+    in_course = (
         await session.scalars(
-            select(Lecture).where(
-                Lecture.course_id == course_id,
-                Lecture.status == LectureStatus.READY,
-                readable(Lecture, viewer),
-            )
+            select(Lecture)
+            .where(Lecture.course_id == course_id, readable(Lecture, viewer))
+            .order_by(Lecture.created_at, Lecture.id)
         )
     ).all()
+    lectures = [lecture for lecture in in_course if lecture.status == LectureStatus.READY]
     if not lectures:
         raise HTTPException(
             status.HTTP_409_CONFLICT, "None of the course's lectures has been processed yet."
@@ -170,6 +172,7 @@ async def ask_course(
         lecture_ids=[lecture.id for lecture in lectures],
         titles={lecture.id: lecture.title for lecture in lectures},
         course_id=course_id,
+        numbers={lecture.id: number for number, lecture in enumerate(in_course, 1)},
     )
     await quotas.check_question(session, viewer, settings)
     return await _ask(body, scope, viewer, request, session, settings, searcher, answerer)
@@ -347,7 +350,7 @@ async def _answer(
             if scope.lecture_id is not None:
                 outline = await _outline(session, scope.lecture_id)
         if scope.course_id is not None:
-            passages = label_lectures(passages, scope.titles)
+            passages = label_lectures(passages, scope.titles, scope.numbers)
         labels = {passage.lecture_id: passage.label for passage in passages}
         sources = [
             _source(hit, scope.titles.get(hit.lecture_id), labels.get(hit.lecture_id))

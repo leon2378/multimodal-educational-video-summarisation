@@ -59,9 +59,9 @@ class SlideDeck(BaseModel):
 class SlideReading(BaseModel):
     """What a slide says. A reading is tidied whenever it's read, from the model, the cache or
     the database (lecture_core.latex): LaTeX in its text is made readable, a formula listed
-    twice is listed once, text that starts by repeating the title, shown above it, doesn't,
-    OCR's 0(n) for O(n) is put right, and a field the model filled with a word for nothing ("",
-    None) is empty."""
+    twice is listed once, the title is one line, text that starts by repeating it (shown above
+    it), on one line or several, doesn't, OCR's 0(n) for O(n) is put right, and a field the
+    model filled with a word for nothing ("", None) is empty."""
 
     slide_id: int
     title: PlainText
@@ -77,13 +77,30 @@ class SlideReading(BaseModel):
         for field in ("title", "text", "figure_description", "code"):
             if getattr(self, field).strip().casefold() in _NOTHING:
                 setattr(self, field, "")
-        first, _, rest = self.text.partition("\n")
-        if self.title and first.strip().casefold() == self.title.strip().casefold():
-            self.text = rest.lstrip("\n")
+        # A title is one line, though the model sometimes breaks it where the slide does.
+        self.title = " ".join(self.title.split())
+        self.text = _without_title(self.text, self.title)
         if self.reader == "ocr":
             self.title = _BIG_O_MISREAD.sub("O", self.title)
             self.text = _BIG_O_MISREAD.sub("O", self.text)
         return self
+
+
+def _without_title(text: str, title: str) -> str:
+    """`text` without the title at its start, whether on one line or over several as the slide
+    sets it: "LINEAR SEARCH\\nON UNSORTED LIST" for the title "LINEAR SEARCH ON UNSORTED LIST"."""
+    if not title:
+        return text
+    lines = text.split("\n")
+    wanted = title.casefold()
+    read = ""
+    for count, line in enumerate(lines, 1):
+        read = " ".join(f"{read} {line}".split()).casefold()
+        if read == wanted:
+            return "\n".join(lines[count:]).lstrip("\n")
+        if not wanted.startswith(read):
+            break
+    return text
 
 
 # What the vision model has written for an empty field: the prompt's "" (read-slides.v1), or a

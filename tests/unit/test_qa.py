@@ -122,7 +122,9 @@ def test_a_chapter_start_from_the_outline_is_grounded() -> None:
     # Without the outline, the chapter's start isn't grounded in anything.
     assert not find_citations(answer, PASSAGES)[0].valid
     # Across a course, a labelled time is checked against the passages alone.
-    assert not find_citations("[L1 39:25]", label_lectures(PASSAGES, {}), OUTLINE)[0].valid
+    assert not find_citations("[L1 39:25]", label_lectures(PASSAGES, {}, {LECTURE: 1}), OUTLINE)[
+        0
+    ].valid
 
 
 def test_passages_are_escaped_and_timestamped() -> None:
@@ -250,20 +252,22 @@ def _two_lectures() -> list[Passage]:
     return [PASSAGES[0], PASSAGES[1].model_copy(update={"lecture_id": OTHER})]
 
 
-def test_lectures_are_labelled_in_the_order_passages_mention_them() -> None:
+def test_lectures_are_labelled_by_their_number_in_the_course() -> None:
     passages = [*_two_lectures(), PASSAGES[0].model_copy(update={"segment_id": "s004"})]
+    # OTHER is listed first on the course page, and a lecture listed second wasn't cited.
+    numbers = {OTHER: 1, LECTURE: 3}
 
-    labelled = label_lectures(passages, {LECTURE: "Efficiency", OTHER: "Recursion"})
+    labelled = label_lectures(passages, {LECTURE: "Efficiency", OTHER: "Recursion"}, numbers)
 
     assert [(p.label, p.lecture_title) for p in labelled] == [
-        ("L1", "Efficiency"),
-        ("L2", "Recursion"),
-        ("L1", "Efficiency"),
+        ("L3", "Efficiency"),
+        ("L1", "Recursion"),
+        ("L3", "Efficiency"),
     ]
 
 
 def test_labelled_citations_point_into_their_lecture() -> None:
-    passages = label_lectures(_two_lectures(), {})
+    passages = label_lectures(_two_lectures(), {}, {LECTURE: 1, OTHER: 2})
     answer = "See [L1 01:30], [L2 1:00:00, 1:00:05], then [L2 01:30] and [01:37]."
 
     citations = find_citations(answer, passages)
@@ -281,7 +285,9 @@ def test_labelled_citations_point_into_their_lecture() -> None:
 
 
 def test_labelled_passages_name_their_lecture() -> None:
-    rendered = render_passages(label_lectures(PASSAGES[:1], {LECTURE: 'Efficiency "1"'}))
+    rendered = render_passages(
+        label_lectures(PASSAGES[:1], {LECTURE: 'Efficiency "1"'}, {LECTURE: 1})
+    )
 
     assert '<passage lecture="L1: Efficiency &quot;1&quot;" chapter="Memoisation">' in rendered
     assert "[L1 01:30] Memoisation stores results." in rendered
@@ -294,7 +300,9 @@ def test_labelled_passages_get_the_course_prompt() -> None:
     async def answer(passages: list[Passage]) -> str:
         return "".join([d async for d in answerer.stream_answer("Q?", passages, [], Usage())])
 
-    assert "[L1 01:30]" in asyncio.run(answer(label_lectures(PASSAGES, {LECTURE: "Efficiency"})))
+    assert "[L1 01:30]" in asyncio.run(
+        answer(label_lectures(PASSAGES, {LECTURE: "Efficiency"}, {LECTURE: 1}))
+    )
     assert fake.instructions[-1].startswith("You answer a student's question about a course")
     asyncio.run(answer(PASSAGES))
     assert fake.instructions[-1].startswith("You answer a student's question about a lecture")
