@@ -11,11 +11,11 @@ import {
   PlayIcon,
   UploadIcon,
 } from "lucide-react";
-import { type ReactNode, Suspense, use, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, Suspense, use, useCallback, useEffect, useId, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import type { Lecture, LectureStatus } from "@/lib/api";
-import { hueFor } from "@/lib/format";
+import { coverGradient } from "@/lib/format";
 import { useSlides } from "@/lib/queries";
 import { formatTime } from "@/lib/timeline";
 
@@ -164,16 +164,13 @@ export function LectureCover({
   // expired; the slides' next refresh brings a new one).
   const [shape, setShape] = useState<"wide" | "narrow" | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const hue = hueFor(lecture.id);
   const measure = (image: HTMLImageElement) =>
     setShape(image.naturalWidth / image.naturalHeight < 1.5 ? "narrow" : "wide");
   return (
     <div
       ref={ref}
       className={cn("relative isolate overflow-hidden bg-muted", className)}
-      style={{
-        backgroundImage: `linear-gradient(135deg, oklch(0.72 0.12 ${hue}), oklch(0.46 0.15 ${(hue + 50) % 360}))`,
-      }}
+      style={{ backgroundImage: coverGradient(lecture.id) }}
     >
       <div className="absolute inset-0 flex items-center justify-center">
         <FilmIcon className="size-8 text-white/80" aria-hidden />
@@ -259,11 +256,20 @@ export function SectionLabel({ children, count }: { children: ReactNode; count?:
   );
 }
 
-/** The app's mark: a play button becoming lines of notes. */
+/** The app's mark: a play button becoming lines of notes, on the lagoon-to-blue gradient that
+ *  icon.svg has too. */
 export function Logo({ className }: { className?: string }) {
+  // An id of its own for the gradient, in case the mark shows more than once.
+  const gradient = `logo-${useId().replace(/[^\w-]/g, "")}`;
   return (
     <svg viewBox="0 0 32 32" aria-hidden className={cn("size-7", className)}>
-      <rect width="32" height="32" rx="8" className="fill-primary" />
+      <defs>
+        <linearGradient id={gradient} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#19a0a0" />
+          <stop offset="1" stopColor="#175d9b" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="9" fill={`url(#${gradient})`} />
       <path d="M9 9.5v8l6.5-4z" fill="white" />
       <rect x="18" y="10.5" width="6" height="2" rx="1" fill="white" fillOpacity=".9" />
       <rect x="9" y="20" width="15" height="2" rx="1" fill="white" fillOpacity=".75" />

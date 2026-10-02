@@ -45,58 +45,63 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(0.985 0.002 286);
-  --foreground: oklch(0.21 0.006 286);
+  /* Lagoon: a teal-cyan accent on cool slate neutrals, with a warm highlighter for what's
+     playing. Hues: neutrals 250, accent 200, success 152, warning 55, destructive 25. */
+  --radius: 0.75rem;
+  --background: oklch(0.985 0.003 250);
+  --foreground: oklch(0.21 0.02 255);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.006 286);
+  --card-foreground: oklch(0.21 0.02 255);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.006 286);
-  --primary: oklch(0.511 0.23 277);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.962 0.003 286);
-  --secondary-foreground: oklch(0.21 0.006 286);
-  --muted: oklch(0.962 0.003 286);
-  --muted-foreground: oklch(0.54 0.016 286);
-  --accent: oklch(0.955 0.005 286);
-  --accent-foreground: oklch(0.21 0.006 286);
-  --destructive: oklch(0.577 0.245 27.3);
-  --border: oklch(0.915 0.005 286);
-  --input: oklch(0.9 0.006 286);
-  --ring: oklch(0.585 0.2 277);
-  --brand-soft: oklch(0.955 0.028 277);
-  --brand-ink: oklch(0.457 0.21 277);
-  --now: oklch(0.963 0.055 95);
-  --now-ink: oklch(0.476 0.114 62);
-  --success: oklch(0.596 0.145 163);
-  --warning: oklch(0.666 0.179 58);
+  --popover-foreground: oklch(0.21 0.02 255);
+  --primary: oklch(0.53 0.09 205);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.965 0.005 250);
+  --secondary-foreground: oklch(0.21 0.02 255);
+  --muted: oklch(0.965 0.005 250);
+  --muted-foreground: oklch(0.52 0.02 255);
+  --accent: oklch(0.955 0.008 230);
+  --accent-foreground: oklch(0.21 0.02 255);
+  --destructive: oklch(0.56 0.22 25);
+  --border: oklch(0.92 0.006 250);
+  --input: oklch(0.9 0.008 250);
+  --ring: oklch(0.6 0.1 203);
+  --brand-soft: oklch(0.958 0.024 200);
+  --brand-ink: oklch(0.44 0.075 210);
+  --now: oklch(0.962 0.058 95);
+  --now-ink: oklch(0.48 0.105 65);
+  --success: oklch(0.52 0.13 152);
+  --warning: oklch(0.56 0.14 55);
+  /* How strongly the accent glows at the top of the page. */
+  --glow: 9%;
 }
 
 .dark {
-  --background: oklch(0.141 0.005 286);
-  --foreground: oklch(0.975 0.002 286);
-  --card: oklch(0.178 0.006 286);
-  --card-foreground: oklch(0.975 0.002 286);
-  --popover: oklch(0.198 0.007 286);
-  --popover-foreground: oklch(0.975 0.002 286);
-  --primary: oklch(0.585 0.215 277);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.245 0.007 286);
-  --secondary-foreground: oklch(0.975 0.002 286);
-  --muted: oklch(0.235 0.007 286);
-  --muted-foreground: oklch(0.71 0.015 286);
-  --accent: oklch(0.25 0.008 286);
-  --accent-foreground: oklch(0.975 0.002 286);
-  --destructive: oklch(0.704 0.191 22.2);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.673 0.182 277);
-  --brand-soft: oklch(0.29 0.075 277);
-  --brand-ink: oklch(0.8 0.105 277);
-  --now: oklch(0.31 0.06 75);
-  --now-ink: oklch(0.87 0.11 88);
-  --success: oklch(0.72 0.15 163);
-  --warning: oklch(0.78 0.15 70);
+  --background: oklch(0.16 0.012 255);
+  --foreground: oklch(0.97 0.004 250);
+  --card: oklch(0.19 0.014 255);
+  --card-foreground: oklch(0.97 0.004 250);
+  --popover: oklch(0.21 0.015 255);
+  --popover-foreground: oklch(0.97 0.004 250);
+  --primary: oklch(0.8 0.12 195);
+  --primary-foreground: oklch(0.19 0.03 225);
+  --secondary: oklch(0.25 0.015 255);
+  --secondary-foreground: oklch(0.97 0.004 250);
+  --muted: oklch(0.245 0.015 255);
+  --muted-foreground: oklch(0.72 0.02 250);
+  --accent: oklch(0.26 0.018 240);
+  --accent-foreground: oklch(0.97 0.004 250);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.7 0.11 198);
+  --brand-soft: oklch(0.31 0.05 205);
+  --brand-ink: oklch(0.87 0.09 195);
+  --now: oklch(0.32 0.06 80);
+  --now-ink: oklch(0.88 0.11 90);
+  --success: oklch(0.74 0.15 155);
+  --warning: oklch(0.8 0.15 75);
+  --glow: 14%;
 }
 
 @layer base {
@@ -111,6 +116,16 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+    /* A faint glow of the accent at the top of the page, under the header. */
+    background-image: radial-gradient(
+      ellipse 80rem 28rem at 50% -8rem,
+      color-mix(in oklch, var(--primary) var(--glow), transparent),
+      transparent 70%
+    );
+    background-repeat: no-repeat;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 28%, transparent);
   }
   /* Thin scrollbars that suit both themes. */
   * {

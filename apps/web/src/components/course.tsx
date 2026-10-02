@@ -39,7 +39,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { refusal } from "@/lib/access";
 import { ApiError, api, ensureOk } from "@/lib/api";
-import { formatDuration, hueFor, pluralise } from "@/lib/format";
+import { coverGradient, formatDuration, pluralise } from "@/lib/format";
 import { useCourse } from "@/lib/queries";
 import { type Open, lectureHref } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
@@ -122,7 +122,6 @@ export function CourseView({ id }: { id: string }) {
   const titles = Object.fromEntries(info.lectures.map((lecture) => [lecture.id, lecture.title]));
   const ready = info.lectures.filter((lecture) => lecture.status === "ready").length;
   const seconds = info.lectures.reduce((sum, lecture) => sum + (lecture.duration_s ?? 0), 0);
-  const hue = hueFor(info.id);
   // Adding lectures and deleting are for its owner (or an admin); anyone who can see it reads it.
   const mine = account.canChange(info);
 
@@ -142,7 +141,7 @@ export function CourseView({ id }: { id: string }) {
               <div className="flex min-w-0 flex-[1_1_18rem] items-start gap-4">
                 <span
                   className="flex size-14 shrink-0 items-center justify-center rounded-xl text-white shadow-sm"
-                  style={{ backgroundImage: `linear-gradient(135deg, oklch(0.7 0.13 ${hue}), oklch(0.5 0.16 ${(hue + 50) % 360}))` }}
+                  style={{ backgroundImage: coverGradient(info.id) }}
                 >
                   <LibraryIcon className="size-6" />
                 </span>

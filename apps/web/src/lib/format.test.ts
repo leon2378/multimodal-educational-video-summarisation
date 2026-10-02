@@ -6,6 +6,7 @@ import {
   formatDuration,
   formatRelative,
   formatSeconds,
+  coverGradient,
   hueFor,
   pluralise,
   sourceSite,
@@ -78,6 +79,16 @@ describe("hueFor", () => {
     expect(hue).toBe(hueFor("13759f9e-6141-4c9b-9907-cda5e708eb05"));
     expect(hue).toBeGreaterThanOrEqual(0);
     expect(hue).toBeLessThan(360);
+  });
+});
+
+describe("coverGradient", () => {
+  it("gives an id the same gradient every time, from a few", () => {
+    const id = "13759f9e-6141-4c9b-9907-cda5e708eb05";
+    expect(coverGradient(id)).toBe(coverGradient(id));
+    expect(coverGradient(id)).toMatch(/^linear-gradient\(135deg, oklch\(.+\), oklch\(.+\)\)$/);
+    const ids = Array.from({ length: 50 }, (_, i) => `lecture-${i}`);
+    expect(new Set(ids.map(coverGradient)).size).toBeLessThanOrEqual(8);
   });
 });
 

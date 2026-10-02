@@ -29,7 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { refusal } from "@/lib/access";
 import { type Course, type Lecture, api, unwrap } from "@/lib/api";
-import { formatDuration, formatRelative, hueFor, pluralise } from "@/lib/format";
+import { coverGradient, formatDuration, formatRelative, pluralise } from "@/lib/format";
 import { useCourses, useLectures } from "@/lib/queries";
 import { lectureHref } from "@/lib/scope";
 import { formatTime } from "@/lib/timeline";
@@ -214,7 +214,6 @@ function LectureCard({ lecture, course }: { lecture: Lecture; course?: string })
 }
 
 function CourseCard({ course }: { course: Course }) {
-  const hue = hueFor(course.id);
   return (
     <Link
       href={`/courses/${course.id}`}
@@ -222,7 +221,7 @@ function CourseCard({ course }: { course: Course }) {
     >
       <span
         className="flex size-11 shrink-0 items-center justify-center rounded-lg text-white shadow-sm"
-        style={{ backgroundImage: `linear-gradient(135deg, oklch(0.7 0.13 ${hue}), oklch(0.5 0.16 ${(hue + 50) % 360}))` }}
+        style={{ backgroundImage: coverGradient(course.id) }}
       >
         <LibraryIcon className="size-5" />
       </span>

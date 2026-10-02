@@ -63,11 +63,30 @@ export function titleFromFilename(filename: string): string {
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : filename;
 }
 
-/** A hue from 0 to 359 that's always the same for an id, for covers without a slide. */
+/** A hue from 0 to 359 that's always the same for an id. */
 export function hueFor(id: string): number {
   let hash = 0;
   for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return hash % 360;
+}
+
+/** Gradients for covers without a slide, picked to sit with the app's colours: any hue at all
+ *  made some muddy (olive, brown). Light to deep, top left to bottom right. */
+const COVERS: [string, string][] = [
+  ["oklch(0.74 0.12 190)", "oklch(0.5 0.13 245)"], // lagoon to blue
+  ["oklch(0.7 0.13 245)", "oklch(0.46 0.16 275)"], // sky to indigo
+  ["oklch(0.7 0.14 300)", "oklch(0.5 0.17 335)"], // violet to magenta
+  ["oklch(0.76 0.13 35)", "oklch(0.56 0.18 15)"], // coral to rose
+  ["oklch(0.83 0.12 80)", "oklch(0.64 0.16 48)"], // amber to orange
+  ["oklch(0.76 0.13 160)", "oklch(0.52 0.1 200)"], // mint to teal
+  ["oklch(0.8 0.1 220)", "oklch(0.56 0.11 195)"], // ice to cyan
+  ["oklch(0.52 0.05 260)", "oklch(0.32 0.05 275)"], // slate to night
+];
+
+/** The cover gradient for an id, always the same one. */
+export function coverGradient(id: string): string {
+  const [from, to] = COVERS[hueFor(id) % COVERS.length] ?? COVERS[0]!;
+  return `linear-gradient(135deg, ${from}, ${to})`;
 }
 
 /** Something to call a count: pluralise(1, "lecture") is "1 lecture". */
