@@ -2,13 +2,13 @@
 # that have a fix. Each exception says why it's safe and when it goes.
 ignore:
   # CVE-2026-82049: CPython's tarfile extraction filters and a crafted archive (a hard link to a
-  # symlink). Fixed in 3.12.15, released 2026-09-30, which the python:3.12-slim image doesn't have
-  # yet (Grype lists only the 3.14 fix). The app never extracts tar archives. Scoped to 3.12.14,
-  # so it stops matching when the image updates: delete it then.
+  # symlink). A false positive: the CVE record (from the PSF) has 3.12.15 fixed, as it affects
+  # versions before it, but Grype's data lists only the fix in 3.14.0b1. The app never extracts
+  # tar archives anyway. Scoped to 3.12.15, so a newer Python gets looked at again.
   - vulnerability: CVE-2026-82049
     package:
       name: python
-      version: 3.12.14
+      version: 3.12.15
       type: binary
 
   # The worker's FFmpeg, in PyAV's wheel: CVE-2026-70632 (the CineForm decoder) and
