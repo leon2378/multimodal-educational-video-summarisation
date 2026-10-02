@@ -74,3 +74,14 @@ export function hueFor(id: string): number {
 export function pluralise(count: number, noun: string, plural = `${noun}s`): string {
   return `${count} ${count === 1 ? noun : plural}`;
 }
+
+/** Where a lecture from a link came from, as a link to show ("youtube.com"), or null for
+ *  anything that isn't a web address: a javascript: link never becomes an href. */
+export function sourceSite(url: string | null): string | null {
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  try {
+    return new URL(url).hostname.replace(/^www\./, "") || null;
+  } catch {
+    return null;
+  }
+}

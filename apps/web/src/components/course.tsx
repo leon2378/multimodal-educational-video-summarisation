@@ -1,6 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import { cn } from "cn";
 import {
   ChevronRightIcon,
   EllipsisIcon,
@@ -46,6 +47,7 @@ import { formatTime } from "@/lib/timeline";
 import { PrivateBadge, useAccount } from "./account";
 import { AskPanel } from "./chat";
 import { LectureCover, StatusBadge, useDocumentTitle } from "./common";
+import { LectureMenu } from "./delete-lecture";
 import { SearchBox, SearchResults } from "./search";
 import { DropTarget, useUpload } from "./upload";
 
@@ -181,10 +183,14 @@ export function CourseView({ id }: { id: string }) {
             ) : (
               <ol className="flex flex-col gap-2">
                 {info.lectures.map((lecture, index) => (
-                  <li key={lecture.id}>
+                  <li key={lecture.id} className="group/card relative">
                     <Link
                       href={lectureHref(lecture.id)}
-                      className="group flex items-center gap-4 rounded-xl border bg-card p-2.5 pr-4 shadow-xs transition hover:border-primary/40 hover:shadow-md"
+                      className={cn(
+                        "group flex items-center gap-4 rounded-xl border bg-card p-2.5 shadow-xs transition hover:border-primary/40 hover:shadow-md",
+                        // Room for its menu.
+                        account.canChange(lecture) ? "pr-12" : "pr-4",
+                      )}
                     >
                       <LectureCover lecture={lecture} className="aspect-video w-32 shrink-0 rounded-lg ring-1 ring-border">
                         {lecture.duration_s != null && (
@@ -204,6 +210,9 @@ export function CourseView({ id }: { id: string }) {
                         </span>
                       </div>
                     </Link>
+                    {account.canChange(lecture) && (
+                      <LectureMenu lecture={lecture} className="absolute top-1/2 right-3 -translate-y-1/2" />
+                    )}
                   </li>
                 ))}
               </ol>

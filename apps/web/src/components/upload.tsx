@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "cn";
-import { ChevronDownIcon, CloudUploadIcon, FileVideoIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, CloudUploadIcon, FileVideoIcon, LinkIcon, XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, type ReactNode, createContext, use, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { allowance, refusal, resetText } from "@/lib/access";
 import { ApiError, api, unwrap } from "@/lib/api";
 import { formatBytes, formatDuration, pluralise, titleFromFilename } from "@/lib/format";
@@ -161,7 +162,10 @@ function UploadDialog({
   const queryClient = useQueryClient();
   const courses = useCourses();
   const account = useAccount();
+  // A video file to upload, or a link for the API to download from.
+  const [source, setSource] = useState<"file" | "link">("file");
   const [file, setFile] = useState<File | null>(initial.file ?? null);
+  const [link, setLink] = useState("");
   const [title, setTitle] = useState(initial.file ? titleFromFilename(initial.file.name) : "");
   const [titleEdited, setTitleEdited] = useState(false);
   const [courseId, setCourseId] = useState<string>(initial.courseId ?? "none");
@@ -183,8 +187,9 @@ function UploadDialog({
     : quotas && left?.uploads === 0
       ? `You've added ${pluralise(quotas.uploads_per_day, "lecture")} today, the most a day. More at ${resetText(quotas.resets_at)}.`
       : null;
+  const fromLink = source === "link";
   const tooBig =
-    file && quotas && file.size > quotas.upload_bytes
+    !fromLink && file && quotas && file.size > quotas.upload_bytes
       ? `This video is ${formatBytes(file.size)}; you can upload up to ${formatBytes(quotas.upload_bytes)}.`
       : null;
 
@@ -196,7 +201,48 @@ function UploadDialog({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!file || busy || blocked || tooBig) return;
+    if (busy || blocked) return;
+    if (fromLink) await addLink();
+    else await upload();
+  }
+
+  async function finish(lectureId: string) {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["lectures"] }),
+      queryClient.invalidateQueries({ queryKey: ["courses"] }),
+      queryClient.invalidateQueries({ queryKey: meKey }),
+    ]);
+    setPhase({ kind: "edit" });
+    onOpenChange(false);
+    router.push(`/lectures/${lectureId}`);
+  }
+
+  /** The API downloads the video and processes it in one run, which starts at once. */
+  async function addLink() {
+    if (!link.trim()) return;
+    try {
+      setPhase({ kind: "starting" });
+      const created = unwrap(
+        await api.POST("/v1/lectures/from-url", {
+          body: {
+            url: link.trim(),
+            // Without a title, the video's own, once it's downloaded.
+            title: title.trim() || null,
+            course_id: course === "none" ? null : course,
+            licence: licence.trim() || null,
+            attribution: attribution.trim() || null,
+          },
+        }),
+      );
+      toast.success("Added. The video downloads, then processing starts.", { description: created.title });
+      await finish(created.id);
+    } catch (error) {
+      setPhase({ kind: "error", message: refusal(error) });
+    }
+  }
+
+  async function upload() {
+    if (!file || tooBig) return;
     try {
       setPhase({ kind: "uploading", loaded: 0, total: file.size, rate: 0 });
       const created = unwrap(
@@ -230,15 +276,8 @@ function UploadDialog({
             return false;
           },
         );
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["lectures"] }),
-        queryClient.invalidateQueries({ queryKey: ["courses"] }),
-        queryClient.invalidateQueries({ queryKey: meKey }),
-      ]);
       if (started) toast.success("Uploaded. Processing has started.", { description: created.lecture.title });
-      setPhase({ kind: "edit" });
-      onOpenChange(false);
-      router.push(`/lectures/${created.lecture.id}`);
+      await finish(created.lecture.id);
     } catch (error) {
       if (error instanceof Error && error.message === "cancelled") {
         setPhase({ kind: "edit" });
@@ -265,8 +304,8 @@ function UploadDialog({
         <DialogHeader>
           <DialogTitle>Add a lecture</DialogTitle>
           <DialogDescription>
-            Upload a lecture video. It&apos;s transcribed and its slides are read, then you get notes, a quiz, search
-            and Q&amp;A.
+            Upload a lecture video or give a link to one. It&apos;s transcribed and its slides are read, then you get
+            notes, a quiz, search and Q&amp;A.
           </DialogDescription>
         </DialogHeader>
 
@@ -276,27 +315,78 @@ function UploadDialog({
           </SignInPrompt>
         ) : (
           <form id="upload" onSubmit={submit} className="flex flex-col gap-4">
-            {file ? (
-              <ChosenFile file={file} onClear={busy ? undefined : () => choose(null)} />
-            ) : (
-              <label className="group flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed bg-muted/30 bg-dots px-6 py-10 text-center transition-colors hover:border-primary/60 hover:bg-brand-soft/40 focus-within:border-primary">
-                <span className="flex size-11 items-center justify-center rounded-full bg-brand-soft text-brand-ink transition-transform group-hover:scale-105">
-                  <CloudUploadIcon className="size-5" />
-                </span>
-                <span className="text-sm font-medium">Drop a video here, or click to choose one</span>
-                <span className="text-xs text-muted-foreground">MP4, WebM or MOV. Slides with spoken explanations work best.</span>
-                <input
-                  type="file"
-                  accept="video/*"
-                  className="sr-only"
-                  onChange={(event) => choose(event.target.files?.[0] ?? null)}
-                />
-              </label>
-            )}
+            <Tabs
+              value={source}
+              onValueChange={(value) => {
+                if (busy) return;
+                setSource(value as "file" | "link");
+                if (phase.kind === "error") setPhase({ kind: "edit" });
+              }}
+              className="gap-4"
+            >
+              <TabsList className="w-full">
+                <TabsTrigger value="file" disabled={busy}>
+                  <CloudUploadIcon /> Upload a file
+                </TabsTrigger>
+                <TabsTrigger value="link" disabled={busy}>
+                  <LinkIcon /> From a link
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="file">
+                {file ? (
+                  <ChosenFile file={file} onClear={busy ? undefined : () => choose(null)} />
+                ) : (
+                  <label className="group flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed bg-muted/30 bg-dots px-6 py-10 text-center transition-colors hover:border-primary/60 hover:bg-brand-soft/40 focus-within:border-primary">
+                    <span className="flex size-11 items-center justify-center rounded-full bg-brand-soft text-brand-ink transition-transform group-hover:scale-105">
+                      <CloudUploadIcon className="size-5" />
+                    </span>
+                    <span className="text-sm font-medium">Drop a video here, or click to choose one</span>
+                    <span className="text-xs text-muted-foreground">
+                      MP4, WebM or MOV. Slides with spoken explanations work best.
+                    </span>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      className="sr-only"
+                      onChange={(event) => choose(event.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                )}
+              </TabsContent>
+              <TabsContent value="link" className="flex flex-col gap-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="upload-link">Video link</Label>
+                  <Input
+                    id="upload-link"
+                    type="url"
+                    inputMode="url"
+                    value={link}
+                    onChange={(event) => {
+                      setLink(event.target.value);
+                      if (phase.kind === "error") setPhase({ kind: "edit" });
+                    }}
+                    placeholder="https://www.youtube.com/watch?v=…"
+                    title="A web link, starting with https:// or http://"
+                    maxLength={2048}
+                    required={fromLink}
+                    disabled={busy}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    A link to a video file, or a page on YouTube, Vimeo, Zoom and many other sites. The video
+                    downloads first, then it&apos;s processed like an upload.
+                  </p>
+                </div>
+                <Callout>
+                  Only add videos you may use: copyright stays with their owner, and downloading from YouTube goes
+                  against its terms. If a site refuses the download, download the video yourself and upload the file.
+                </Callout>
+              </TabsContent>
+            </Tabs>
             {quotas && left && !blocked && (
               <p className="-mt-2 text-xs text-muted-foreground">
                 {pluralise(left.uploads, "upload")} of {quotas.uploads_per_day} left today, up to{" "}
-                {formatBytes(quotas.upload_bytes)} each. What you upload is private to you.
+                {formatBytes(quotas.upload_bytes)} each{fromLink && ", links included"}. What you add is private to
+                you.
               </p>
             )}
             {blocked && <Callout tone="warning">{blocked}</Callout>}
@@ -311,7 +401,7 @@ function UploadDialog({
                   setTitle(event.target.value);
                   setTitleEdited(true);
                 }}
-                placeholder="Taken from the file name"
+                placeholder={fromLink ? "Taken from the video" : "Taken from the file name"}
                 maxLength={300}
                 disabled={busy}
               />
@@ -348,7 +438,7 @@ function UploadDialog({
                     id="upload-licence"
                     value={licence}
                     onChange={(event) => setLicence(event.target.value)}
-                    placeholder="CC BY-NC-SA 4.0"
+                    placeholder={fromLink ? "What the site says, if it says" : "CC BY-NC-SA 4.0"}
                     maxLength={100}
                     disabled={busy}
                   />
@@ -384,11 +474,11 @@ function UploadDialog({
             )}
             {phase.kind === "starting" && (
               <p className="text-sm text-muted-foreground" role="status">
-                Uploaded. Starting processing…
+                {fromLink ? "Adding the lecture…" : "Uploaded. Starting processing…"}
               </p>
             )}
             {phase.kind === "error" && (
-              <Callout tone="error" title="The upload didn't finish">
+              <Callout tone="error" title={fromLink ? "The lecture wasn't added" : "The upload didn't finish"}>
                 {phase.message}
               </Callout>
             )}
@@ -406,9 +496,13 @@ function UploadDialog({
             </Button>
           )}
           {!(account.auth && !account.signedIn) && (
-            <Button type="submit" form="upload" disabled={!file || busy || Boolean(blocked || tooBig)}>
-              <CloudUploadIcon />
-              {busy ? "Uploading…" : "Upload and process"}
+            <Button
+              type="submit"
+              form="upload"
+              disabled={(fromLink ? !link.trim() : !file) || busy || Boolean(blocked || tooBig)}
+            >
+              {fromLink ? <LinkIcon /> : <CloudUploadIcon />}
+              {fromLink ? (busy ? "Adding…" : "Add and process") : busy ? "Uploading…" : "Upload and process"}
             </Button>
           )}
         </DialogFooter>

@@ -7,6 +7,7 @@ import {
   ClockIcon,
   DownloadIcon,
   EllipsisIcon,
+  ExternalLinkIcon,
   FileQuestionIcon,
   FolderIcon,
   GlobeIcon,
@@ -18,6 +19,7 @@ import {
   NotebookTextIcon,
   PresentationIcon,
   RotateCcwIcon,
+  Trash2Icon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -58,7 +60,7 @@ import {
   api,
   unwrap,
 } from "@/lib/api";
-import { formatRelative } from "@/lib/format";
+import { formatRelative, sourceSite } from "@/lib/format";
 import {
   courseKey,
   lectureKey,
@@ -76,6 +78,7 @@ import { formatTime, indexAt, slideAt } from "@/lib/timeline";
 import { PrivateBadge, useAccount } from "./account";
 import { AskPanel } from "./chat";
 import { StatusBadge, useDocumentTitle } from "./common";
+import { DeleteLectureDialog, deleteBlocked } from "./delete-lecture";
 import { NotesPanel, QuizPanel, downloadNotes } from "./notes";
 import { ChapterRail, KeyHints, usePlayerKeys } from "./player";
 import { ProcessingPanel, RunsDialog, useStartProcessing } from "./processing";
@@ -87,12 +90,16 @@ type Seek = (seconds: number) => void;
 /** A lecture's page. `start` (from ?t=) plays it from that second. */
 export function LectureView({ id, start }: { id: string; start?: number }) {
   const router = useRouter();
-  const lecture = useLecture(id);
-  const status = lecture.data?.status;
+  // Once it's deleted, nothing asks for it again while the library opens.
+  const [deleted, setDeleted] = useState(false);
+  const lecture = useLecture(id, !deleted);
+  const status = deleted ? undefined : lecture.data?.status;
   const ready = status === "ready";
   // The event stream also reports a finished run once, which is how a failed run's error shows.
   const progress = useProgress(id, status === "processing" || status === "failed");
-  const media = useMedia(id, status !== undefined && status !== "awaiting_upload");
+  // A lecture from a link has no video to play until its download has stored one.
+  const downloading = lecture.data?.source_url != null && lecture.data.size_bytes === null;
+  const media = useMedia(id, status !== undefined && status !== "awaiting_upload" && !downloading);
   const transcript = useTranscript(id, ready);
   const slides = useSlides(id, ready);
   const notes = useNotes(id, ready);
@@ -115,7 +122,29 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
   );
   const started = useRef(false);
   usePlayerKeys(video);
+  const onDeleted = useCallback(() => {
+    setDeleted(true);
+    router.replace("/");
+  }, [router]);
 
+  if (deleted) {
+    return (
+      <Empty className="min-h-[60vh]">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <Trash2Icon />
+          </EmptyMedia>
+          <EmptyTitle>Lecture deleted</EmptyTitle>
+          <EmptyDescription>Opening the library…</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button asChild variant="outline">
+            <Link href="/">Back to the library</Link>
+          </Button>
+        </EmptyContent>
+      </Empty>
+    );
+  }
   if (lecture.isPending) return <LectureSkeleton />;
   if (lecture.isError) {
     return (
@@ -143,7 +172,13 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
     // them can run the full height of the window.
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_28rem]">
       <div className="flex min-w-0 flex-col gap-5">
-        <LectureHeader lecture={info} notes={notes.data?.notes} slideCount={slides.data?.length} time={time} />
+        <LectureHeader
+          lecture={info}
+          notes={notes.data?.notes}
+          slideCount={slides.data?.length}
+          time={time}
+          onDeleted={onDeleted}
+        />
         <div className="overflow-hidden rounded-xl bg-black shadow-sm ring-1 ring-border">
           {media.data ? (
             <video
@@ -163,7 +198,13 @@ export function LectureView({ id, start }: { id: string; start?: number }) {
             />
           ) : (
             <div className="flex aspect-video items-center justify-center text-sm text-white/60">
-              {status === "awaiting_upload" ? "The video wasn't uploaded" : "Loading the video…"}
+              {status === "awaiting_upload"
+                ? "The video wasn't uploaded"
+                : downloading
+                  ? status === "failed"
+                    ? "The video wasn't downloaded"
+                    : "Downloading the video…"
+                  : "Loading the video…"}
             </div>
           )}
         </div>
@@ -204,11 +245,13 @@ function LectureHeader({
   notes,
   slideCount,
   time,
+  onDeleted,
 }: {
   lecture: Lecture;
   notes: StudyNotes | undefined;
   slideCount: number | undefined;
   time: number;
+  onDeleted: () => void;
 }) {
   const queryClient = useQueryClient();
   const courses = useCourses();
@@ -216,10 +259,13 @@ function LectureHeader({
   const course = courses.data?.find((c) => c.id === lecture.course_id);
   const [history, setHistory] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const { start } = useStartProcessing(lecture.id);
   const ready = lecture.status === "ready";
   // Someone else's public lecture reads the same, without the controls that change it.
   const mine = account.canChange(lecture);
+  const blocked = deleteBlocked(lecture);
+  const site = sourceSite(lecture.source_url);
 
   async function setVisibility(visibility: Visibility) {
     try {
@@ -281,6 +327,17 @@ function LectureHeader({
               </span>
             )}
             <span>Added {formatRelative(lecture.created_at)}</span>
+            {site && lecture.source_url && (
+              <a
+                href={lecture.source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex min-w-0 items-center gap-1.5 hover:text-foreground"
+                title={lecture.source_url}
+              >
+                <ExternalLinkIcon className="size-3.5 shrink-0" /> <span className="truncate">From {site}</span>
+              </a>
+            )}
             {(lecture.attribution || lecture.licence) && (
               <span className="truncate">{[lecture.attribution, lecture.licence].filter(Boolean).join(" · ")}</span>
             )}
@@ -323,11 +380,21 @@ function LectureHeader({
                     <LockIcon /> Make private
                   </DropdownMenuItem>
                 ))}
+              {mine && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" disabled={blocked !== null} onSelect={() => setRemoving(true)}>
+                    <Trash2Icon /> Delete lecture
+                  </DropdownMenuItem>
+                  {blocked && <p className="px-2 pb-1.5 text-xs text-muted-foreground">{blocked}</p>}
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
       <RunsDialog lectureId={lecture.id} open={history} onOpenChange={setHistory} />
+      <DeleteLectureDialog lecture={lecture} open={removing} onOpenChange={setRemoving} onDeleted={onDeleted} />
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>

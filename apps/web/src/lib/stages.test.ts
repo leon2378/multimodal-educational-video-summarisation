@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PHASES, stageLabel, summarise } from "./stages";
+import { PHASES, phasesFor, stageLabel, summarise } from "./stages";
 
 const total = PHASES.flatMap((phase) => phase.stages).length;
 
@@ -46,11 +46,35 @@ describe("summarise", () => {
     });
     expect(run.done).toBe(0);
   });
+
+  it("counts the download only for a lecture from a link", () => {
+    const progress = {
+      status: "running" as const,
+      running: ["probe"],
+      done: [{ stage: "fetch", seconds: 30, cached: false }],
+      error: null,
+    };
+    expect(summarise(progress).done).toBe(0);
+    const run = summarise(progress, true);
+    expect(run.done).toBe(1);
+    expect(run.total).toBe(total + 1);
+    expect(run.state("fetch")).toBe("done");
+  });
+});
+
+describe("phasesFor", () => {
+  it("puts the download first for a link, and leaves uploads alone", () => {
+    expect(phasesFor(false)).toBe(PHASES);
+    expect(phasesFor(true)[0]?.stages[0]?.id).toBe("fetch");
+    expect(phasesFor(true).flatMap((phase) => phase.stages)).toHaveLength(total + 1);
+    expect(PHASES[0]?.stages[0]?.id).toBe("probe");
+  });
 });
 
 describe("stageLabel", () => {
   it("names known stages and tidies unknown ones", () => {
     expect(stageLabel("draft_notes")).toBe("Writing notes");
+    expect(stageLabel("fetch")).toBe("Downloading the video");
     expect(stageLabel("new_stage")).toBe("new stage");
   });
 });

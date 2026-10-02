@@ -36,6 +36,7 @@ import { formatTime } from "@/lib/timeline";
 
 import { PrivateBadge, SignInPrompt, useAccount } from "./account";
 import { Callout, LectureCover, StatusBadge, useDocumentTitle } from "./common";
+import { LectureMenu } from "./delete-lecture";
 import { DropTarget } from "./upload";
 
 type Filter = "all" | "yours" | "ready" | "processing" | "attention";
@@ -129,7 +130,7 @@ export function LibraryView() {
             value={filter}
             onValueChange={(value) => value && setFilter(value as Filter)}
             aria-label="Show lectures"
-            className="overflow-x-auto"
+            className="max-w-full overflow-x-auto"
           >
             <ToggleGroupItem value="all" className="px-3">
               All <Count n={all.length} />
@@ -177,34 +178,38 @@ function Count({ n }: { n: number }) {
 }
 
 function LectureCard({ lecture, course }: { lecture: Lecture; course?: string }) {
+  const mine = useAccount().canChange(lecture);
   return (
-    <Link
-      href={lectureHref(lecture.id)}
-      className="group flex flex-col gap-3 rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-    >
-      <LectureCover
-        lecture={lecture}
-        className="aspect-video rounded-xl shadow-sm ring-1 ring-border transition group-hover:shadow-md group-hover:ring-primary/40"
+    <div className="group/card relative">
+      <Link
+        href={lectureHref(lecture.id)}
+        className="group flex flex-col gap-3 rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
-        <span className="absolute top-2 left-2 flex gap-1.5">
-          {lecture.status !== "ready" && <StatusBadge status={lecture.status} className="shadow-sm backdrop-blur" />}
-          <PrivateBadge visibility={lecture.visibility} className="shadow-sm" />
-        </span>
-        {lecture.duration_s != null && (
-          <span className="absolute right-2 bottom-2 rounded-md bg-black/75 px-1.5 py-0.5 font-mono text-xs text-white tabular-nums">
-            {formatTime(lecture.duration_s)}
+        <LectureCover
+          lecture={lecture}
+          className="aspect-video rounded-xl shadow-sm ring-1 ring-border transition group-hover:shadow-md group-hover:ring-primary/40"
+        >
+          <span className="absolute top-2 left-2 flex gap-1.5">
+            {lecture.status !== "ready" && <StatusBadge status={lecture.status} className="shadow-sm backdrop-blur" />}
+            <PrivateBadge visibility={lecture.visibility} className="shadow-sm" />
           </span>
-        )}
-      </LectureCover>
-      <div className="flex flex-col gap-1 px-0.5">
-        <h3 className="line-clamp-2 leading-snug font-medium transition-colors group-hover:text-primary">
-          {lecture.title}
-        </h3>
-        <p className="truncate text-sm text-muted-foreground">
-          {[course, formatRelative(lecture.created_at)].filter(Boolean).join(" · ")}
-        </p>
-      </div>
-    </Link>
+          {lecture.duration_s != null && (
+            <span className="absolute right-2 bottom-2 rounded-md bg-black/75 px-1.5 py-0.5 font-mono text-xs text-white tabular-nums">
+              {formatTime(lecture.duration_s)}
+            </span>
+          )}
+        </LectureCover>
+        <div className="flex flex-col gap-1 px-0.5">
+          <h3 className="line-clamp-2 leading-snug font-medium transition-colors group-hover:text-primary">
+            {lecture.title}
+          </h3>
+          <p className="truncate text-sm text-muted-foreground">
+            {[course, formatRelative(lecture.created_at)].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+      </Link>
+      {mine && <LectureMenu lecture={lecture} className="absolute top-2 right-2" />}
+    </div>
   );
 }
 

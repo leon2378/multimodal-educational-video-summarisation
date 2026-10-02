@@ -26,7 +26,7 @@ import { refusal } from "@/lib/access";
 import { type Lecture, type ProgressEvent, api, unwrap } from "@/lib/api";
 import { formatCost, formatDuration, formatRelative, formatSeconds } from "@/lib/format";
 import { lectureKey, meKey, useRuns } from "@/lib/queries";
-import { PHASES, stageLabel, summarise } from "@/lib/stages";
+import { phasesFor, stageLabel, summarise } from "@/lib/stages";
 
 import { useAccount } from "./account";
 import { Callout } from "./common";
@@ -75,7 +75,9 @@ export function ProcessingPanel({ lecture, event }: { lecture: Lecture; event: P
   const runs = useRuns(lecture.id, running || status === "failed");
   const now = useNow(running);
   const progress = event?.progress;
-  const run = summarise(progress);
+  // A lecture from a link downloads its video first.
+  const fromLink = lecture.source_url !== null;
+  const run = summarise(progress, fromLink);
   const latest = runs.data?.[0];
 
   if (status === "awaiting_upload" || status === "uploaded") {
@@ -148,7 +150,7 @@ export function ProcessingPanel({ lecture, event }: { lecture: Lecture; event: P
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <ol className="flex flex-col gap-5" aria-live="polite">
-          {PHASES.map((phase) => (
+          {phasesFor(fromLink).map((phase) => (
             <li key={phase.label}>
               <p className="mb-1.5 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
                 {phase.label}

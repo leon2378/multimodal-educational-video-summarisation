@@ -8,6 +8,7 @@ import {
   formatSeconds,
   hueFor,
   pluralise,
+  sourceSite,
   titleFromFilename,
 } from "./format";
 
@@ -85,5 +86,15 @@ describe("pluralise", () => {
     expect(pluralise(1, "lecture")).toBe("1 lecture");
     expect(pluralise(3, "lecture")).toBe("3 lectures");
     expect(pluralise(2, "passage")).toBe("2 passages");
+  });
+});
+
+describe("sourceSite", () => {
+  it("names a web link's site, and nothing else", () => {
+    expect(sourceSite("https://www.youtube.com/watch?v=abc")).toBe("youtube.com");
+    expect(sourceSite("http://example.org/talk.mp4")).toBe("example.org");
+    expect(sourceSite("javascript:alert(1)")).toBeNull();
+    expect(sourceSite("https://")).toBeNull();
+    expect(sourceSite(null)).toBeNull();
   });
 });

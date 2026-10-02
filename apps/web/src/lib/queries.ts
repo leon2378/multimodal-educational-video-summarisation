@@ -31,10 +31,11 @@ export function useLectures() {
   });
 }
 
-export function useLecture(id: string) {
+export function useLecture(id: string, enabled = true) {
   return useQuery({
     queryKey: key(id),
     queryFn: async () => unwrap(await api.GET("/v1/lectures/{lecture_id}", path(id))),
+    enabled,
   });
 }
 
@@ -173,6 +174,7 @@ export function useProgress(id: string, active: boolean): ProgressEvent | null {
     if (!active) return;
     const controller = new AbortController();
     let finished = false;
+    let fetched = false;
     const follow = async () => {
       for (let attempt = 0; !finished && !controller.signal.aborted; attempt += 1) {
         try {
@@ -182,6 +184,11 @@ export function useProgress(id: string, active: boolean): ProgressEvent | null {
             (data) => {
               attempt = 0;
               setEvent(data);
+              if (!fetched && data.progress?.done.some((info) => info.stage === "fetch")) {
+                fetched = true;
+                // A lecture from a link: its video, and the title the site gave it, are in now.
+                void queryClient.invalidateQueries({ queryKey: key(id), exact: true });
+              }
               if (data.progress?.status !== "running") {
                 finished = true;
                 void queryClient.invalidateQueries({ queryKey: key(id) });

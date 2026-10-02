@@ -11,6 +11,9 @@ export interface Phase {
   stages: { id: string; label: string }[];
 }
 
+/** A lecture added from a link downloads its video first. */
+const FETCH = { id: "fetch", label: "Downloading the video" };
+
 /** Speech and slides run side by side, then notes and search embeddings. */
 export const PHASES: Phase[] = [
   {
@@ -48,7 +51,11 @@ export const PHASES: Phase[] = [
   { label: "Finish", stages: [{ id: "save", label: "Saving results" }] },
 ];
 
-const ALL = PHASES.flatMap((phase) => phase.stages.map((stage) => stage.id));
+/** The stages a lecture's run goes through: an upload's, or a link's with the download first. */
+export function phasesFor(fromLink: boolean): Phase[] {
+  if (!fromLink) return PHASES;
+  return PHASES.map((phase, index) => (index === 0 ? { ...phase, stages: [FETCH, ...phase.stages] } : phase));
+}
 
 export type StageState = "done" | "running" | "pending";
 
@@ -61,15 +68,16 @@ export interface RunSummary {
   info: (stage: string) => StageInfo | undefined;
 }
 
-export function summarise(progress: Progress | null | undefined): RunSummary {
+export function summarise(progress: Progress | null | undefined, fromLink = false): RunSummary {
+  const ids = phasesFor(fromLink).flatMap((phase) => phase.stages.map((stage) => stage.id));
   const done = new Map((progress?.done ?? []).map((info) => [info.stage, info]));
   const running = new Set(progress?.running ?? []);
-  const count = ALL.filter((stage) => done.has(stage)).length;
+  const count = ids.filter((stage) => done.has(stage)).length;
   const finished = progress?.status === "succeeded";
   return {
-    done: finished ? ALL.length : count,
-    total: ALL.length,
-    percent: finished ? 100 : Math.round((count / ALL.length) * 100),
+    done: finished ? ids.length : count,
+    total: ids.length,
+    percent: finished ? 100 : Math.round((count / ids.length) * 100),
     state: (stage) =>
       done.has(stage) || finished ? "done" : running.has(stage) ? "running" : "pending",
     info: (stage) => done.get(stage),
@@ -78,7 +86,7 @@ export function summarise(progress: Progress | null | undefined): RunSummary {
 
 /** Every stage's name in a label, for the run history ("draft_notes" -> "Writing notes"). */
 export function stageLabel(stage: string): string {
-  for (const phase of PHASES) {
+  for (const phase of phasesFor(true)) {
     const found = phase.stages.find((s) => s.id === stage);
     if (found) return found.label;
   }
