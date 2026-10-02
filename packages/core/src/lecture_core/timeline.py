@@ -59,8 +59,9 @@ class SlideDeck(BaseModel):
 class SlideReading(BaseModel):
     """What a slide says. A reading is tidied whenever it's read, from the model, the cache or
     the database (lecture_core.latex): LaTeX in its text is made readable, a formula listed
-    twice is listed once, text that starts by repeating the title, shown above it, doesn't, and
-    OCR's 0(n) for O(n) is put right."""
+    twice is listed once, text that starts by repeating the title, shown above it, doesn't,
+    OCR's 0(n) for O(n) is put right, and a field the model filled with a word for nothing ("",
+    None) is empty."""
 
     slide_id: int
     title: PlainText
@@ -73,6 +74,9 @@ class SlideReading(BaseModel):
 
     @model_validator(mode="after")
     def _tidy(self) -> "SlideReading":
+        for field in ("title", "text", "figure_description", "code"):
+            if getattr(self, field).strip().casefold() in _NOTHING:
+                setattr(self, field, "")
         first, _, rest = self.text.partition("\n")
         if self.title and first.strip().casefold() == self.title.strip().casefold():
             self.text = rest.lstrip("\n")
@@ -82,6 +86,9 @@ class SlideReading(BaseModel):
         return self
 
 
+# What the vision model has written for an empty field: the prompt's "" (read-slides.v1), or a
+# word for nothing.
+_NOTHING = {'""', "''", "none", "null", "n/a"}
 # OCR reads big-O notation's O as a zero: 0(1), 0(n log n), 0(len(L)). Not after a letter,
 # digit or point, so f(0) and 10(1) stay as they are.
 _BIG_O_MISREAD = re.compile(r"(?<![\w.])0(?=\([^()\n]{0,20}(?:\([^()\n]{0,20}\)[^()\n]{0,10})?\))")

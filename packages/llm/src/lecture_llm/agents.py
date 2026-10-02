@@ -119,7 +119,7 @@ class Prompts:
     @classmethod
     def load(cls, prompts_dir: Path) -> "Prompts":
         return cls(
-            read_slides=Prompt.load(prompts_dir, "read-slides.v1"),
+            read_slides=Prompt.load(prompts_dir, "read-slides.v2"),
             chapters=Prompt.load(prompts_dir, "chapters.v1"),
             chapter_notes=Prompt.load(prompts_dir, "chapter-notes.v1"),
             overview=Prompt.load(prompts_dir, "overview.v1"),

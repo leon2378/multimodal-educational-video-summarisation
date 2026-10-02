@@ -167,6 +167,25 @@ def test_a_slide_reading_is_tidied_when_read() -> None:
     assert reading.latex == [r"\gamma = 0", r"\gamma = 1", r"\gamma < 1"]
 
 
+def test_a_field_filled_with_a_word_for_nothing_is_empty() -> None:
+    # MIT 6.0001 Lecture 11: the prompt said to use "" for nothing, and the model wrote that, or
+    # None when it said to use an empty string.
+    reading = SlideReading.model_validate(
+        {
+            "slide_id": 13,
+            "title": "LOGARITHMIC COMPLEXITY",
+            "text": "- only have to look at loop",
+            "figure_description": '""',
+            "latex": [],
+            "code": " '' ",
+        }
+    )
+    other = reading.model_copy(update={"figure_description": "None"})
+
+    assert (reading.figure_description, reading.code) == ("", "")
+    assert SlideReading.model_validate(other.model_dump()).figure_description == ""
+
+
 @pytest.mark.parametrize("reader", ["ocr", "vlm"])
 def test_ocr_reading_big_o_as_zero_is_put_right(reader: str) -> None:
     # MIT 6.0001 Lecture 11, slide 30, read by OCR alone.

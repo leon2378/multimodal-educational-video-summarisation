@@ -107,6 +107,15 @@ def test_slides_with_more_than_text_go_to_the_vision_llm() -> None:
             slide(5, [*text_slide(5).lines, *(line("note", 200, angle=-30) for _ in range(2))]),
             slide(6, [line("words " * 6, 80, score=0.8)]),
             slide(7, [line("x", 80)]),
+            # A table: an operation and its cost on each of three rows.
+            slide(
+                8,
+                [line("A TITLE", 10, height=40)]
+                + [line(f"- op {n}", 80 + 30 * n) for n in range(3)]
+                + [line("O(n)", 80 + 30 * n, left=300) for n in range(3)],
+            ),
+            # Side by side on two rows only, like a page number beside a line: still text.
+            slide(9, [*text_slide(9).lines, line("1", 80, left=440), line("2", 110, left=440)]),
         ],
     )
 
@@ -115,6 +124,7 @@ def test_slides_with_more_than_text_go_to_the_vision_llm() -> None:
         5: ["annotations"],
         6: ["low confidence"],
         7: ["little text"],
+        8: ["columns"],
     }
 
 

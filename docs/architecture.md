@@ -383,7 +383,7 @@ so a second run only redoes stages whose inputs, version, model, params or promp
 | asr | perception (`asr`) | faster-whisper large-v3-turbo, int8, VAD and word timestamps. On the GPU in Docker |
 | slides | perception (`slides`) | Frames at 1 fps, split into slide vs camera by brightness, a 256-bit difference hash to find changes, keeps the most complete frame of each slide, recognises revisits |
 | ocr | perception (`ocr`) | RapidOCR (PP-OCRv6 small, ONNX Runtime) on every slide: text lines with boxes and confidence, and how much ink isn't text |
-| read_slides | perception (`ocr`) + llm | Title and text from OCR; slides with figures, annotations or doubtful OCR go to the vision LLM, 8 per request, for title, text, figure, LaTeX, code (`SLIDE_READER`, [below](#ocr-and-routing-phase-5a)) |
+| read_slides | perception (`ocr`) + llm | Title and text from OCR; slides with figures, annotations, text side by side or doubtful OCR go to the vision LLM, 8 per request, for title, text, figure, LaTeX, code (`SLIDE_READER`, [below](#ocr-and-routing-phase-5a)) |
 | timeline | pipeline (`fuse`) | One segment per slide span, split at 90 s. Speech before the first slide gets no slide |
 | chapters, notes | llm + pipeline (`assemble`) | Chapter plan, notes per chapter, then TL;DR and quiz. Output cites segment ids, converted to times. Concepts get the time the term is first said, from word timestamps |
 
@@ -435,15 +435,27 @@ Every slide is OCR'd, and only the slides OCR can't handle go to the vision LLM
   - ink outside text beyond the deck's usual (its 25th percentile, which absorbs the template's
     bands and rules) by more than 0.3% of the slide: a plot, diagram, table or marks;
   - 2 or more lines at over 8°: annotations written across the slide;
+  - 3 or more rows with text side by side: a table, or code with notes beside it, which OCR
+    reads a line at a time across both, so they come out interleaved;
   - a mean OCR confidence under 0.93, or fewer than 5 words.
 
-  On Lecture 10 that's 11 of 24 slides; the reasons are kept with the readings. Every slide
-  the vision LLM described a figure on is among them, except one with only faint arrows.
+  On Lecture 10 that's 14 of 24 slides; the reasons are kept with the readings. Every slide
+  the vision LLM described a figure on is among them, except one with only faint arrows. Text
+  side by side was added after a table on the demo came out as one jumbled column (Lecture 11,
+  "Complexity of common Python functions"): in the MIT lectures it sends 8 more slides to the
+  vision LLM, which had 3 to 11 such rows each, while every other slide OCR read had none.
+  Five are code with notes beside it, which the vision LLM gives as code and text apart, two
+  are tables, and one is a tree of calls drawn in text.
 - **OCR readings**: the title is the tall text starting in the top 30% of the slide, over as
   many lines as it runs; the rest is text, bullets as "- ". Lines in the bottom 8% (the
   footer) are dropped. A reading records who made it (`slides.reader`: `ocr` or `vlm`). A
   slide the vision LLM returns without a title (Gemini sometimes drops a whole batch's) keeps
   OCR's: a run of the eval gate found 8 of 24 slides untitled that way.
+- **Vision readings** (`prompts/pipeline/read-slides.v2.md`): a table is written row by row,
+  with " | " between its cells; v1 said nothing about tables, and the merge example in Lecture
+  12 came out a column at a time. v1 asked for "" for an empty field, which the model sometimes
+  wrote as two quote marks; asked for an empty string, it sometimes writes None. A reading is
+  tidied as it's read, so either becomes empty.
 - **Modes**: `SLIDE_READER` is `routed` (the default), `vlm` (every slide, as before 5a) or
   `ocr`. `vlm` keeps the cache key slide reading always had, so lectures read before 5a aren't
   read again.

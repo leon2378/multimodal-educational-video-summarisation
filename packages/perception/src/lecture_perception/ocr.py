@@ -9,6 +9,8 @@ slide goes to the vision LLM when it shows something besides text:
 - ink outside the text lines, beyond what every slide in the deck has (the template's bands and
   rules): plots, diagrams, tables drawn with lines, marks;
 - text lines at an angle: annotations written over the slide;
+- text side by side on several lines: a table, or code with notes beside it, which OCR reads a
+  line at a time, across both, so the two come out interleaved;
 - low OCR confidence, or almost no text (a picture).
 
 The Phase 5 detector replaces the ink measure with boxes for figures, tables and equations.
@@ -20,6 +22,7 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.metadata import version
+from itertools import pairwise
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
@@ -41,6 +44,14 @@ class OcrLine(BaseModel):
     @property
     def top(self) -> float:
         return min(y for _, y in self.box)
+
+    @property
+    def left(self) -> float:
+        return min(x for x, _ in self.box)
+
+    @property
+    def right(self) -> float:
+        return max(x for x, _ in self.box)
 
     @property
     def height(self) -> float:
@@ -146,6 +157,9 @@ class RoutingConfig:
     # This many lines at more than max_angle degrees: annotations over the slide.
     rotated_lines: int = 2
     max_angle: float = 8.0
+    # This many rows with text side by side: a table, or code with notes beside it. In the MIT
+    # lectures, 8 slides OCR read had 3 to 11 such rows, and every other slide it read had none.
+    side_by_side: int = 3
     # Mean confidence below this, or fewer words than min_words, and OCR isn't trusted.
     min_confidence: float = 0.93
     min_words: int = 5
@@ -163,6 +177,8 @@ def route(deck: DeckOcr, config: RoutingConfig) -> dict[int, list[str]]:
             why.append("figure")
         if sum(abs(line.angle) > config.max_angle for line in slide.lines) >= config.rotated_lines:
             why.append("annotations")
+        if _rows_side_by_side(slide) >= config.side_by_side:
+            why.append("columns")
         words = sum(len(line.text.split()) for line in slide.lines)
         if words < config.min_words:
             why.append("little text")
@@ -171,6 +187,31 @@ def route(deck: DeckOcr, config: RoutingConfig) -> dict[int, list[str]]:
         if why:
             reasons[slide.slide_id] = why
     return reasons
+
+
+def _rows_side_by_side(slide: SlideOcr) -> int:
+    """How many of the slide's rows have pieces of text side by side, with space between."""
+    rows: list[list[OcrLine]] = []
+    for line in sorted(_above_footer(slide), key=lambda line: line.top):
+        row = next((row for row in rows if _same_row(row[0], line)), None)
+        if row is None:
+            rows.append([line])
+        else:
+            row.append(line)
+    spans = (sorted((line.left, line.right) for line in row) for row in rows)
+    return sum(any(a[1] < b[0] for a, b in pairwise(row)) for row in spans)
+
+
+def _same_row(a: OcrLine, b: OcrLine) -> bool:
+    overlap = min(a.top + a.height, b.top + b.height) - max(a.top, b.top)
+    return overlap >= 0.5 * min(a.height, b.height)
+
+
+def _above_footer(ocr: SlideOcr) -> list[OcrLine]:
+    """The slide's lines, but those in its bottom 8%: the template's footer (course name, page
+    number)."""
+    _, top, _, bottom = ocr.area
+    return [line for line in ocr.lines if line.top < top + 0.92 * (bottom - top)]
 
 
 # Bullet glyphs: symbol fonts map them to the private use area, others use real bullets.
@@ -184,10 +225,7 @@ def reading_from_ocr(ocr: SlideOcr) -> SlideReading:
     Lines in the bottom 8% are the template's footer (course name, page number) and dropped."""
     _, top, _, bottom = ocr.area
     height = bottom - top
-    lines = sorted(
-        (line for line in ocr.lines if line.top < top + 0.92 * height),
-        key=lambda line: (round(line.top / 4), line.box[0][0]),
-    )
+    lines = sorted(_above_footer(ocr), key=lambda line: (round(line.top / 4), line.box[0][0]))
     title: list[OcrLine] = []
     rest = list(lines)
     if lines:
